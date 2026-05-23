@@ -562,61 +562,111 @@ def calc_opponent_avg(matches_list):
 
 
 def build_ideal_team(players_list, formation="3-5-2"):
-    """Monta time ideal por nota média e posição"""
-    formations = {
-        "3-5-2": {"GK": 1, "CB": 3, "CM": 5, "ST": 2},
-        "4-3-3": {"GK": 1, "CB": 2, "LB": 1, "RB": 1, "CM": 3, "LW": 1, "RW": 1, "ST": 1},
-        "4-4-2": {"GK": 1, "CB": 2, "LB": 1, "RB": 1, "CM": 2, "LM": 1, "RM": 1, "ST": 2},
+    """Monta 11 ideal por formacao, funcao e melhor encaixe disponivel."""
+    formation_slots = {
+        "3-5-2": ["GK", "LCB", "CB", "RCB", "LM", "LCM", "CM", "RCM", "RM", "LST", "RST"],
+        "4-3-3": ["GK", "LB", "LCB", "RCB", "RB", "LCM", "CM", "RCM", "LW", "ST", "RW"],
+        "4-4-2": ["GK", "LB", "LCB", "RCB", "RB", "LM", "LCM", "RCM", "RM", "LST", "RST"],
+        "4-2-3-1": ["GK", "LB", "LCB", "RCB", "RB", "LDM", "RDM", "LAM", "CAM", "RAM", "ST"],
+        "4-1-2-1-2": ["GK", "LB", "LCB", "RCB", "RB", "CDM", "LCM", "RCM", "CAM", "LST", "RST"],
+        "3-4-3": ["GK", "LCB", "CB", "RCB", "LM", "LCM", "RCM", "RM", "LW", "ST", "RW"],
+        "5-3-2": ["GK", "LWB", "LCB", "CB", "RCB", "RWB", "LCM", "CM", "RCM", "LST", "RST"],
     }
-    
-    pos_map = {
+    slot_descriptions = {
+        "GK": "Goleiro - protege a meta e inicia a saida de bola.",
+        "LB": "Lateral esquerdo - amplitude, cobertura e apoio pela esquerda.",
+        "RB": "Lateral direito - amplitude, cobertura e apoio pela direita.",
+        "LWB": "Ala esquerdo - corredor inteiro, apoio ofensivo e recomposicao.",
+        "RWB": "Ala direito - corredor inteiro, apoio ofensivo e recomposicao.",
+        "LCB": "Zagueiro pela esquerda - cobertura e primeira construcao.",
+        "CB": "Zagueiro central - lidera a linha defensiva.",
+        "RCB": "Zagueiro pela direita - cobertura e duelos laterais.",
+        "CDM": "Volante - protege a defesa e organiza a saida.",
+        "LDM": "Volante esquerdo - equilibrio, cobertura e passe curto.",
+        "RDM": "Volante direito - equilibrio, cobertura e pressao.",
+        "LCM": "Meia central esquerdo - conexao, apoio e chegada.",
+        "CM": "Meia central - dita ritmo e liga defesa/ataque.",
+        "RCM": "Meia central direito - conexao, apoio e chegada.",
+        "LM": "Meia/ala esquerdo - amplitude e criacao pelo lado.",
+        "RM": "Meia/ala direito - amplitude e criacao pelo lado.",
+        "CAM": "Meia ofensivo - cria chances entre linhas.",
+        "LAM": "Meia ofensivo esquerdo - corta para dentro e cria.",
+        "RAM": "Meia ofensivo direito - corta para dentro e cria.",
+        "LW": "Ponta esquerda - profundidade e finalizacao pelo lado.",
+        "RW": "Ponta direita - profundidade e finalizacao pelo lado.",
+        "ST": "Centroavante - referencia, gols e ataque a area.",
+        "LST": "Atacante esquerdo - ataca espacos e combina por dentro.",
+        "RST": "Atacante direito - ataca espacos e combina por dentro.",
+    }
+    slot_coords = {
+        "GK": (50, 92), "LB": (18, 76), "LWB": (14, 68), "LCB": (35, 78), "CB": (50, 80), "RCB": (65, 78), "RB": (82, 76), "RWB": (86, 68),
+        "CDM": (50, 64), "LDM": (40, 64), "RDM": (60, 64), "LCM": (36, 52), "CM": (50, 50), "RCM": (64, 52), "LM": (18, 48), "RM": (82, 48),
+        "LAM": (34, 34), "CAM": (50, 34), "RAM": (66, 34), "LW": (24, 22), "RW": (76, 22), "ST": (50, 16), "LST": (42, 16), "RST": (58, 16),
+    }
+    family_by_position = {
         "goalkeeper": "GK", "gk": "GK",
-        "defender": "CB", "cb": "CB", "lb": "LB", "rb": "RB",
-        "midfielder": "CM", "cm": "CM", "cdm": "CM", "cam": "CM", "lm": "LM", "rm": "RM",
-        "forward": "ST", "st": "ST", "cf": "ST", "lw": "LW", "rw": "RW", "lf": "LW", "rf": "RW"
+        "defender": "DEF", "cb": "DEF", "lb": "DEF", "rb": "DEF", "lwb": "DEF", "rwb": "DEF",
+        "midfielder": "MID", "cm": "MID", "cdm": "MID", "cam": "MID", "lm": "MID", "rm": "MID",
+        "forward": "FWD", "st": "FWD", "cf": "FWD", "lw": "FWD", "rw": "FWD", "lf": "FWD", "rf": "FWD",
     }
-    
-    # Agrupa por posição
-    by_pos = {}
-    for p in players_list:
-        pos = pos_map.get(p["position"].lower(), p["position"].upper())
-        if pos not in by_pos:
-            by_pos[pos] = []
-        by_pos[pos].append(p)
-    
-    # Ordena por rating
-    for pos in by_pos:
-        by_pos[pos].sort(key=lambda x: x["rating"], reverse=True)
-    
-    # Monta time ideal 3-5-2
+    preferred = {
+        "GK": ["GK"],
+        "LB": ["DEF", "MID"], "RB": ["DEF", "MID"], "LWB": ["DEF", "MID"], "RWB": ["DEF", "MID"], "LCB": ["DEF"], "CB": ["DEF"], "RCB": ["DEF"],
+        "CDM": ["MID", "DEF"], "LDM": ["MID", "DEF"], "RDM": ["MID", "DEF"], "LCM": ["MID"], "CM": ["MID"], "RCM": ["MID"], "LM": ["MID", "FWD"], "RM": ["MID", "FWD"],
+        "CAM": ["MID", "FWD"], "LAM": ["MID", "FWD"], "RAM": ["MID", "FWD"], "LW": ["FWD", "MID"], "RW": ["FWD", "MID"], "ST": ["FWD"], "LST": ["FWD"], "RST": ["FWD"],
+    }
+    role_bonus = {
+        "GK": lambda p: p.get("rating", 0) * 10,
+        "DEF": lambda p: p.get("rating", 0) * 10 + p.get("tackle_pct", 0) * 0.08 + p.get("mom", 0) * 0.05,
+        "MID": lambda p: p.get("rating", 0) * 10 + p.get("assists_per_game", 0) * 4 + p.get("pass_pct", 0) * 0.05,
+        "FWD": lambda p: p.get("rating", 0) * 10 + p.get("goals_per_game", 0) * 5 + p.get("assists_per_game", 0) * 2,
+    }
+
+    slots = formation_slots.get(formation, formation_slots["3-5-2"])
+    pool = []
+    for p in players_list or []:
+        fam = family_by_position.get(str(p.get("position", "")).lower(), "MID")
+        pool.append({**p, "family": fam})
+    pool.sort(key=lambda p: float(p.get("rating", 0) or 0), reverse=True)
+
     team = []
     used = set()
-    
-    needed = formations.get(formation, formations["3-5-2"])
-    for pos, count in needed.items():
-        candidates = by_pos.get(pos, [])
-        # Se não tem suficiente, busca posições compatíveis
-        if len(candidates) < count:
-            if pos in ["CB", "LB", "RB"]:
-                for alt in ["CB", "LB", "RB"]:
-                    if alt != pos:
-                        candidates += by_pos.get(alt, [])
-            elif pos in ["CM", "LM", "RM"]:
-                for alt in ["CM", "LM", "RM"]:
-                    if alt != pos:
-                        candidates += by_pos.get(alt, [])
-        
-        added = 0
-        for p in candidates:
-            if added >= count:
-                break
-            if p["name"] not in used:
-                team.append({**p, "field_pos": pos})
-                used.add(p["name"])
-                added += 1
-    
-    return {"formation": formation, "players": team}
+    for slot in slots:
+        wanted = preferred.get(slot, ["MID"])
+        best = None
+        best_score = -999
+        for p in pool:
+            if p.get("name") in used:
+                continue
+            fam = p.get("family", "MID")
+            fit_bonus = 18 if fam == wanted[0] else 9 if fam in wanted else -12
+            score = role_bonus.get(wanted[0], role_bonus["MID"])(p) + fit_bonus
+            if score > best_score:
+                best_score = score
+                best = p
+        if best:
+            used.add(best.get("name"))
+            x, y = slot_coords.get(slot, (50, 50))
+            fit = "natural" if best.get("family") == wanted[0] else "adaptado" if best.get("family") in wanted else "improvisado"
+            team.append({
+                **best,
+                "field_pos": slot,
+                "role": slot,
+                "role_description": slot_descriptions.get(slot, slot),
+                "fit": fit,
+                "x": x,
+                "y": y,
+                "selection_score": round(best_score, 1),
+            })
 
+    return {
+        "formation": formation,
+        "formation_name": f"Formacao {formation}",
+        "slots": slots,
+        "players": team,
+        "missing_slots": [s for s in slots if not any(p.get("role") == s for p in team)],
+        "available_formations": list(formation_slots.keys()),
+    }
 
 # ============================================================
 # FASTAPI APP
@@ -701,6 +751,15 @@ def get_dashboard():
             save_cache(cache)
         return cache
     return {"club": None, "stats": None, "players": [], "matches": [], "opponents": [], "ideal_team": None}
+
+
+@app.get("/api/ideal-team")
+def get_ideal_team(formation: str = Query("3-5-2")):
+    """Retorna o melhor 11 recalculado para a formacao escolhida."""
+    cache = load_cache()
+    if not cache or not cache.get("players"):
+        raise HTTPException(404, "Sincronize um clube primeiro")
+    return build_ideal_team(cache.get("players", []), formation)
 
 
 @app.get("/api/test-matchtypes")
@@ -1223,13 +1282,13 @@ def generate_player_analysis_offline(p):
 
 
 @app.get("/api/ai/team")
-async def ai_team():
+async def ai_team(formation: str = Query("3-5-2")):
     """Análise do time ideal"""
     cache = load_cache()
-    if not cache or not cache.get("ideal_team"):
+    if not cache or not cache.get("players"):
         raise HTTPException(404, "Sincronize um clube primeiro")
     
-    ideal = cache["ideal_team"]
+    ideal = build_ideal_team(cache.get("players", []), formation)
     
     text = f"""## 🏆 Time Ideal — Formação {ideal['formation']}
 
@@ -2802,6 +2861,7 @@ let COMPARE_A = null;
 let COMPARE_B = null;
 let AGENDA = [];
 let AGENDA_EDIT_ID = null;
+let IDEAL_FORMATION = '3-5-2';
 
 function filteredMatches() {
   const all = (DATA && DATA.matches) ? [...DATA.matches] : [];
@@ -3280,67 +3340,151 @@ function renderConfrontos() {
   return html;
 }
 
+function normalizePlayerFamily(pos) {
+  pos = String(pos || '').toLowerCase();
+  if (['goalkeeper','gk'].includes(pos)) return 'GK';
+  if (['defender','cb','lb','rb','lwb','rwb'].includes(pos)) return 'DEF';
+  if (['midfielder','cm','cdm','cam','lm','rm'].includes(pos)) return 'MID';
+  if (['forward','st','cf','lw','rw','lf','rf'].includes(pos)) return 'FWD';
+  return 'MID';
+}
+
+const FORMATION_SLOTS = {
+  '3-5-2': ['GK','LCB','CB','RCB','LM','LCM','CM','RCM','RM','LST','RST'],
+  '4-3-3': ['GK','LB','LCB','RCB','RB','LCM','CM','RCM','LW','ST','RW'],
+  '4-4-2': ['GK','LB','LCB','RCB','RB','LM','LCM','RCM','RM','LST','RST'],
+  '4-2-3-1': ['GK','LB','LCB','RCB','RB','LDM','RDM','LAM','CAM','RAM','ST'],
+  '4-1-2-1-2': ['GK','LB','LCB','RCB','RB','CDM','LCM','RCM','CAM','LST','RST'],
+  '3-4-3': ['GK','LCB','CB','RCB','LM','LCM','RCM','RM','LW','ST','RW'],
+  '5-3-2': ['GK','LWB','LCB','CB','RCB','RWB','LCM','CM','RCM','LST','RST'],
+};
+
+const ROLE_COORDS = {
+  GK:[50,92], LB:[18,76], LWB:[14,68], LCB:[35,78], CB:[50,80], RCB:[65,78], RB:[82,76], RWB:[86,68],
+  CDM:[50,64], LDM:[40,64], RDM:[60,64], LCM:[36,52], CM:[50,50], RCM:[64,52], LM:[18,48], RM:[82,48],
+  LAM:[34,34], CAM:[50,34], RAM:[66,34], LW:[24,22], RW:[76,22], ST:[50,16], LST:[42,16], RST:[58,16],
+};
+
+const ROLE_DESC = {
+  GK:'Goleiro - protege a meta e inicia a saída de bola.',
+  LB:'Lateral esquerdo - amplitude, cobertura e apoio pela esquerda.', RB:'Lateral direito - amplitude, cobertura e apoio pela direita.',
+  LWB:'Ala esquerdo - corredor inteiro, apoio ofensivo e recomposição.', RWB:'Ala direito - corredor inteiro, apoio ofensivo e recomposição.',
+  LCB:'Zagueiro pela esquerda - cobertura e primeira construção.', CB:'Zagueiro central - lidera a linha defensiva.', RCB:'Zagueiro pela direita - cobertura e duelos laterais.',
+  CDM:'Volante - protege a defesa e organiza a saída.', LDM:'Volante esquerdo - equilíbrio, cobertura e passe curto.', RDM:'Volante direito - equilíbrio, cobertura e pressão.',
+  LCM:'Meia central esquerdo - conexão, apoio e chegada.', CM:'Meia central - dita ritmo e liga defesa/ataque.', RCM:'Meia central direito - conexão, apoio e chegada.',
+  LM:'Meia/ala esquerdo - amplitude e criação pelo lado.', RM:'Meia/ala direito - amplitude e criação pelo lado.',
+  CAM:'Meia ofensivo - cria chances entre linhas.', LAM:'Meia ofensivo esquerdo - corta para dentro e cria.', RAM:'Meia ofensivo direito - corta para dentro e cria.',
+  LW:'Ponta esquerda - profundidade e finalização pelo lado.', RW:'Ponta direita - profundidade e finalização pelo lado.',
+  ST:'Centroavante - referência, gols e ataque à área.', LST:'Atacante esquerdo - ataca espaços e combina por dentro.', RST:'Atacante direito - ataca espaços e combina por dentro.',
+};
+
+const ROLE_PREF = {
+  GK:['GK'], LB:['DEF','MID'], RB:['DEF','MID'], LWB:['DEF','MID'], RWB:['DEF','MID'], LCB:['DEF'], CB:['DEF'], RCB:['DEF'],
+  CDM:['MID','DEF'], LDM:['MID','DEF'], RDM:['MID','DEF'], LCM:['MID'], CM:['MID'], RCM:['MID'], LM:['MID','FWD'], RM:['MID','FWD'],
+  CAM:['MID','FWD'], LAM:['MID','FWD'], RAM:['MID','FWD'], LW:['FWD','MID'], RW:['FWD','MID'], ST:['FWD'], LST:['FWD'], RST:['FWD'],
+};
+
+function roleScore(p, targetFamily) {
+  const rating = Number(p.rating || 0) * 10;
+  if (targetFamily === 'DEF') return rating + Number(p.tackle_pct || 0) * 0.08 + Number(p.mom || 0) * 0.05;
+  if (targetFamily === 'MID') return rating + Number(p.assists_per_game || 0) * 4 + Number(p.pass_pct || 0) * 0.05;
+  if (targetFamily === 'FWD') return rating + Number(p.goals_per_game || 0) * 5 + Number(p.assists_per_game || 0) * 2;
+  return rating;
+}
+
+function buildIdealTeamClient(formation) {
+  const slots = FORMATION_SLOTS[formation] || FORMATION_SLOTS['3-5-2'];
+  const pool = (DATA.players || []).map(p => ({...p, family: normalizePlayerFamily(p.position)})).sort((a,b) => Number(b.rating || 0) - Number(a.rating || 0));
+  const used = new Set();
+  const picked = [];
+  slots.forEach(slot => {
+    const wanted = ROLE_PREF[slot] || ['MID'];
+    let best = null;
+    let bestScore = -999;
+    pool.forEach(p => {
+      if (used.has(p.name)) return;
+      const fitBonus = p.family === wanted[0] ? 18 : wanted.includes(p.family) ? 9 : -12;
+      const score = roleScore(p, wanted[0]) + fitBonus;
+      if (score > bestScore) { bestScore = score; best = p; }
+    });
+    if (best) {
+      used.add(best.name);
+      const [x,y] = ROLE_COORDS[slot] || [50,50];
+      const fit = best.family === wanted[0] ? 'natural' : wanted.includes(best.family) ? 'adaptado' : 'improvisado';
+      picked.push({...best, role:slot, field_pos:slot, x, y, fit, role_description: ROLE_DESC[slot], selection_score: Math.round(bestScore * 10) / 10});
+    }
+  });
+  return {formation, formation_name:`Formação ${formation}`, slots, players:picked, missing_slots:slots.filter(s => !picked.some(p => p.role === s))};
+}
+
+function setIdealFormation(value) {
+  IDEAL_FORMATION = value;
+  renderTab();
+}
+
 function renderTimeIdeal() {
-  if (!DATA.ideal_team) {
-    return '<div class="empty-state">Time ideal não disponível</div>';
+  if (!DATA.players || !DATA.players.length) {
+    return '<div class="empty-state">Sincronize jogadores para montar o time ideal</div>';
   }
-  
-  const team = DATA.ideal_team;
+
+  const team = buildIdealTeamClient(IDEAL_FORMATION);
   const formation = team.formation;
   const players = team.players || [];
-  
-  // Posições no campo (3-5-2)
-  const positions = {
-    'GK': [{ x: 50, y: 92 }],
-    'CB': [{ x: 25, y: 75 }, { x: 50, y: 78 }, { x: 75, y: 75 }],
-    'LB': [{ x: 15, y: 60 }],
-    'RB': [{ x: 85, y: 60 }],
-    'CM': [{ x: 20, y: 50 }, { x: 40, y: 55 }, { x: 50, y: 45 }, { x: 60, y: 55 }, { x: 80, y: 50 }],
-    'LM': [{ x: 15, y: 40 }],
-    'RM': [{ x: 85, y: 40 }],
-    'LW': [{ x: 20, y: 20 }],
-    'RW': [{ x: 80, y: 20 }],
-    'ST': [{ x: 40, y: 15 }, { x: 60, y: 15 }],
-    'CF': [{ x: 50, y: 12 }],
-  };
-  
-  // Conta jogadores por posição
-  const usedPos = {};
+  const formations = Object.keys(FORMATION_SLOTS);
+
   let fieldHtml = '';
-  
   players.forEach(p => {
-    const fp = p.field_pos;
-    if (!usedPos[fp]) usedPos[fp] = 0;
-    const posList = positions[fp] || [{ x: 50, y: 50 }];
-    const coord = posList[usedPos[fp]] || posList[0];
-    usedPos[fp]++;
-    
     fieldHtml += `
-      <div class="player-on-field" style="left:${coord.x}%;top:${coord.y}%;">
+      <div class="player-on-field" style="left:${p.x}%;top:${p.y}%;" title="${p.role}: ${p.role_description}">
         <div class="player-circle">${p.rating}</div>
-        <div class="player-circle-name">${p.name.length > 12 ? p.name.slice(0,12) : p.name}</div>
+        <div class="player-circle-name"><strong>${p.role}</strong> ${p.name.length > 12 ? p.name.slice(0,12) : p.name}</div>
       </div>
     `;
   });
-  
-  let html = `
+
+  const listHtml = players.map((p, idx) => `
+    <div class="ideal-row" style="display:grid;grid-template-columns:42px 70px 1fr 90px;gap:10px;align-items:center;padding:10px 12px;border-bottom:1px solid var(--border);">
+      <div style="color:var(--text-3);font-size:11px;">${String(idx + 1).padStart(2,'0')}</div>
+      <div><span class="tag ${p.fit === 'natural' ? 'liga' : p.fit === 'adaptado' ? 'copa' : 'd'}">${p.role}</span></div>
+      <div>
+        <div style="font-weight:800;">${p.name} <span style="color:var(--green);font-weight:800;">${p.rating}</span></div>
+        <div style="color:var(--text-2);font-size:11px;line-height:1.4;">${p.role_description}</div>
+        <div style="color:var(--text-3);font-size:10px;margin-top:2px;">Origem: ${p.position} · encaixe: ${p.fit}</div>
+      </div>
+      <div style="text-align:right;color:var(--text-2);font-size:11px;">score<br><strong style="color:var(--green);">${p.selection_score}</strong></div>
+    </div>
+  `).join('');
+
+  return `
+    <div style="display:flex;gap:10px;align-items:center;justify-content:center;margin-bottom:16px;flex-wrap:wrap;">
+      <div class="formation-title" style="margin:0;">${team.formation_name}</div>
+      <select onchange="setIdealFormation(this.value)" style="background:var(--bg-card);color:var(--text);border:1px solid var(--green-dim);border-radius:8px;padding:10px 12px;font-weight:700;">
+        ${formations.map(f => `<option value="${f}" ${f === formation ? 'selected' : ''}>${f}</option>`).join('')}
+      </select>
+      <button class="btn-primary" style="padding:10px 16px;" onclick="renderTab()">Ajustar Melhor 11</button>
+    </div>
+
     <div class="formation-wrapper">
-      <div class="formation-title">FORMAÇÃO ${formation}</div>
+      <div class="formation-title">${team.formation_name} · ${players.length}/11 jogadores</div>
       <div class="field">
         <div class="field-line"></div>
         <div class="field-circle"></div>
         ${fieldHtml}
       </div>
-      <div class="formation-label">Melhor 11 por nota média · ${formation}</div>
+      <div class="formation-label">Escolha automática por função, nota e encaixe posicional</div>
     </div>
-    
-    <div class="section-title">📋 Análise Tática</div>
-    <button class="btn-primary" onclick="analyzeTeam()">🤖 GERAR ANÁLISE COM IA</button>
-  `;
-  
-  return html;
-}
 
+    <div class="section-title">Escalação e Função Tática</div>
+    <div style="background:var(--bg-card);border:1px solid var(--border);border-radius:12px;overflow:hidden;margin-bottom:18px;">
+      ${listHtml}
+    </div>
+
+    ${team.missing_slots.length ? `<div style="color:var(--yellow);font-size:12px;margin-bottom:14px;">Atenção: faltaram jogadores para ${team.missing_slots.join(', ')}.</div>` : ''}
+
+    <div class="section-title">Análise Tática</div>
+    <button class="btn-primary" onclick="analyzeTeam()">Gerar Análise com IA</button>
+  `;
+}
 function renderAgenda() {
   return `
     <div class="section-title">✏️ ${AGENDA_EDIT_ID ? 'Editar Agendamento' : 'Novo Agendamento'}</div>
