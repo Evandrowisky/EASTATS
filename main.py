@@ -1,0 +1,3755 @@
+﻿# -*- coding: utf-8 -*-
+"""
+Scout Clubs Pro v2 - Análise Profissional EA FC
+Inspirado no app Scout Clubs original
+- Abas: Visão, Jogadores, Comparar, Confrontos, Time Ideal, Agenda
+- Formação tática visual com mapinha do campo
+- MOM (Melhor da Partida) por jogo
+- Gráficos circulares e de barras
+- Cache JSON + sincronização com progresso em tempo real
+"""
+
+import os
+import json
+import sqlite3
+import asyncio
+import time
+from datetime import datetime
+from pathlib import Path
+from typing import Optional, Dict, List, Any
+from contextlib import asynccontextmanager
+from statistics import mean, pstdev
+
+from fastapi import FastAPI, HTTPException, Query
+from pydantic import BaseModel
+from typing import Optional
+from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
+from fastapi.middleware.cors import CORSMiddleware
+
+# ============================================================
+# CONFIGURAÇÃO
+# ============================================================
+
+APP_NAME = "Scout Clubs Pro"
+DB_FILE = "scout_clubs.db"
+JSON_CACHE = "dados_clube.json"
+
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
+
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
+OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+
+MATCH_TYPE_CANDIDATES = [
+    "leagueMatch",
+    "playoffMatch",
+    "friendlyMatch",
+    "friendlies",
+    "friendly",
+    "clubFriendly",
+    "practiceMatch",
+    "gameType9",
+    "gameType13",
+    "gameType15",
+    "gameType16",
+]
+
+# ============================================================
+# CLIENTE EA FC
+# ============================================================
+
+class EAFCClient:
+    """Cliente para API do EA FC"""
+    
+    BASE_URL = "https://proclubs.ea.com/api/fc"
+    
+    def __init__(self):
+        self.using_curl_cffi = False
+        try:
+            from curl_cffi import requests as cffi_requests
+            # tenta varios browsers ate funcionar
+            for impersonate in ["chrome120", "chrome110", "chrome116", "firefox133", "safari17_0"]:
+                try:
+                    self.session = cffi_requests.Session(impersonate=impersonate)
+                    self.using_curl_cffi = True
+                    print(f"[EA FC] Usando curl_cffi com {impersonate}")
+                    break
+                except Exception:
+                    continue
+            if not self.using_curl_cffi:
+                raise ImportError
+        except ImportError:
+            import requests
+            self.session = requests.Session()
+            print("[EA FC] Usando requests simples (curl_cffi nao disponivel)")
+        
+        # Headers que funcionam com a API EA FC (testado em 2026)
+        self.session.headers.update({
+            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:109.0) Gecko/20100101 Firefox/112.0",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+            "Accept-Encoding": "gzip, deflate, br",
+            "Accept-Language": "pt-BR,pt;q=0.9,en;q=0.8",
+            "Referer": "https://www.ea.com/",
+            "Origin": "https://www.ea.com",
+        })
+    
+    def _get(self, url: str, params: dict = None, timeout: int = 30):
+        try:
+            r = self.session.get(url, params=params, timeout=timeout)
+            print(f"[EA FC] GET {url} {params} -> {r.status_code} ({len(r.text)} bytes)")
+            if r.status_code == 200 and r.text:
+                # mostra preview do retorno
+                preview = r.text[:200].replace('\n', ' ')
+                print(f"[EA FC]   preview: {preview}")
+                try:
+                    return r.json()
+                except Exception as je:
+                    print(f"[EA FC]   nao eh json: {je}")
+                    return {}
+            else:
+                print(f"[EA FC]   body: {r.text[:300]}")
+            return {}
+        except Exception as e:
+            print(f"[EA FC] Erro de conexao em {url}: {type(e).__name__}: {e}")
+            return {}
+    
+    def search_club(self, club_name: str, platform: str = "common-gen5"):
+        # Endpoint correto (EA mudou em 2025): allTimeLeaderboard/search
+        url = f"{self.BASE_URL}/allTimeLeaderboard/search"
+        # Tenta variacoes do nome e multiplas plataformas
+        name_variants = [
+            club_name,
+            club_name.upper(),
+            club_name.title(),
+            club_name.lower(),
+            club_name.replace(' SC', '').strip(),
+            club_name.replace('SC', '').strip(),
+        ]
+        if platform == "auto" or not platform:
+            platforms = ["common-gen5", "common-gen4"]
+        else:
+            platforms = [platform]
+        seen = set()
+        for plat in platforms:
+            for nm in name_variants:
+                if not nm or (plat, nm) in seen:
+                    continue
+                seen.add((plat, nm))
+                params = {"clubName": nm, "platform": plat}
+                result = self._get(url, params)
+                if result and isinstance(result, list) and len(result) > 0:
+                    club = result[0]
+                    # Nome esta em clubName ou clubInfo.name
+                    cname = club.get("clubName") or club.get("name") or (
+                        club.get("clubInfo", {}).get("name") if isinstance(club.get("clubInfo"), dict) else None
+                    ) or nm
+                    return {
+                        "success": True,
+                        "clubId": str(club.get("clubId")),
+                        "name": cname,
+                        "platform": plat,
+                        "raw": club,
+                    }
+        return {"success": False}
+    
+    def club_info(self, club_id: str, platform: str = "common-gen5"):
+        url = f"{self.BASE_URL}/clubs/info"
+        params = {"clubIds": club_id, "platform": platform}
+        return self._get(url, params)
+    
+    def overall_stats(self, club_id: str, platform: str = "common-gen5"):
+        url = f"{self.BASE_URL}/clubs/overallStats"
+        params = {"clubIds": club_id, "platform": platform}
+        return self._get(url, params)
+    
+    def members(self, club_id: str, platform: str = "common-gen5"):
+        url = f"{self.BASE_URL}/members/career/stats"
+        params = {"clubId": club_id, "platform": platform}
+        return self._get(url, params)
+    
+    def matches(self, club_id: str, match_type: str = "leagueMatch", platform: str = "common-gen5", max_count: int = 50):
+        url = f"{self.BASE_URL}/clubs/matches"
+        params = {
+            "clubIds": club_id,
+            "platform": platform,
+            "matchType": match_type,
+            "maxResultCount": max_count,
+        }
+        return self._get(url, params)
+
+
+# ============================================================
+# BANCO DE DADOS
+# ============================================================
+
+def init_db():
+    conn = sqlite3.connect(DB_FILE)
+    c = conn.cursor()
+    c.executescript("""
+        CREATE TABLE IF NOT EXISTS clubs (
+            club_id TEXT PRIMARY KEY,
+            name TEXT,
+            platform TEXT,
+            data TEXT,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE TABLE IF NOT EXISTS players (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            club_id TEXT,
+            name TEXT,
+            position TEXT,
+            data TEXT,
+            UNIQUE(club_id, name)
+        );
+        CREATE TABLE IF NOT EXISTS matches (
+            match_id TEXT PRIMARY KEY,
+            club_id TEXT,
+            opponent TEXT,
+            score TEXT,
+            result TEXT,
+            match_type TEXT,
+            timestamp INTEGER,
+            data TEXT
+        );
+        CREATE TABLE IF NOT EXISTS agenda (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            opponent TEXT NOT NULL,
+            match_date TEXT NOT NULL,
+            match_time TEXT,
+            match_type TEXT DEFAULT 'liga',
+            location TEXT,
+            notes TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+    """)
+    # Auto-migra: se ja existe DB antigo sem a coluna 'data', adiciona
+    for table in ("clubs", "players", "matches"):
+        try:
+            c.execute(f"PRAGMA table_info({table})")
+            cols = [row[1] for row in c.fetchall()]
+            if cols and "data" not in cols:
+                c.execute(f"ALTER TABLE {table} ADD COLUMN data TEXT")
+                print(f"[DB] Migracao: coluna 'data' adicionada em '{table}'")
+        except Exception as e:
+            print(f"[DB] Aviso ao migrar {table}: {e}")
+    conn.commit()
+    conn.close()
+
+
+# ============================================================
+# CACHE JSON
+# ============================================================
+
+def save_cache(data: dict):
+    with open(JSON_CACHE, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2, default=str)
+    print(f"[CACHE] Dados salvos em {JSON_CACHE}")
+
+def load_cache() -> Optional[dict]:
+    if not Path(JSON_CACHE).exists():
+        return None
+    try:
+        with open(JSON_CACHE, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return None
+
+
+# ============================================================
+# PROCESSAMENTO DE DADOS
+# ============================================================
+
+def calc_club_stats(overall_data, club_info_data, matches_list):
+    """Calcula estatísticas agregadas do clube"""
+    stats = {
+        "win_rate": 0, "goals_for": 0, "goals_against": 0, "goal_diff": 0,
+        "wins": 0, "draws": 0, "losses": 0, "matches_played": 0,
+        "goals_per_match": 0, "shots_per_match": 0, "clean_sheets": 0,
+        "pass_pct": 0, "tackle_pct": 0, "best_streak": 0, "shooting": 0
+    }
+    
+    if isinstance(overall_data, list) and overall_data:
+        d = overall_data[0]
+        stats["wins"] = int(d.get("wins", 0))
+        stats["draws"] = int(d.get("ties", 0))
+        stats["losses"] = int(d.get("losses", 0))
+        stats["goals_for"] = int(d.get("goals", 0))
+        stats["goals_against"] = int(d.get("goalsAgainst", 0))
+        stats["matches_played"] = stats["wins"] + stats["draws"] + stats["losses"]
+        if stats["matches_played"] > 0:
+            stats["win_rate"] = round((stats["wins"] / stats["matches_played"]) * 100)
+            stats["goals_per_match"] = round(stats["goals_for"] / stats["matches_played"], 1)
+        stats["goal_diff"] = stats["goals_for"] - stats["goals_against"]
+    
+    # Calcula melhor sequência e clean sheets das partidas
+    if matches_list:
+        streak = current_streak = 0
+        for m in matches_list:
+            if m.get("result") == "V":
+                current_streak += 1
+                streak = max(streak, current_streak)
+                if m.get("goals_against", 0) == 0:
+                    stats["clean_sheets"] += 1
+            else:
+                current_streak = 0
+        stats["best_streak"] = streak
+    
+    return stats
+
+
+def fetch_all_match_types(ea_client, club_id, platform, max_count=50):
+    """Testa varios matchTypes da EA, deduplica por matchId e devolve debug detalhado."""
+    all_matches_raw = []
+    seen = set()
+    debug = []
+
+    for match_type in MATCH_TYPE_CANDIDATES:
+        entry = {"matchType": match_type, "ok": False, "count": 0, "error": None}
+        try:
+            raw = ea_client.matches(club_id, match_type, platform, max_count=max_count)
+            if isinstance(raw, list):
+                entry["ok"] = True
+                entry["count"] = len(raw)
+                for idx, m in enumerate(raw):
+                    if not isinstance(m, dict):
+                        continue
+                    match_id = str(m.get("matchId") or "").strip()
+                    if not match_id:
+                        match_id = f"{match_type}:{m.get('timestamp', '')}:{idx}:{json.dumps(m.get('clubs', {}), sort_keys=True)}"
+                    if match_id in seen:
+                        continue
+                    seen.add(match_id)
+                    enriched = dict(m)
+                    enriched["_origin"] = match_type
+                    all_matches_raw.append(enriched)
+            else:
+                entry["error"] = f"Retorno inesperado: {type(raw).__name__}"
+        except Exception as e:
+            entry["error"] = f"{type(e).__name__}: {e}"
+
+        print(
+            f"[EA FC] matchType={match_type} ok={entry['ok']} "
+            f"count={entry['count']} error={entry['error']}"
+        )
+        debug.append(entry)
+
+    print(f"[EA FC] Total bruto unico apos dedupe: {len(all_matches_raw)}")
+    return all_matches_raw, debug
+
+
+def summarize_matches_by_type(matches):
+    resumo = {"liga": 0, "copa": 0, "amistoso": 0, "desconhecido": 0}
+    for m in matches or []:
+        mt = m.get("match_type") or "desconhecido"
+        if mt not in resumo:
+            resumo[mt] = 0
+        resumo[mt] += 1
+    return resumo
+
+
+def parse_matches(matches_raw, our_club_id):
+    """Processa lista de partidas"""
+    result = []
+    if not isinstance(matches_raw, list):
+        return result
+    
+    for m in matches_raw:
+        try:
+            clubs = m.get("clubs", {})
+            our = clubs.get(str(our_club_id), {})
+            opp_id = next((k for k in clubs.keys() if k != str(our_club_id)), None)
+            opp = clubs.get(opp_id, {}) if opp_id else {}
+            
+            our_goals = int(our.get("goals", 0))
+            opp_goals = int(opp.get("goals", 0))
+            
+            if our_goals > opp_goals: result_str = "V"
+            elif our_goals < opp_goals: result_str = "D"
+            else: result_str = "E"
+            
+            # Detecta tipo de partida (liga / copa / amistoso)
+            raw_match_type = str(m.get("matchType") or "").lower()
+            origin = str(m.get("_origin") or "").lower()
+            type_probe = f"{raw_match_type} {origin}"
+            if "playoff" in type_probe:
+                match_type_label = "copa"
+            elif (
+                "friendly" in type_probe
+                or "friendlies" in type_probe
+                or "amist" in type_probe
+                or "gametype9" in type_probe
+                or "gametype13" in type_probe
+                or "gametype15" in type_probe
+                or "gametype16" in type_probe
+            ):
+                match_type_label = "amistoso"
+            elif "league" in type_probe or "liga" in type_probe:
+                match_type_label = "liga"
+            else:
+                match_type_label = origin or "desconhecido"
+
+            # Encontra MOM e enriquece estatisticas por jogador
+            players = m.get("players", {}).get(str(our_club_id), {})
+            mom = None
+            mom_rating = 0.0
+            players_with_ratings = []
+            for pid, pdata in players.items():
+                rating = float(pdata.get("rating", 0) or 0)
+                player_name = pdata.get("playername", "Unknown")
+                p_goals = int(float(pdata.get("goals", 0) or 0))
+                p_assists = int(float(pdata.get("assists", 0) or 0))
+                p_shots = int(float(pdata.get("shots", 0) or 0))
+                p_passes_made = int(float(pdata.get("passesmade", pdata.get("passesMade", 0)) or 0))
+                p_pass_att = int(float(pdata.get("passattempts", pdata.get("passAttempts", 0)) or 0))
+                p_tackles = int(float(pdata.get("tacklesmade", pdata.get("tacklesMade", 0)) or 0))
+                p_tackle_att = int(float(pdata.get("tackleattempts", pdata.get("tackleAttempts", 0)) or 0))
+                p_saves = int(float(pdata.get("saves", 0) or 0))
+                p_cleansheets = int(float(pdata.get("cleansheetsany", pdata.get("cleanSheets", 0)) or 0))
+                p_red = int(float(pdata.get("redcards", 0) or 0))
+                p_mom_flag = int(float(pdata.get("mom", 0) or 0))
+                p_pos = pdata.get("pos", "?")
+
+                pass_pct = round((p_passes_made / max(p_pass_att, 1)) * 100, 1) if p_pass_att else 0
+                tackle_pct = round((p_tackles / max(p_tackle_att, 1)) * 100, 1) if p_tackle_att else 0
+
+                # Nota sofisticada: combina rating + impacto + posicao
+                # Base: rating EA. Bonus por gol, assist, MOM, defesa solida.
+                sofi = rating
+                if p_pos.lower() in ("goalkeeper", "gk"):
+                    sofi += min(p_saves * 0.05, 1.5)  # ate +1.5 por defesas
+                    if p_cleansheets:
+                        sofi += 0.5
+                    if opp_goals >= 4:
+                        sofi -= 0.4
+                elif p_pos.lower() in ("defender", "cb", "lb", "rb"):
+                    sofi += p_tackles * 0.04
+                    if p_cleansheets:
+                        sofi += 0.6
+                    if opp_goals >= 4:
+                        sofi -= 0.3
+                    sofi += p_assists * 0.3 + p_goals * 0.5
+                elif p_pos.lower() in ("midfielder", "cm", "cdm", "cam", "lm", "rm"):
+                    sofi += p_assists * 0.5 + p_goals * 0.5
+                    if pass_pct >= 80:
+                        sofi += 0.3
+                    sofi += p_tackles * 0.02
+                else:  # forward / st / lw / rw
+                    sofi += p_goals * 0.7 + p_assists * 0.4
+                    if p_shots >= 5 and p_goals == 0:
+                        sofi -= 0.2
+                # Modificadores globais
+                if result_str == "V":
+                    sofi += 0.15
+                elif result_str == "D":
+                    sofi -= 0.15
+                if p_red:
+                    sofi -= 1.0
+                if p_mom_flag:
+                    sofi += 0.3
+                # Limita 0-10
+                sofi = max(0.0, min(10.0, sofi))
+
+                players_with_ratings.append({
+                    "name": player_name,
+                    "rating": round(rating, 2),
+                    "sofi_rating": round(sofi, 2),
+                    "pos": p_pos,
+                    "goals": p_goals,
+                    "assists": p_assists,
+                    "shots": p_shots,
+                    "passes_made": p_passes_made,
+                    "pass_pct": pass_pct,
+                    "tackles_made": p_tackles,
+                    "tackle_pct": tackle_pct,
+                    "saves": p_saves,
+                    "clean_sheet": p_cleansheets,
+                    "red": p_red,
+                    "mom": p_mom_flag,
+                })
+                if rating > mom_rating:
+                    mom_rating = rating
+                    mom = player_name
+            
+            timestamp = int(m.get("timestamp", 0))
+            date_str = datetime.fromtimestamp(timestamp).strftime("%d/%m/%Y") if timestamp else "—"
+            
+            result.append({
+                "match_id": m.get("matchId"),
+                "opponent": opp.get("details", {}).get("name", "Adversário"),
+                "score": f"{our_goals}-{opp_goals}",
+                "goals_for": our_goals,
+                "goals_against": opp_goals,
+                "result": result_str,
+                "match_type": match_type_label,
+                "match_type_raw": raw_match_type or origin,
+                "date": date_str,
+                "timestamp": timestamp,
+                "mom": mom,
+                "mom_rating": round(mom_rating, 1),
+                "players_ratings": sorted(players_with_ratings, key=lambda x: x["sofi_rating"], reverse=True)
+            })
+        except Exception as e:
+            print(f"[parse_matches] Erro: {e}")
+    
+    return sorted(result, key=lambda x: x.get("timestamp", 0), reverse=True)
+
+
+def parse_players(members_data):
+    """Processa dados dos jogadores"""
+    if not members_data or "members" not in members_data:
+        return []
+    
+    players = []
+    for m in members_data.get("members", []):
+        gp = int(m.get("gamesPlayed", 0))
+        if gp == 0:
+            continue
+        
+        goals = int(m.get("goals", 0))
+        assists = int(m.get("assists", 0))
+        passes_made = int(m.get("passesMade", 0))
+        pass_attempts = int(m.get("passAttempts", 1))
+        tackles_made = int(m.get("tacklesMade", 0))
+        tackle_attempts = int(m.get("tackleAttempts", 1))
+        rating = float(m.get("ratingAve", 0))
+        mom = int(m.get("manOfTheMatch", 0))
+        shots = int(m.get("shots", 0))
+        pos = m.get("favoritePosition", "?")
+        
+        players.append({
+            "name": m.get("name", "Unknown"),
+            "position": pos,
+            "games": gp,
+            "rating": round(rating, 2),
+            "goals": goals,
+            "assists": assists,
+            "shots": shots,
+            "passes_made": passes_made,
+            "pass_pct": round((passes_made / max(pass_attempts, 1)) * 100, 1),
+            "tackles_made": tackles_made,
+            "tackle_pct": round((tackles_made / max(tackle_attempts, 1)) * 100, 1),
+            "mom": mom,
+            "goals_per_game": round(goals / gp, 2),
+            "assists_per_game": round(assists / gp, 2),
+        })
+    
+    return sorted(players, key=lambda x: x["rating"], reverse=True)
+
+
+def calc_opponent_avg(matches_list):
+    """Calcula média de gols por adversário"""
+    by_opp = {}
+    for m in matches_list:
+        opp = m["opponent"]
+        if opp not in by_opp:
+            by_opp[opp] = {"games": 0, "gf": 0, "ga": 0}
+        by_opp[opp]["games"] += 1
+        by_opp[opp]["gf"] += m["goals_for"]
+        by_opp[opp]["ga"] += m["goals_against"]
+    
+    result = []
+    for opp, d in by_opp.items():
+        result.append({
+            "opponent": opp,
+            "games": d["games"],
+            "avg_gf": round(d["gf"] / d["games"], 1),
+            "avg_ga": round(d["ga"] / d["games"], 1)
+        })
+    return sorted(result, key=lambda x: x["avg_gf"], reverse=True)[:10]
+
+
+def build_ideal_team(players_list, formation="3-5-2"):
+    """Monta time ideal por nota média e posição"""
+    formations = {
+        "3-5-2": {"GK": 1, "CB": 3, "CM": 5, "ST": 2},
+        "4-3-3": {"GK": 1, "CB": 2, "LB": 1, "RB": 1, "CM": 3, "LW": 1, "RW": 1, "ST": 1},
+        "4-4-2": {"GK": 1, "CB": 2, "LB": 1, "RB": 1, "CM": 2, "LM": 1, "RM": 1, "ST": 2},
+    }
+    
+    pos_map = {
+        "goalkeeper": "GK", "gk": "GK",
+        "defender": "CB", "cb": "CB", "lb": "LB", "rb": "RB",
+        "midfielder": "CM", "cm": "CM", "cdm": "CM", "cam": "CM", "lm": "LM", "rm": "RM",
+        "forward": "ST", "st": "ST", "cf": "ST", "lw": "LW", "rw": "RW", "lf": "LW", "rf": "RW"
+    }
+    
+    # Agrupa por posição
+    by_pos = {}
+    for p in players_list:
+        pos = pos_map.get(p["position"].lower(), p["position"].upper())
+        if pos not in by_pos:
+            by_pos[pos] = []
+        by_pos[pos].append(p)
+    
+    # Ordena por rating
+    for pos in by_pos:
+        by_pos[pos].sort(key=lambda x: x["rating"], reverse=True)
+    
+    # Monta time ideal 3-5-2
+    team = []
+    used = set()
+    
+    needed = formations.get(formation, formations["3-5-2"])
+    for pos, count in needed.items():
+        candidates = by_pos.get(pos, [])
+        # Se não tem suficiente, busca posições compatíveis
+        if len(candidates) < count:
+            if pos in ["CB", "LB", "RB"]:
+                for alt in ["CB", "LB", "RB"]:
+                    if alt != pos:
+                        candidates += by_pos.get(alt, [])
+            elif pos in ["CM", "LM", "RM"]:
+                for alt in ["CM", "LM", "RM"]:
+                    if alt != pos:
+                        candidates += by_pos.get(alt, [])
+        
+        added = 0
+        for p in candidates:
+            if added >= count:
+                break
+            if p["name"] not in used:
+                team.append({**p, "field_pos": pos})
+                used.add(p["name"])
+                added += 1
+    
+    return {"formation": formation, "players": team}
+
+
+# ============================================================
+# FASTAPI APP
+# ============================================================
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    init_db()
+    yield
+
+app = FastAPI(title=APP_NAME, lifespan=lifespan)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+ea_client = EAFCClient()
+
+
+# ============================================================
+# ROTAS API
+# ============================================================
+
+@app.get("/health")
+def health():
+    return {"status": "ok", "app": APP_NAME}
+
+
+@app.get("/api/test-search")
+def test_search(
+    club_name: str = Query("DESAGREGADOS SC"),
+    platform: str = Query("common-gen5")
+):
+    """Endpoint de diagnostico: testa busca direta na EA FC API"""
+    import requests as rq
+    results = {}
+    
+    # Tenta com curl_cffi (impersonating chrome)
+    try:
+        r = ea_client.search_club(club_name, platform)
+        results["curl_cffi"] = r
+    except Exception as e:
+        results["curl_cffi"] = {"error": str(e)}
+    
+    # Tenta com requests simples
+    try:
+        url = "https://proclubs.ea.com/api/fc/allTimeLeaderboard/search"
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:109.0) Gecko/20100101 Firefox/112.0",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            "Accept-Encoding": "gzip, deflate, br",
+            "Referer": "https://www.ea.com/",
+            "Origin": "https://www.ea.com",
+        }
+        params = {"clubName": club_name, "platform": platform}
+        resp = rq.get(url, headers=headers, params=params, timeout=20)
+        results["requests_simples"] = {
+            "status": resp.status_code,
+            "body_preview": resp.text[:500],
+            "json": resp.json() if resp.status_code == 200 else None,
+        }
+    except Exception as e:
+        results["requests_simples"] = {"error": f"{type(e).__name__}: {e}"}
+    
+    return results
+
+
+@app.get("/api/dashboard")
+def get_dashboard():
+    """Retorna dados do cache JSON"""
+    cache = load_cache()
+    if cache:
+        # Reconstroi time ideal se nao existir ou estiver vazio
+        if cache.get("players") and (
+            not cache.get("ideal_team")
+            or not cache["ideal_team"].get("players")
+        ):
+            cache["ideal_team"] = build_ideal_team(cache["players"], "3-5-2")
+            save_cache(cache)
+        return cache
+    return {"club": None, "stats": None, "players": [], "matches": [], "opponents": [], "ideal_team": None}
+
+
+@app.get("/api/test-matchtypes")
+def test_matchtypes(
+    club_name: str = Query("DESAGREGADOS SC"),
+    platform: str = Query("auto"),
+    max_count: int = Query(50, ge=1, le=100)
+):
+    """Diagnostico: busca o clube e testa todos os matchTypes conhecidos/candidatos."""
+    search = ea_client.search_club(club_name, platform)
+    if not search.get("success"):
+        raise HTTPException(404, "Clube nao encontrado")
+
+    club_id = str(search["clubId"])
+    plat = search.get("platform", platform) or "common-gen5"
+    all_matches_raw, debug = fetch_all_match_types(ea_client, club_id, plat, max_count=max_count)
+    parsed = parse_matches(all_matches_raw, club_id)
+    resumo = summarize_matches_by_type(parsed)
+
+    return {
+        "club": {
+            "id": club_id,
+            "name": search.get("name"),
+            "platform": plat,
+        },
+        "debug_matchtypes": debug,
+        "total_raw": len(all_matches_raw),
+        "total_parsed": len(parsed),
+        "resumo_por_tipo": resumo,
+        "matches_preview": parsed[:10],
+    }
+
+
+@app.get("/api/sync-stream")
+async def sync_stream(
+    club_name: str = Query("DESAGREGADOS SC"),
+    platform: str = Query("auto")
+):
+    """Sincronização com progresso em tempo real (SSE)"""
+    initial_platform = platform
+    
+    async def event_generator():
+        plat = initial_platform
+        start = time.time()
+        
+        def log(msg, step, total):
+            elapsed = round(time.time() - start, 1)
+            return json.dumps({
+                "msg": f"[{elapsed}s] {msg}",
+                "step": step,
+                "total": total
+            })
+        
+        try:
+            yield f"data: {log('🔌 Conectando à EA FC...', 1, 8)}\n\n"
+            await asyncio.sleep(0.1)
+            
+            yield f"data: {log(f'🔎 Buscando clube: {club_name} (varias plataformas)...', 2, 8)}\n\n"
+            await asyncio.sleep(0.05)
+            search = ea_client.search_club(club_name, plat)
+            
+            if not search.get("success"):
+                yield f"data: {log('❌ Clube nao encontrado em nenhuma plataforma', 2, 8)}\n\n"
+                yield f"data: {log('💡 Verifique o nome exato do clube e tente novamente', 2, 8)}\n\n"
+                yield f"data: {json.dumps({'error': 'Clube nao encontrado', 'done': True})}\n\n"
+                return
+            
+            club_id = str(search["clubId"])
+            club_name_real = search["name"]
+            plat = search.get("platform", plat) or "common-gen5"
+            yield f"data: {log(f'✓ Clube: {club_name_real} (ID: {club_id}, plat: {plat})', 3, 8)}\n\n"
+            
+            yield f"data: {log('📊 Carregando estatísticas gerais...', 4, 8)}\n\n"
+            overall = ea_client.overall_stats(club_id, plat)
+            info = ea_client.club_info(club_id, plat)
+            
+            yield f"data: {log('👥 Baixando jogadores...', 5, 8)}\n\n"
+            members = ea_client.members(club_id, plat)
+            players = parse_players(members)
+            yield f"data: {log(f'✓ {len(players)} jogadores carregados', 5, 8)}\n\n"
+            
+            yield f"data: {log('Baixando partidas e testando matchTypes da EA...', 6, 8)}\n\n"
+            all_matches_raw, debug_matchtypes = fetch_all_match_types(ea_client, club_id, plat, max_count=50)
+            for d in debug_matchtypes:
+                status = "ok" if d.get("ok") else "falhou"
+                err = f" | erro: {d.get('error')}" if d.get("error") else ""
+                mt_msg = f"matchType={d.get('matchType')} -> {d.get('count', 0)} partidas ({status}){err}"
+                yield f"data: {log(mt_msg, 7, 8)}\n\n"
+                await asyncio.sleep(0.01)
+
+            new_matches = parse_matches(all_matches_raw, club_id)
+            resumo_sync = summarize_matches_by_type(new_matches)
+            resumo_msg = (
+                f"Resumo: liga={resumo_sync.get('liga', 0)}, "
+                f"copa={resumo_sync.get('copa', 0)}, "
+                f"amistoso={resumo_sync.get('amistoso', 0)}, "
+                f"desconhecido={resumo_sync.get('desconhecido', 0)}"
+            )
+            yield f"data: {log(resumo_msg, 7, 8)}\n\n"
+            print(f"[EA FC] Amistosos encontrados nesta sync: {resumo_sync.get('amistoso', 0)}")
+            yield f"data: {log(f'✓ {len(new_matches)} partidas baixadas nesta sync', 7, 8)}\n\n"
+            
+            # ACUMULAÇÃO HISTÓRICA: salva todas as partidas no DB (UPSERT)
+            try:
+                conn = sqlite3.connect(DB_FILE)
+                c = conn.cursor()
+                for m in new_matches:
+                    c.execute(
+                        "INSERT OR REPLACE INTO matches (match_id, club_id, opponent, score, result, match_type, timestamp, data) VALUES (?,?,?,?,?,?,?,?)",
+                        (
+                            str(m.get("match_id", "")),
+                            club_id,
+                            m.get("opponent", ""),
+                            m.get("score", ""),
+                            m.get("result", ""),
+                            m.get("match_type", ""),
+                            int(m.get("timestamp", 0) or 0),
+                            json.dumps(m, default=str),
+                        ),
+                    )
+                conn.commit()
+                # Carrega TODO o histórico acumulado (mais novas primeiro)
+                c.execute(
+                    "SELECT data FROM matches WHERE club_id=? AND data IS NOT NULL ORDER BY timestamp DESC",
+                    (club_id,),
+                )
+                rows = c.fetchall()
+                conn.close()
+                matches = []
+                for (raw,) in rows:
+                    try:
+                        matches.append(json.loads(raw))
+                    except Exception:
+                        pass
+                if not matches:
+                    matches = new_matches
+                yield f"data: {log(f'📚 Histórico acumulado: {len(matches)} partidas totais', 8, 8)}\n\n"
+            except Exception as e:
+                print(f"[DB] Aviso ao acumular partidas: {e}")
+                matches = new_matches
+            
+            yield f"data: {log('🧮 Calculando estatísticas...', 8, 8)}\n\n"
+            stats = calc_club_stats(overall, info, matches)
+            opponents = calc_opponent_avg(matches)
+            ideal_team = build_ideal_team(players, "3-5-2")
+            
+            # Encontra MVP (jogador com mais MOMs)
+            mvp = None
+            if players:
+                mvp = max(players, key=lambda p: (p["mom"], p["rating"]))
+            
+            # Monta dados completos
+            club_data = {
+                "club": {
+                    "id": club_id,
+                    "name": club_name_real,
+                    "platform": plat,
+                    "synced_at": datetime.now().isoformat()
+                },
+                "stats": stats,
+                "players": players,
+                "matches": matches,
+                "opponents": opponents,
+                "ideal_team": ideal_team,
+                "mvp": mvp,
+                "debug_matchtypes": debug_matchtypes,
+                "matchtype_summary": summarize_matches_by_type(matches),
+            }
+            
+            # Salva cache
+            save_cache(club_data)
+            
+            # Salva no DB (best-effort, nao falha a sync se DB der erro)
+            try:
+                conn = sqlite3.connect(DB_FILE)
+                c = conn.cursor()
+                c.execute(
+                    "INSERT OR REPLACE INTO clubs (club_id, name, platform, data) VALUES (?, ?, ?, ?)",
+                    (club_id, club_name_real, plat, json.dumps(club_data, default=str))
+                )
+                conn.commit()
+                conn.close()
+            except Exception as db_err:
+                # DB legado pode nao ter a coluna data; cache JSON eh fonte primaria
+                print(f"[DB] Aviso: nao salvou no SQLite: {db_err}")
+                yield f"data: {log(f'⚠️ DB legado ignorado: {db_err}', 8, 8)}\n\n"
+            
+            yield f"data: {log(f'✅ Sincronização completa!', 8, 8)}\n\n"
+            yield f"data: {log(f'💾 Dados salvos em {JSON_CACHE}', 8, 8)}\n\n"
+            yield f"data: {json.dumps({'done': True, 'success': True, 'club': club_name_real})}\n\n"
+            
+        except Exception as e:
+            yield f"data: {log(f'❌ Erro: {str(e)}', 0, 8)}\n\n"
+            yield f"data: {json.dumps({'error': str(e), 'done': True})}\n\n"
+    
+    return StreamingResponse(event_generator(), media_type="text/event-stream")
+
+
+def _position_profile(position: str) -> str:
+    pos = (position or "").lower()
+    if pos in ("goalkeeper", "gk"):
+        return "GK"
+    if pos in ("defender", "cb", "lb", "rb", "lcb", "rcb", "rwb", "lwb"):
+        return "DEF"
+    if pos in ("midfielder", "cm", "cdm", "cam", "lm", "rm"):
+        return "MID"
+    if pos in ("forward", "st", "cf", "lw", "rw", "lf", "rf"):
+        return "FWD"
+    return "MID"
+
+
+def _avg(values, default=0):
+    vals = [float(v) for v in values if v is not None]
+    return round(sum(vals) / len(vals), 2) if vals else default
+
+
+def _safe_pct(value, total):
+    return round((float(value) / max(float(total), 1)) * 100, 1) if total else 0
+
+
+def build_estimated_heatmap(player, history):
+    """Mapa de calor estimado por perfil estatistico, sem coordenadas reais da EA."""
+    profile = _position_profile(player.get("position"))
+    zones = {
+        "def_left": 0, "def_center": 0, "def_right": 0,
+        "mid_left": 0, "mid_center": 0, "mid_right": 0,
+        "att_left": 0, "att_center": 0, "att_right": 0,
+    }
+    if profile == "GK":
+        zones.update({"def_center": 70, "def_left": 20, "def_right": 20, "mid_center": 8})
+    elif profile == "DEF":
+        zones.update({"def_center": 45, "def_left": 28, "def_right": 28, "mid_center": 22})
+    elif profile == "MID":
+        zones.update({"mid_center": 55, "mid_left": 24, "mid_right": 24, "def_center": 16, "att_center": 18})
+    else:
+        zones.update({"att_center": 55, "att_left": 24, "att_right": 24, "mid_center": 18})
+
+    for h in history:
+        goals = h.get("goals", 0)
+        assists = h.get("assists", 0)
+        shots = h.get("shots", 0)
+        tackles = h.get("tackles_made", 0)
+        saves = h.get("saves", 0)
+        clean = h.get("clean_sheet", 0)
+        pos = (h.get("position") or player.get("position") or "").lower()
+        zones["att_center"] += goals * 8 + shots * 2
+        zones["att_left"] += assists * 3
+        zones["att_right"] += assists * 3
+        zones["mid_center"] += assists * 5 + h.get("pass_pct", 0) * 0.05
+        zones["def_center"] += tackles * 3 + saves * 6 + clean * 5
+        if "lb" in pos or "lm" in pos or "lw" in pos:
+            zones["def_left"] += tackles * 2
+            zones["mid_left"] += assists * 2 + shots
+            zones["att_left"] += goals * 3 + shots
+        elif "rb" in pos or "rm" in pos or "rw" in pos:
+            zones["def_right"] += tackles * 2
+            zones["mid_right"] += assists * 2 + shots
+            zones["att_right"] += goals * 3 + shots
+        else:
+            zones["mid_center"] += tackles + assists
+
+    max_val = max(zones.values()) if zones else 1
+    return {
+        "disclaimer": "Mapa de calor estimado por perfil estatistico; a API nao fornece coordenadas reais de campo.",
+        "profile": profile,
+        "zones": {k: round(min(1, v / max(max_val, 1)), 3) for k, v in zones.items()},
+    }
+
+
+def build_player_analytics(player_name, cache):
+    """Gera pacote analitico profissional do jogador a partir do cache local."""
+    if not cache or not cache.get("players"):
+        raise HTTPException(404, "Sincronize um clube primeiro")
+    pname = player_name.strip().lower()
+    players = cache.get("players", [])
+    player = next((p for p in players if p.get("name", "").lower() == pname), None)
+    if not player:
+        raise HTTPException(404, f"Jogador '{player_name}' nao encontrado")
+
+    history = []
+    for m in cache.get("matches", []):
+        for pr in (m.get("players_ratings") or []):
+            if pr.get("name", "").lower() == pname:
+                history.append({
+                    "match_id": m.get("match_id"), "opponent": m.get("opponent"), "date": m.get("date"),
+                    "timestamp": int(m.get("timestamp", 0) or 0), "score": m.get("score"), "result": m.get("result"),
+                    "match_type": m.get("match_type", "liga"), "position": pr.get("pos"),
+                    "rating": float(pr.get("rating", 0) or 0),
+                    "sofi_rating": float(pr.get("sofi_rating", pr.get("rating", 0)) or 0),
+                    "goals": int(pr.get("goals", 0) or 0), "assists": int(pr.get("assists", 0) or 0),
+                    "shots": int(pr.get("shots", 0) or 0), "passes_made": int(pr.get("passes_made", 0) or 0),
+                    "pass_pct": float(pr.get("pass_pct", 0) or 0), "tackles_made": int(pr.get("tackles_made", 0) or 0),
+                    "tackle_pct": float(pr.get("tackle_pct", 0) or 0), "saves": int(pr.get("saves", 0) or 0),
+                    "clean_sheet": int(pr.get("clean_sheet", 0) or 0), "red": int(pr.get("red", 0) or 0),
+                    "mom": int(pr.get("mom", 0) or 0),
+                })
+                break
+
+    history.sort(key=lambda x: x.get("timestamp", 0), reverse=True)
+    if not history:
+        print(f"[ANALYTICS] Jogador sem dados suficientes: {player_name}")
+
+    games = len(history)
+    ratings = [h["rating"] for h in history]
+    sofi = [h["sofi_rating"] for h in history]
+    goals = sum(h["goals"] for h in history)
+    assists = sum(h["assists"] for h in history)
+    shots = sum(h["shots"] for h in history)
+    tackles = sum(h["tackles_made"] for h in history)
+    saves = sum(h["saves"] for h in history)
+    clean_sheets = sum(h["clean_sheet"] for h in history)
+    moms = sum(1 for h in history if h.get("mom"))
+    reds = sum(h["red"] for h in history)
+
+    team_rating_avg = _avg([p.get("rating", 0) for p in players], 0)
+    team_goal_avg = _avg([p.get("goals_per_game", 0) for p in players], 0)
+    ranking = sorted(players, key=lambda p: float(p.get("rating", 0) or 0), reverse=True)
+    rank_position = next((i + 1 for i, p in enumerate(ranking) if p.get("name") == player.get("name")), None)
+
+    recent_asc = sorted(history[:8], key=lambda x: x.get("timestamp", 0))
+    first_half = recent_asc[:max(1, len(recent_asc)//2)]
+    second_half = recent_asc[max(1, len(recent_asc)//2):]
+    delta = _avg([h["sofi_rating"] for h in second_half], 0) - _avg([h["sofi_rating"] for h in first_half], 0) if len(recent_asc) >= 4 else 0
+    trend = "subindo" if delta >= 0.25 else "caindo" if delta <= -0.25 else "estavel"
+
+    best_match = max(history, key=lambda h: h["sofi_rating"], default=None)
+    worst_match = min(history, key=lambda h: h["sofi_rating"], default=None)
+    by_opp = {}
+    for h in history:
+        by_opp.setdefault(h.get("opponent") or "Adversario", []).append(h["sofi_rating"])
+    opponent_perf = [{"opponent": opp, "games": len(vals), "avg_sofi": round(sum(vals) / len(vals), 2)} for opp, vals in by_opp.items()]
+
+    offensive_impact = goals * 8 + assists * 6 + shots * 1.2
+    defensive_impact = tackles * 2 + _avg([h["tackle_pct"] for h in history], 0) * 0.2 + clean_sheets * 4 + saves * 3
+    consistency_std = pstdev(sofi) if len(sofi) > 1 else 0
+    consistency = max(0, 100 - consistency_std * 18)
+    regularity = _safe_pct(sum(1 for r in ratings if r >= 7), games)
+    clutch = moms * 8 + sum((h["goals"] + h["assists"]) * 3 for h in history if h.get("result") == "V")
+    risk = reds * 12 + sum(1 for r in ratings if r < 6) * 4
+    analytic_score = min(30, _avg(sofi, 0) * 3) + min(18, offensive_impact / max(games, 1) * 1.5) + min(16, defensive_impact / max(games, 1)) + min(16, consistency / 6.25) + min(12, regularity / 8.3) + min(12, clutch / max(games, 1) * 2) - min(12, risk / max(games, 1))
+    analytic_score = round(max(0, min(100, analytic_score)), 1)
+
+    radar = {
+        "Finalizacao": round(min(100, (goals / max(games, 1)) * 45 + (shots / max(games, 1)) * 8), 1),
+        "Criacao": round(min(100, (assists / max(games, 1)) * 55 + _avg([h["pass_pct"] for h in history], 0) * 0.25), 1),
+        "Passe": round(min(100, _avg([h["pass_pct"] for h in history], player.get("pass_pct", 0))), 1),
+        "Defesa": round(min(100, (tackles / max(games, 1)) * 18 + _avg([h["tackle_pct"] for h in history], 0) * 0.45 + saves * 2), 1),
+        "Consistencia": round(consistency, 1),
+        "Decisao": round(min(100, regularity * 0.45 + clutch * 2), 1),
+    }
+
+    analytics = {
+        "player": player,
+        "games_with_history": games,
+        "history": history[:20],
+        "series": list(reversed(history[:20])),
+        "averages": {
+            "rating": _avg(ratings, player.get("rating", 0)), "sofi_rating": _avg(sofi, player.get("rating", 0)),
+            "goals_per_game": round(goals / max(games, 1), 2), "assists_per_game": round(assists / max(games, 1), 2),
+            "shots_per_game": round(shots / max(games, 1), 2), "passes_pct": _avg([h["pass_pct"] for h in history], player.get("pass_pct", 0)),
+            "tackle_pct": _avg([h["tackle_pct"] for h in history], player.get("tackle_pct", 0)), "tackles_per_game": round(tackles / max(games, 1), 2),
+            "saves_per_game": round(saves / max(games, 1), 2),
+        },
+        "totals": {"goals": goals, "assists": assists, "shots": shots, "tackles": tackles, "moms": moms, "red_cards": reds, "clean_sheets": clean_sheets, "saves": saves},
+        "advanced": {"offensive_impact": round(offensive_impact, 1), "defensive_impact": round(defensive_impact, 1), "consistency": round(consistency, 1), "regularity": regularity, "clutch_score": round(clutch, 1), "risk": round(risk, 1), "analytic_score": analytic_score, "radar": radar},
+        "ranking": {"position": rank_position, "total_players": len(players), "rating_rank_label": f"{rank_position}/{len(players)}" if rank_position else "-"},
+        "team_comparison": {"team_avg_rating": team_rating_avg, "player_vs_team_rating": round(float(player.get("rating", 0) or 0) - team_rating_avg, 2), "team_avg_goals_per_game": team_goal_avg, "player_vs_team_goals_per_game": round(float(player.get("goals_per_game", 0) or 0) - team_goal_avg, 2)},
+        "trend": {"status": trend, "delta_recent_sofi": round(delta, 2)},
+        "best_match": best_match,
+        "worst_match": worst_match,
+        "best_opponent": max(opponent_perf, key=lambda x: x["avg_sofi"], default=None),
+        "worst_opponent": min(opponent_perf, key=lambda x: x["avg_sofi"], default=None),
+        "heatmap": build_estimated_heatmap(player, history),
+        "scout_report": None,
+    }
+    analytics["scout_report"] = generate_player_scout_report_offline(analytics)
+    return analytics
+
+
+def generate_player_scout_report_offline(analytics):
+    p = analytics["player"]
+    avg = analytics["averages"]
+    adv = analytics["advanced"]
+    totals = analytics["totals"]
+    trend = analytics["trend"]["status"]
+    profile = _position_profile(p.get("position"))
+    strengths = []
+    weaknesses = []
+    if avg["rating"] >= 7.5:
+        strengths.append(f"Nota media alta ({avg['rating']}) e presenca confiavel.")
+    if adv["regularity"] >= 70:
+        strengths.append(f"Regularidade forte: {adv['regularity']}% dos jogos com rating >= 7.")
+    if totals["goals"] or totals["assists"]:
+        strengths.append(f"Impacto ofensivo direto: {totals['goals']} gols e {totals['assists']} assistencias.")
+    if avg["passes_pct"] >= 75:
+        strengths.append(f"Boa seguranca na circulacao: {avg['passes_pct']}% de passes.")
+    if totals["tackles"] or totals["saves"] or totals["clean_sheets"]:
+        strengths.append("Contribuicao defensiva relevante para o perfil da posicao.")
+    if adv["risk"] > 10:
+        weaknesses.append("Risco competitivo acima do ideal por cartoes ou notas baixas.")
+    if adv["consistency"] < 65:
+        weaknesses.append("Oscilacao de notas acima do desejado; precisa estabilizar desempenho.")
+    if avg["passes_pct"] and avg["passes_pct"] < 65:
+        weaknesses.append("Eficiencia de passe pode limitar a construcao.")
+    if not strengths:
+        strengths.append("Boa base estatistica, mas ainda sem destaque dominante no recorte disponivel.")
+    if not weaknesses:
+        weaknesses.append("Sem alerta grave; foco principal e manter constancia e tomada de decisao.")
+    tactical = {
+        "GK": "Goleiro de reacao, priorizando seguranca, reposicao curta e protecao de clean sheet.",
+        "DEF": "Defensor de cobertura, com foco em antecipacao, linha compacta e saida simples.",
+        "MID": "Meio-campista de conexao, ideal para dar ritmo, apoiar pressao e criar superioridade pelo passe.",
+        "FWD": "Atacante de decisao, procurando volume de finalizacoes e participacao direta no ultimo terco.",
+    }.get(profile, "Jogador de apoio tatico, util para equilibrar posse, pressao e transicao.")
+    return f"""## Perfil do jogador
+{p['name']} atua como {p.get('position', '-')}, com nota analitica final de **{adv['analytic_score']}/100** e media EA de **{avg['rating']}** nas partidas com historico.
+
+## Pontos fortes
+{chr(10).join(f'- {x}' for x in strengths)}
+
+## Pontos fracos
+{chr(10).join(f'- {x}' for x in weaknesses)}
+
+## Tendencia recente
+O momento recente esta **{trend}** (variacao sofi: {analytics['trend']['delta_recent_sofi']}).
+
+## Funcao tatica ideal
+{tactical}
+
+## Comparacao com elenco
+Ranking por nota: **{analytics['ranking']['rating_rank_label']}**. Diferenca para media do elenco: **{analytics['team_comparison']['player_vs_team_rating']}** pontos de rating.
+
+## Recomendacao pratica
+Priorize treinos e chamadas que maximizem os pontos fortes acima. Em jogos grandes, use o jogador em funcoes que reduzam risco e aumentem participacao nas zonas fortes do mapa estimado.
+"""
+
+@app.post("/api/ai/player")
+async def ai_player(player_name: str):
+    """Analise de jogador por IA usando o pacote analitico completo."""
+    cache = load_cache()
+    if not cache or not cache.get("players"):
+        raise HTTPException(404, "Sincronize um clube primeiro")
+
+    analytics = build_player_analytics(player_name, cache)
+    player = analytics["player"]
+
+    if not OPENAI_API_KEY:
+        analysis = generate_player_scout_report_offline(analytics)
+    else:
+        try:
+            from openai import OpenAI
+            client = OpenAI(api_key=OPENAI_API_KEY)
+            prompt = f"""Analise o jogador de futebol abaixo do EA FC Pro Clubs e gere um relatorio scout profissional em portugues.
+
+Dados analiticos JSON:
+{json.dumps(analytics, ensure_ascii=False, indent=2, default=str)}
+
+Responda em markdown com:
+## Perfil do jogador
+## Pontos fortes
+## Pontos fracos
+## Tendencia recente
+## Funcao tatica ideal
+## Comparacao com elenco
+## Recomendacao pratica
+"""
+            resp = client.chat.completions.create(
+                model=OPENAI_MODEL,
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.7,
+            )
+            analysis = resp.choices[0].message.content
+        except Exception as e:
+            print(f"[AI] Falha ao gerar analise OpenAI para {player_name}: {e}")
+            analysis = generate_player_scout_report_offline(analytics)
+
+    return {"player": player, "analytics": analytics, "analysis": analysis}
+
+def generate_player_analysis_offline(p):
+    """Análise offline baseada em estatísticas"""
+    rating = p['rating']
+    
+    if rating >= 8: nivel = "EXCELENTE ⭐⭐⭐⭐⭐"
+    elif rating >= 7.5: nivel = "MUITO BOM ⭐⭐⭐⭐"
+    elif rating >= 7: nivel = "BOM ⭐⭐⭐"
+    elif rating >= 6.5: nivel = "REGULAR ⭐⭐"
+    else: nivel = "PRECISA MELHORAR ⭐"
+    
+    pontos_fortes = []
+    pontos_fracos = []
+    
+    if p['pass_pct'] >= 75: pontos_fortes.append(f"Excelente precisão de passes ({p['pass_pct']}%)")
+    elif p['pass_pct'] < 60: pontos_fracos.append(f"Precisão de passes baixa ({p['pass_pct']}%)")
+    
+    if p['tackle_pct'] >= 50: pontos_fortes.append(f"Bom em divididas ({p['tackle_pct']}%)")
+    elif p['tackle_pct'] < 30: pontos_fracos.append(f"Divididas precisam melhorar ({p['tackle_pct']}%)")
+    
+    if p['goals_per_game'] >= 0.5: pontos_fortes.append(f"Artilheiro ({p['goals_per_game']} gols/jogo)")
+    if p['mom'] >= 3: pontos_fortes.append(f"Decisivo: {p['mom']} MOMs")
+    
+    if not pontos_fortes: pontos_fortes.append("Atuação consistente")
+    if not pontos_fracos: pontos_fracos.append("Continue evoluindo")
+    
+    return f"""## 📊 Análise: {p['name']}
+
+**Posição:** {p['position']} | **Jogos:** {p['games']} | **Nível:** {nivel}
+
+## ✅ Pontos Fortes
+{chr(10).join(f'- {pf}' for pf in pontos_fortes)}
+
+## ⚠️ Pontos a Melhorar
+{chr(10).join(f'- {pf}' for pf in pontos_fracos)}
+
+## 🎯 Recomendação Tática
+{'Mantenha a regularidade. Jogador essencial para o time.' if rating >= 7.5 else 'Trabalhe consistência e participação ofensiva.'}
+
+## 🏆 Nota Geral
+**{rating}/10**
+"""
+
+
+@app.get("/api/ai/team")
+async def ai_team():
+    """Análise do time ideal"""
+    cache = load_cache()
+    if not cache or not cache.get("ideal_team"):
+        raise HTTPException(404, "Sincronize um clube primeiro")
+    
+    ideal = cache["ideal_team"]
+    
+    text = f"""## 🏆 Time Ideal — Formação {ideal['formation']}
+
+### Escalação
+"""
+    for p in ideal["players"]:
+        text += f"- **{p['field_pos']}** — {p['name']} (Nota: {p['rating']})\n"
+    
+    text += f"""
+### 📋 Análise Tática
+
+A formação **{ideal['formation']}** foi escolhida com base no elenco disponível, priorizando os jogadores com melhor desempenho em cada posição.
+
+### 🎯 Pontos Fortes
+- Equilíbrio entre defesa e ataque
+- Aproveitamento dos jogadores em melhor fase
+- Distribuição tática otimizada
+
+### ⚡ Recomendações
+- Manter intensidade no meio-campo
+- Aproveitar laterais para ataques rápidos
+- Pressão alta na recuperação de bola
+"""
+    return {"team": ideal, "analysis": text}
+
+
+# ============================================================
+# JOGADOR - DETALHES E HISTORICO
+# ============================================================
+
+@app.get("/api/player/{player_name}/analytics")
+def get_player_analytics(player_name: str):
+    """Retorna analytics profissional completo do jogador."""
+    cache = load_cache()
+    return build_player_analytics(player_name, cache)
+
+
+@app.get("/api/player/{player_name}")
+def get_player_detail(player_name: str):
+    """Retorna jogador + ultimas 20 partidas dele com nota sofisticada"""
+    cache = load_cache()
+    if not cache or not cache.get("players"):
+        raise HTTPException(404, "Sincronize um clube primeiro")
+
+    pname = player_name.strip().lower()
+    player = next((p for p in cache["players"] if p["name"].lower() == pname), None)
+    if not player:
+        raise HTTPException(404, f"Jogador '{player_name}' nao encontrado")
+
+    # Coleta histórico em todas as partidas
+    history = []
+    for m in cache.get("matches", []):
+        for pr in (m.get("players_ratings") or []):
+            if pr["name"].lower() == pname:
+                history.append({
+                    "match_id": m.get("match_id"),
+                    "opponent": m.get("opponent"),
+                    "date": m.get("date"),
+                    "timestamp": m.get("timestamp"),
+                    "score": m.get("score"),
+                    "result": m.get("result"),
+                    "match_type": m.get("match_type", "liga"),
+                    "position": pr.get("pos"),
+                    "rating": pr.get("rating"),
+                    "sofi_rating": pr.get("sofi_rating", pr.get("rating")),
+                    "goals": pr.get("goals", 0),
+                    "assists": pr.get("assists", 0),
+                    "shots": pr.get("shots", 0),
+                    "pass_pct": pr.get("pass_pct", 0),
+                    "tackle_pct": pr.get("tackle_pct", 0),
+                    "saves": pr.get("saves", 0),
+                    "mom": pr.get("mom", 0),
+                })
+                break
+
+    # Ordena por data desc e pega 20
+    history.sort(key=lambda x: x.get("timestamp", 0), reverse=True)
+    history = history[:20]
+
+    # Estatisticas agregadas do historico
+    h_stats = {"games": len(history), "goals": 0, "assists": 0, "avg_rating": 0, "avg_sofi": 0, "moms": 0}
+    if history:
+        h_stats["goals"] = sum(h["goals"] for h in history)
+        h_stats["assists"] = sum(h["assists"] for h in history)
+        h_stats["avg_rating"] = round(sum(float(h["rating"]) for h in history) / len(history), 2)
+        h_stats["avg_sofi"] = round(sum(float(h["sofi_rating"]) for h in history) / len(history), 2)
+        h_stats["moms"] = sum(1 for h in history if h.get("mom"))
+
+    return {"player": player, "history": history, "history_stats": h_stats}
+
+
+# ============================================================
+# AGENDA - CRUD
+# ============================================================
+
+class AgendaItem(BaseModel):
+    opponent: str
+    match_date: str  # YYYY-MM-DD
+    match_time: Optional[str] = None  # HH:MM
+    match_type: str = "liga"  # liga | copa | amistoso
+    location: Optional[str] = None
+    notes: Optional[str] = None
+
+
+@app.get("/api/agenda")
+def list_agenda():
+    conn = sqlite3.connect(DB_FILE)
+    conn.row_factory = sqlite3.Row
+    rows = conn.execute(
+        "SELECT id, opponent, match_date, match_time, match_type, location, notes "
+        "FROM agenda ORDER BY match_date ASC, match_time ASC"
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+@app.post("/api/agenda")
+def create_agenda(item: AgendaItem):
+    conn = sqlite3.connect(DB_FILE)
+    cur = conn.execute(
+        "INSERT INTO agenda (opponent, match_date, match_time, match_type, location, notes) "
+        "VALUES (?,?,?,?,?,?)",
+        (item.opponent, item.match_date, item.match_time, item.match_type, item.location, item.notes)
+    )
+    new_id = cur.lastrowid
+    conn.commit()
+    conn.close()
+    return {"id": new_id, **item.dict()}
+
+
+@app.put("/api/agenda/{item_id}")
+def update_agenda(item_id: int, item: AgendaItem):
+    conn = sqlite3.connect(DB_FILE)
+    res = conn.execute(
+        "UPDATE agenda SET opponent=?, match_date=?, match_time=?, match_type=?, location=?, notes=? WHERE id=?",
+        (item.opponent, item.match_date, item.match_time, item.match_type, item.location, item.notes, item_id)
+    )
+    if res.rowcount == 0:
+        conn.close()
+        raise HTTPException(404, "Agendamento nao encontrado")
+    conn.commit()
+    conn.close()
+    return {"id": item_id, **item.dict()}
+
+
+@app.delete("/api/agenda/{item_id}")
+def delete_agenda(item_id: int):
+    conn = sqlite3.connect(DB_FILE)
+    res = conn.execute("DELETE FROM agenda WHERE id=?", (item_id,))
+    if res.rowcount == 0:
+        conn.close()
+        raise HTTPException(404, "Agendamento nao encontrado")
+    conn.commit()
+    conn.close()
+    return {"deleted": item_id}
+
+
+# ============================================================
+# FRONTEND HTML
+# ============================================================
+
+@app.get("/", response_class=HTMLResponse)
+def home():
+    return HTMLResponse(content=render_html())
+
+
+def render_html() -> str:
+    return r"""<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Scout Clubs Pro - Análise EA FC</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<style>
+:root {
+  --green: #00FF73;
+  --green-dim: #00ff7333;
+  --green-glow: #00ff7366;
+  --bg: #000000;
+  --bg-2: #0a0a0a;
+  --bg-3: #111111;
+  --bg-card: #0d0d0d;
+  --border: #1a1a1a;
+  --border-2: #222;
+  --text: #ffffff;
+  --text-2: #888;
+  --text-3: #555;
+  --red: #ff3344;
+  --yellow: #ffaa00;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  font-family: 'Inter', sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  min-height: 100vh;
+  overflow-x: hidden;
+}
+
+/* HEADER */
+.header {
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg);
+  position: relative;
+  z-index: 50;
+}
+
+.header-inner {
+  max-width: 1400px;
+  margin: 0 auto;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.logo {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.logo-icon {
+  width: 40px;
+  height: 40px;
+  border: 2px solid var(--green);
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 20px;
+}
+
+.logo-text {
+  font-size: 18px;
+  font-weight: 800;
+  letter-spacing: 1px;
+}
+
+.logo-text span {
+  color: var(--green);
+}
+
+.logo-sub {
+  font-size: 9px;
+  color: var(--text-3);
+  letter-spacing: 3px;
+  text-transform: uppercase;
+}
+
+.btn-sync {
+  background: var(--bg-3);
+  border: 1px solid var(--border-2);
+  color: var(--green);
+  padding: 8px 14px;
+  border-radius: 8px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  transition: all 0.2s;
+}
+
+.btn-sync:hover {
+  background: var(--green-dim);
+  border-color: var(--green);
+}
+
+/* CLUB CARD */
+.club-card {
+  max-width: 1400px;
+  margin: 20px auto;
+  padding: 0 20px;
+}
+
+.club-info {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 20px;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.club-shield {
+  width: 60px;
+  height: 60px;
+  background: var(--bg-3);
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 28px;
+  border: 1px solid var(--border-2);
+}
+
+.club-name {
+  font-size: 22px;
+  font-weight: 800;
+  letter-spacing: 1px;
+}
+
+.club-meta {
+  font-size: 12px;
+  color: var(--text-2);
+  margin-top: 2px;
+}
+
+/* TABS */
+.tabs {
+  max-width: 1400px;
+  margin: 0 auto;
+  padding: 10px 20px;
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  scrollbar-width: none;
+  border: 1px solid var(--border);
+  border-radius: 50px;
+  margin: 20px 20px;
+  background: var(--bg-card);
+}
+
+.tabs::-webkit-scrollbar { display: none; }
+
+.tab {
+  padding: 10px 18px;
+  border-radius: 30px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 1.5px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.2s;
+  color: var(--text-3);
+  text-transform: uppercase;
+}
+
+.tab.active {
+  background: var(--green-dim);
+  color: var(--green);
+  text-shadow: 0 0 10px var(--green);
+}
+
+.tab:hover:not(.active) {
+  color: var(--text);
+}
+
+/* PERIOD FILTER */
+.period-filter {
+  max-width: 1400px;
+  margin: 0 auto 20px;
+  padding: 0 20px;
+  display: flex;
+  gap: 10px;
+}
+
+.period {
+  padding: 6px 16px;
+  border-radius: 20px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 1.5px;
+  border: 1px solid var(--border-2);
+  background: transparent;
+  color: var(--text-3);
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.period.active {
+  border-color: var(--green);
+  background: var(--green-dim);
+  color: var(--green);
+}
+
+/* CONTAINER */
+.container {
+  max-width: 1400px;
+  margin: 0 auto;
+  padding: 0 20px 40px;
+}
+
+.tab-content {
+  display: none;
+}
+
+.tab-content.active {
+  display: block;
+}
+
+/* STATS GRID */
+.stats-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+  margin-bottom: 20px;
+}
+
+.stat-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 24px 16px;
+  text-align: center;
+  position: relative;
+  overflow: hidden;
+  transition: all 0.3s;
+}
+
+.stat-card:hover {
+  border-color: var(--green);
+  transform: translateY(-2px);
+}
+
+.stat-card.highlight {
+  border-color: var(--green);
+  background: linear-gradient(180deg, var(--green-dim) 0%, transparent 100%);
+}
+
+.stat-value {
+  font-size: 38px;
+  font-weight: 800;
+  letter-spacing: -1px;
+  line-height: 1;
+  margin-bottom: 8px;
+}
+
+.stat-value.green { color: var(--green); }
+.stat-value.red { color: var(--red); }
+.stat-value.yellow { color: var(--yellow); }
+.stat-value.compound {
+  font-size: 32px;
+  display: flex;
+  justify-content: center;
+  gap: 6px;
+}
+
+.stat-label {
+  font-size: 10px;
+  color: var(--text-2);
+  letter-spacing: 2px;
+  text-transform: uppercase;
+}
+
+/* CIRCULAR CHARTS */
+.circles-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+  margin-bottom: 20px;
+}
+
+.circle-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.circle-svg {
+  width: 130px;
+  height: 130px;
+  position: relative;
+}
+
+.circle-svg svg {
+  transform: rotate(-90deg);
+}
+
+.circle-bg {
+  fill: none;
+  stroke: var(--border-2);
+  stroke-width: 8;
+}
+
+.circle-progress {
+  fill: none;
+  stroke: var(--green);
+  stroke-width: 8;
+  stroke-linecap: round;
+  filter: drop-shadow(0 0 8px var(--green));
+  transition: stroke-dasharray 1s ease;
+}
+
+.circle-text {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  font-size: 22px;
+  font-weight: 800;
+  color: var(--green);
+}
+
+.circle-label {
+  margin-top: 12px;
+  font-size: 11px;
+  color: var(--text-2);
+  letter-spacing: 2px;
+  text-transform: uppercase;
+}
+
+/* MVP CARD */
+.mvp-card {
+  background: var(--bg-card);
+  border: 1px solid var(--green);
+  border-radius: 16px;
+  padding: 24px;
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  margin-bottom: 20px;
+  position: relative;
+  overflow: hidden;
+}
+
+.mvp-card::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--green), transparent);
+}
+
+.mvp-rating {
+  font-size: 56px;
+  font-weight: 900;
+  color: var(--green);
+  text-shadow: 0 0 20px var(--green);
+  line-height: 1;
+}
+
+.mvp-info { flex: 1; }
+.mvp-name {
+  font-size: 22px;
+  font-weight: 800;
+  letter-spacing: 1px;
+}
+.mvp-meta {
+  font-size: 11px;
+  color: var(--text-2);
+  margin-top: 4px;
+  letter-spacing: 1px;
+}
+
+.mvp-stats {
+  display: flex;
+  gap: 20px;
+  margin-top: 12px;
+}
+
+.mvp-stat {
+  text-align: center;
+}
+
+.mvp-stat-value {
+  font-size: 18px;
+  font-weight: 700;
+}
+
+.mvp-stat-label {
+  font-size: 9px;
+  color: var(--text-2);
+  letter-spacing: 1.5px;
+  margin-top: 2px;
+  text-transform: uppercase;
+}
+
+.mvp-badge {
+  position: absolute;
+  top: 12px;
+  right: 16px;
+  font-size: 10px;
+  letter-spacing: 3px;
+  color: var(--green);
+}
+
+/* SECTION TITLE */
+.section-title {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--green);
+  letter-spacing: 3px;
+  text-transform: uppercase;
+  margin: 30px 0 14px;
+}
+
+/* OPPONENTS LIST */
+.opponents-list {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  overflow: hidden;
+}
+
+.opp-row {
+  padding: 14px 20px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border-bottom: 1px solid var(--border);
+}
+
+.opp-row:last-child { border-bottom: none; }
+
+.opp-name {
+  font-weight: 700;
+  letter-spacing: 1px;
+}
+
+.opp-name-small {
+  color: var(--text-3);
+  font-size: 11px;
+  margin-left: 6px;
+}
+
+.opp-stats {
+  display: flex;
+  gap: 30px;
+}
+
+.opp-stat {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+}
+
+.opp-stat-val {
+  font-size: 16px;
+  font-weight: 700;
+}
+.opp-stat-val.green { color: var(--green); }
+.opp-stat-val.red { color: var(--red); }
+.opp-stat-label {
+  font-size: 9px;
+  color: var(--text-3);
+  letter-spacing: 1px;
+}
+
+/* PERFORMANCE BARS */
+.perf-bars {
+  display: flex;
+  gap: 8px;
+  align-items: flex-end;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 24px 16px;
+  height: 200px;
+  overflow-x: auto;
+}
+
+.perf-bar {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-width: 50px;
+  height: 100%;
+  justify-content: flex-end;
+}
+
+.perf-bar-bar {
+  width: 36px;
+  border-radius: 8px 8px 4px 4px;
+  margin-bottom: 8px;
+  transition: all 0.3s;
+}
+
+.perf-bar.win .perf-bar-bar { background: var(--green); box-shadow: 0 0 10px var(--green); }
+.perf-bar.draw .perf-bar-bar { background: var(--yellow); }
+.perf-bar.loss .perf-bar-bar { background: var(--red); }
+
+.perf-bar-score {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 1px;
+}
+
+.perf-bar-date {
+  font-size: 8px;
+  color: var(--text-3);
+  margin-top: 2px;
+}
+
+/* PLAYERS GRID */
+.players-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 12px;
+}
+
+.player-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 20px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.player-card:hover {
+  border-color: var(--green);
+  transform: translateY(-2px);
+}
+
+.player-rating-big {
+  font-size: 38px;
+  font-weight: 800;
+  color: var(--green);
+  text-align: center;
+  text-shadow: 0 0 15px var(--green);
+  line-height: 1;
+}
+
+.player-pos {
+  text-align: center;
+  margin: 6px 0;
+}
+
+.player-pos-badge {
+  display: inline-block;
+  background: var(--green-dim);
+  color: var(--green);
+  padding: 3px 10px;
+  border-radius: 4px;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 1.5px;
+}
+
+.player-name {
+  text-align: center;
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  margin: 8px 0 12px;
+  text-transform: uppercase;
+}
+
+.player-stats {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  border-top: 1px solid var(--border);
+  padding-top: 12px;
+}
+
+.player-stat {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11px;
+}
+
+.player-stat-label {
+  color: var(--text-3);
+}
+
+.player-stat-val {
+  color: var(--green);
+  font-weight: 700;
+}
+
+/* MATCHES LIST */
+.matches-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.match-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 14px 18px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.match-card:hover {
+  border-color: var(--green);
+}
+
+.match-opp {
+  font-weight: 700;
+  letter-spacing: 1px;
+  font-size: 14px;
+}
+
+.match-mom {
+  font-size: 10px;
+  color: var(--text-2);
+  margin-top: 4px;
+  letter-spacing: 1px;
+}
+
+.match-mom strong {
+  color: var(--green);
+}
+
+.match-results {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+.match-badge {
+  padding: 4px 10px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  border: 1px solid;
+}
+
+.match-badge.v {
+  color: var(--green);
+  border-color: var(--green-dim);
+  background: var(--green-dim);
+}
+
+.match-badge.e {
+  color: var(--yellow);
+  border-color: rgba(255,170,0,0.3);
+  background: rgba(255,170,0,0.1);
+}
+
+.match-badge.d {
+  color: var(--red);
+  border-color: rgba(255,51,68,0.3);
+  background: rgba(255,51,68,0.1);
+}
+
+.match-score {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--text);
+}
+
+/* FORMATION FIELD */
+.formation-wrapper {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 20px;
+  margin-bottom: 20px;
+}
+
+.formation-title {
+  text-align: center;
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 3px;
+  color: var(--green);
+  margin-bottom: 16px;
+  text-transform: uppercase;
+}
+
+.field {
+  position: relative;
+  background:
+    radial-gradient(ellipse at center, rgba(0,255,115,0.05) 0%, transparent 70%),
+    linear-gradient(180deg, #001a0d 0%, #000 100%);
+  border: 2px solid var(--green-dim);
+  border-radius: 12px;
+  height: 600px;
+  margin: 0 auto;
+  max-width: 480px;
+  overflow: hidden;
+}
+
+.field::before, .field::after {
+  content: '';
+  position: absolute;
+  border: 1px solid var(--green-dim);
+  left: 50%;
+  transform: translateX(-50%);
+  width: 60%;
+}
+
+.field::before {
+  top: 0;
+  height: 80px;
+  border-top: none;
+  border-radius: 0 0 8px 8px;
+}
+
+.field::after {
+  bottom: 0;
+  height: 80px;
+  border-bottom: none;
+  border-radius: 8px 8px 0 0;
+}
+
+.field-line {
+  position: absolute;
+  top: 50%;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: var(--green-dim);
+}
+
+.field-circle {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 80px;
+  height: 80px;
+  border: 1px solid var(--green-dim);
+  border-radius: 50%;
+}
+
+.player-on-field {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.player-circle {
+  width: 50px;
+  height: 50px;
+  border: 2px solid var(--green);
+  border-radius: 50%;
+  background: rgba(0,0,0,0.7);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--green);
+  font-size: 14px;
+  font-weight: 700;
+  text-shadow: 0 0 8px var(--green);
+  box-shadow: 0 0 15px var(--green-glow);
+}
+
+.player-circle-name {
+  font-size: 9px;
+  color: var(--text);
+  margin-top: 4px;
+  text-align: center;
+  background: rgba(0,0,0,0.6);
+  padding: 1px 6px;
+  border-radius: 4px;
+  white-space: nowrap;
+  letter-spacing: 0.5px;
+}
+
+.formation-label {
+  text-align: center;
+  margin-top: 16px;
+  color: var(--text-2);
+  font-size: 11px;
+  letter-spacing: 2px;
+}
+
+/* MODAL */
+.modal-bg {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.85);
+  z-index: 1000;
+  backdrop-filter: blur(8px);
+  animation: fadeIn 0.2s;
+}
+
+.modal-bg.active { display: flex; align-items: center; justify-content: center; padding: 20px; }
+
+.modal-box {
+  background: var(--bg-2);
+  border: 1px solid var(--green-dim);
+  border-radius: 16px;
+  padding: 28px;
+  max-width: 980px;
+  width: 100%;
+  max-height: 85vh;
+  overflow-y: auto;
+  overflow-x: hidden;
+  box-shadow: 0 0 40px var(--green-dim);
+  animation: slideUp 0.3s;
+}
+
+.modal-close {
+  float: right;
+  background: var(--bg-3);
+  border: 1px solid var(--border-2);
+  color: var(--text);
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  cursor: pointer;
+  font-size: 18px;
+}
+
+.modal-content {
+  margin-top: 10px;
+  line-height: 1.7;
+}
+
+.modal-content h2 { font-size: 18px; color: var(--green); margin: 12px 0 8px; }
+.modal-content h3 { font-size: 15px; margin: 14px 0 6px; color: var(--green); }
+.modal-content p { margin-bottom: 10px; color: var(--text-2); }
+.modal-content strong { color: var(--green); }
+.modal-content ul { padding-left: 20px; margin-bottom: 10px; }
+.modal-content li { color: var(--text-2); margin-bottom: 4px; }
+
+@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+@keyframes slideUp { from { transform: translateY(20px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+
+/* SYNC PROGRESS */
+.sync-progress {
+  display: none;
+  background: var(--bg-card);
+  border: 2px solid var(--green);
+  border-radius: 16px;
+  padding: 24px;
+  margin: 20px;
+  box-shadow: 0 0 30px var(--green-glow);
+}
+
+.sync-progress.active { display: block; }
+
+.sync-title {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--green);
+  margin-bottom: 4px;
+  letter-spacing: 1px;
+}
+
+.sync-step {
+  font-size: 11px;
+  color: var(--text-2);
+  margin-bottom: 14px;
+  letter-spacing: 1px;
+}
+
+.sync-progress-bar {
+  height: 6px;
+  background: var(--border-2);
+  border-radius: 3px;
+  overflow: hidden;
+  margin-bottom: 14px;
+}
+
+.sync-progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--green), #00cc5c);
+  border-radius: 3px;
+  width: 0%;
+  transition: width 0.4s;
+  box-shadow: 0 0 10px var(--green);
+}
+
+.sync-log {
+  background: #000;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 14px;
+  max-height: 200px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.sync-log-line {
+  color: var(--green);
+  margin-bottom: 2px;
+}
+
+/* EMPTY STATE */
+.empty-state {
+  text-align: center;
+  padding: 100px 20px;
+}
+
+.empty-icon {
+  font-size: 80px;
+  margin-bottom: 20px;
+  filter: drop-shadow(0 0 15px var(--green));
+}
+
+.empty-title {
+  font-size: 24px;
+  font-weight: 700;
+  margin-bottom: 8px;
+}
+
+.empty-text {
+  color: var(--text-2);
+  margin-bottom: 20px;
+}
+
+.btn-primary {
+  background: var(--green);
+  color: #000;
+  border: none;
+  padding: 12px 24px;
+  border-radius: 8px;
+  font-weight: 700;
+  cursor: pointer;
+  font-size: 14px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  box-shadow: 0 0 20px var(--green-glow);
+}
+
+/* LOADING */
+.loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 60px 20px;
+  color: var(--text-2);
+}
+
+.spinner {
+  width: 40px;
+  height: 40px;
+  border: 3px solid var(--border-2);
+  border-top-color: var(--green);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+  margin-right: 16px;
+}
+
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* CONFRONTS */
+.confronts-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 12px;
+}
+
+.confront-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 16px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.confront-name {
+  font-weight: 700;
+  letter-spacing: 1px;
+  font-size: 14px;
+}
+
+.confront-vs {
+  display: flex;
+  gap: 8px;
+}
+
+.vs-tag {
+  padding: 4px 10px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  border: 1px solid;
+}
+
+.vs-tag.v { color: var(--green); border-color: var(--green-dim); background: var(--green-dim); }
+.vs-tag.e { color: var(--yellow); border-color: rgba(255,170,0,0.3); background: rgba(255,170,0,0.1); }
+.vs-tag.d { color: var(--red); border-color: rgba(255,51,68,0.3); background: rgba(255,51,68,0.1); }
+
+/* COMPARAR */
+.compare-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 24px;
+  margin-top: 16px;
+}
+.compare-pick {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 16px;
+}
+.compare-pick select {
+  width: 100%;
+  padding: 10px 12px;
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  margin-bottom: 12px;
+  font-size: 14px;
+}
+.compare-bars {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 18px;
+  margin-top: 18px;
+}
+.compare-bar-row {
+  display: grid;
+  grid-template-columns: 80px 1fr 100px 1fr 80px;
+  align-items: center;
+  gap: 8px;
+  margin: 10px 0;
+  font-size: 12px;
+}
+.compare-bar-label {
+  text-align: center;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: var(--text-2);
+  font-size: 11px;
+}
+.compare-bar {
+  height: 16px;
+  background: rgba(0,255,115,0.08);
+  border-radius: 4px;
+  position: relative;
+  overflow: hidden;
+}
+.compare-bar.left .fill { right: 0; }
+.compare-bar.right .fill { left: 0; }
+.compare-bar .fill {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  background: var(--green);
+  box-shadow: 0 0 8px var(--green-glow);
+}
+.compare-bar-val {
+  font-weight: 700;
+  color: var(--text);
+}
+.compare-bar-val.left { text-align: right; }
+.compare-bar-val.right { text-align: left; }
+
+/* PLAYER DETAIL MODAL */
+.player-detail h2 { margin: 0 0 4px; }
+.player-detail .pos-tag {
+  display: inline-block;
+  padding: 4px 10px;
+  background: var(--green-dim);
+  color: var(--green);
+  border-radius: 6px;
+  font-size: 11px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  font-weight: 700;
+}
+.detail-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 10px;
+  margin: 16px 0 24px;
+}
+.detail-stat {
+  background: rgba(0,255,115,0.05);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px;
+  text-align: center;
+}
+.detail-stat .v { font-size: 20px; font-weight: 700; color: var(--green); }
+.detail-stat .l { font-size: 10px; text-transform: uppercase; color: var(--text-2); letter-spacing: 1px; }
+
+.history-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+  margin-top: 8px;
+}
+.history-table th {
+  text-align: left;
+  padding: 8px 6px;
+  border-bottom: 1px solid var(--border);
+  color: var(--text-2);
+  text-transform: uppercase;
+  font-size: 10px;
+  letter-spacing: 1px;
+}
+.history-table td {
+  padding: 8px 6px;
+  border-bottom: 1px solid rgba(255,255,255,0.04);
+}
+.history-table tr:hover { background: rgba(0,255,115,0.04); }
+.tag {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+}
+.tag.liga { background: rgba(0,255,115,0.1); color: var(--green); border: 1px solid var(--green-dim); }
+.tag.copa { background: rgba(255,170,0,0.1); color: var(--yellow); border: 1px solid rgba(255,170,0,0.3); }
+.tag.amistoso { background: rgba(120,120,120,0.15); color: var(--text-2); border: 1px solid var(--border); }
+.tag.v { background: rgba(0,255,115,0.15); color: var(--green); }
+.tag.e { background: rgba(255,170,0,0.15); color: var(--yellow); }
+.tag.d { background: rgba(255,51,68,0.15); color: var(--red); }
+.sofi {
+  font-weight: 800;
+  font-size: 14px;
+  color: var(--green);
+}
+
+.analytics-hero {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 18px;
+  align-items: center;
+  padding-bottom: 18px;
+  border-bottom: 1px solid var(--border);
+}
+.analytics-score {
+  width: 104px;
+  height: 104px;
+  border: 2px solid var(--green);
+  border-radius: 50%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  color: var(--green);
+  box-shadow: 0 0 20px var(--green-glow);
+}
+.analytics-score .num { font-size: 30px; font-weight: 900; line-height: 1; }
+.analytics-score .lab { font-size: 9px; letter-spacing: 1px; text-transform: uppercase; color: var(--text-2); }
+.analytics-cards {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(82px, 1fr));
+  gap: 8px;
+  margin: 16px 0;
+}
+.analytics-card {
+  background: rgba(0,255,115,0.05);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px;
+  text-align: center;
+}
+.analytics-card .v { font-size: 19px; font-weight: 800; color: var(--green); }
+.analytics-card .l { font-size: 9px; text-transform: uppercase; color: var(--text-2); letter-spacing: 1px; margin-top: 2px; }
+.analytics-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin: 16px 0;
+  width: 100%;
+  overflow: hidden;
+}
+.chart-box {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 12px;
+  height: 260px;
+  min-height: 260px;
+  max-height: 260px;
+  overflow: hidden;
+  position: relative;
+}
+.chart-box.wide {
+  grid-column: span 2;
+  height: 360px;
+  min-height: 360px;
+  max-height: 360px;
+}
+.chart-box canvas {
+  display: block;
+  width: 100% !important;
+  height: 210px !important;
+  max-height: 210px !important;
+}
+.chart-box.wide canvas {
+  height: 310px !important;
+  max-height: 310px !important;
+}
+.chart-title {
+  font-size: 10px;
+  color: var(--green);
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  margin-bottom: 8px;
+}
+.heatmap-wrap {
+  display: grid;
+  grid-template-columns: 260px 1fr;
+  gap: 14px;
+  align-items: stretch;
+}
+.heatmap-field {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  grid-template-rows: repeat(3, 1fr);
+  height: 360px;
+  border: 2px solid var(--green-dim);
+  border-radius: 12px;
+  overflow: hidden;
+  background: linear-gradient(180deg, #001a0d, #000);
+}
+.heat-zone {
+  border: 1px solid rgba(0,255,115,0.14);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: rgba(255,255,255,0.62);
+}
+.analytics-note {
+  color: var(--text-2);
+  font-size: 12px;
+  line-height: 1.6;
+}
+.mini-insights {
+  display: grid;
+  gap: 8px;
+}
+.mini-insight {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px;
+  background: rgba(255,255,255,0.02);
+}
+.mini-insight .k { color: var(--text-2); font-size: 10px; text-transform: uppercase; letter-spacing: 1px; }
+.mini-insight .v { color: var(--text); font-weight: 700; margin-top: 3px; }
+
+/* AGENDA */
+.agenda-form {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 16px;
+  margin-bottom: 16px;
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 10px;
+}
+.agenda-form input,
+.agenda-form select,
+.agenda-form textarea {
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px;
+  font-size: 13px;
+  font-family: inherit;
+}
+.agenda-form textarea { grid-column: span 6; min-height: 60px; resize: vertical; }
+.agenda-form .full { grid-column: span 6; display: flex; gap: 8px; justify-content: flex-end; }
+.agenda-list {
+  display: grid;
+  gap: 10px;
+}
+.agenda-row {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 14px 16px;
+  display: grid;
+  grid-template-columns: 100px 1fr auto auto;
+  align-items: center;
+  gap: 14px;
+}
+.agenda-date {
+  text-align: center;
+  background: rgba(0,255,115,0.1);
+  border: 1px solid var(--green-dim);
+  border-radius: 8px;
+  padding: 6px;
+}
+.agenda-date .d { font-size: 22px; font-weight: 800; color: var(--green); line-height: 1; }
+.agenda-date .m { font-size: 10px; text-transform: uppercase; letter-spacing: 1px; color: var(--text-2); margin-top: 2px; }
+.agenda-info .opp { font-size: 16px; font-weight: 700; }
+.agenda-info .meta { color: var(--text-2); font-size: 12px; margin-top: 2px; }
+.btn-mini {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: 6px 10px;
+  border-radius: 6px;
+  font-size: 11px;
+  cursor: pointer;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+.btn-mini:hover { border-color: var(--green); color: var(--green); }
+.btn-mini.danger:hover { border-color: var(--red); color: var(--red); }
+
+/* RESPONSIVE */
+@media (max-width: 768px) {
+  .stats-grid { grid-template-columns: repeat(2, 1fr); }
+  .stat-value { font-size: 28px; }
+  .mvp-rating { font-size: 42px; }
+  .field { height: 500px; }
+  .player-circle { width: 42px; height: 42px; font-size: 12px; }
+  .analytics-hero { grid-template-columns: 1fr; }
+  .analytics-cards { grid-template-columns: repeat(2, 1fr); }
+  .analytics-grid { grid-template-columns: 1fr; }
+  .chart-box.wide { grid-column: span 1; }
+  .heatmap-wrap { grid-template-columns: 1fr; }
+  .heatmap-field { height: 320px; }
+}
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div class="header-inner">
+    <div class="logo">
+      <div class="logo-icon">⚽</div>
+      <div>
+        <div class="logo-text">SCOUT <span>CLUBS</span></div>
+        <div class="logo-sub">Inteligência Esportiva</div>
+      </div>
+    </div>
+    <div style="display:flex;gap:8px;align-items:center;">
+      <input id="clubInput" type="text" placeholder="Nome do clube" value="DESAGREGADOS SC"
+        style="background:var(--bg-3);border:1px solid var(--border-2);color:var(--text);padding:8px 12px;border-radius:8px;font-size:13px;outline:none;width:180px;font-family:inherit;"
+        onkeydown="if(event.key==='Enter') startSync()">
+      <button class="btn-sync" onclick="startSync()">↻ Sincronizar</button>
+    </div>
+  </div>
+</div>
+
+<div id="syncProgress" class="sync-progress">
+  <div class="sync-title">🔄 Sincronizando dados do clube...</div>
+  <div class="sync-step" id="syncStep">Iniciando...</div>
+  <div class="sync-progress-bar">
+    <div class="sync-progress-fill" id="syncFill"></div>
+  </div>
+  <div class="sync-log" id="syncLog"></div>
+</div>
+
+<div id="content"></div>
+
+<div class="modal-bg" id="modal" onclick="if(event.target===this) closeModal()">
+  <div class="modal-box">
+    <button class="modal-close" onclick="closeModal()">×</button>
+    <div class="modal-content" id="modalContent"></div>
+  </div>
+</div>
+
+<script>
+let DATA = null;
+let CURRENT_TAB = 'visao';
+let CURRENT_PERIOD = 'todos';
+let COMPARE_A = null;
+let COMPARE_B = null;
+let AGENDA = [];
+let AGENDA_EDIT_ID = null;
+
+function filteredMatches() {
+  const all = (DATA && DATA.matches) ? [...DATA.matches] : [];
+  // Já vem ordenado por timestamp desc
+  if (CURRENT_PERIOD === 'todos') return all;
+  if (CURRENT_PERIOD === 'ult5') return all.slice(0, 5);
+  if (CURRENT_PERIOD === 'ult10') return all.slice(0, 10);
+  const now = Math.floor(Date.now() / 1000);
+  if (CURRENT_PERIOD === 'semana') {
+    const cutoff = now - 7 * 86400;
+    return all.filter(m => (m.timestamp || 0) >= cutoff);
+  }
+  if (CURRENT_PERIOD === 'mes') {
+    const cutoff = now - 30 * 86400;
+    return all.filter(m => (m.timestamp || 0) >= cutoff);
+  }
+  return all;
+}
+
+function setPeriod(p, ev) {
+  CURRENT_PERIOD = p;
+  document.querySelectorAll('.period').forEach(el => el.classList.remove('active'));
+  if (ev && ev.target) ev.target.classList.add('active');
+  renderTab();
+}
+
+async function loadData() {
+  try {
+    const r = await fetch('/api/dashboard');
+    DATA = await r.json();
+    await loadAgenda();
+    render();
+  } catch (e) {
+    console.error(e);
+  }
+}
+
+function render() {
+  const c = document.getElementById('content');
+  
+  if (!DATA || !DATA.club) {
+    c.innerHTML = `
+      <div class="empty-state">
+        <div class="empty-icon">⚽</div>
+        <div class="empty-title">Nenhum clube sincronizado</div>
+        <div class="empty-text">Clique no botão abaixo para sincronizar seu clube EA FC</div>
+        <button class="btn-primary" onclick="startSync()">↻ SINCRONIZAR CLUBE</button>
+      </div>`;
+    return;
+  }
+  
+  c.innerHTML = `
+    <div class="club-card">
+      <div class="club-info">
+        <div class="club-shield">🛡️</div>
+        <div>
+          <div class="club-name">${DATA.club.name}</div>
+          <div class="club-meta">${DATA.players?.length || 0} jogadores · ${DATA.matches?.length || 0} partidas</div>
+        </div>
+      </div>
+    </div>
+    
+    <div class="tabs">
+      <div class="tab ${CURRENT_TAB==='visao'?'active':''}" onclick="setTab('visao')">VISÃO</div>
+      <div class="tab ${CURRENT_TAB==='jogadores'?'active':''}" onclick="setTab('jogadores')">JOGADORES</div>
+      <div class="tab ${CURRENT_TAB==='comparar'?'active':''}" onclick="setTab('comparar')">COMPARAR</div>
+      <div class="tab ${CURRENT_TAB==='confrontos'?'active':''}" onclick="setTab('confrontos')">CONFRONTOS</div>
+      <div class="tab ${CURRENT_TAB==='time-ideal'?'active':''}" onclick="setTab('time-ideal')">TIME IDEAL</div>
+      <div class="tab ${CURRENT_TAB==='agenda'?'active':''}" onclick="setTab('agenda')">AGENDA</div>
+    </div>
+    
+    <div class="period-filter">
+      <div class="period ${CURRENT_PERIOD==='todos'?'active':''}" onclick="setPeriod('todos', event)">TODOS</div>
+      <div class="period ${CURRENT_PERIOD==='ult5'?'active':''}" onclick="setPeriod('ult5', event)">ÚLT. 5</div>
+      <div class="period ${CURRENT_PERIOD==='ult10'?'active':''}" onclick="setPeriod('ult10', event)">ÚLT. 10</div>
+      <div class="period ${CURRENT_PERIOD==='semana'?'active':''}" onclick="setPeriod('semana', event)">SEMANA</div>
+      <div class="period ${CURRENT_PERIOD==='mes'?'active':''}" onclick="setPeriod('mes', event)">MÊS</div>
+    </div>
+    
+    <div class="container">
+      <div id="tabContent"></div>
+    </div>
+  `;
+  
+  renderTab();
+}
+
+function setTab(t) {
+  CURRENT_TAB = t;
+  document.querySelectorAll('.tab').forEach(el => el.classList.remove('active'));
+  event.target.classList.add('active');
+  renderTab();
+}
+
+function renderTab() {
+  const tc = document.getElementById('tabContent');
+  if (!tc) return;
+  
+  if (CURRENT_TAB === 'visao') tc.innerHTML = renderVisao();
+  else if (CURRENT_TAB === 'jogadores') tc.innerHTML = renderJogadores();
+  else if (CURRENT_TAB === 'comparar') { tc.innerHTML = renderComparar(); renderCompareBars(); }
+  else if (CURRENT_TAB === 'confrontos') tc.innerHTML = renderConfrontos();
+  else if (CURRENT_TAB === 'time-ideal') tc.innerHTML = renderTimeIdeal();
+  else if (CURRENT_TAB === 'agenda') tc.innerHTML = renderAgenda();
+}
+
+function computeStatsFor(matches) {
+  const out = {wins:0, draws:0, losses:0, goals_for:0, goals_against:0, clean_sheets:0, matches_played: matches.length, best_streak: 0};
+  let streak = 0;
+  matches.slice().reverse().forEach(m => {
+    out.goals_for += m.goals_for || 0;
+    out.goals_against += m.goals_against || 0;
+    if (m.goals_against === 0) out.clean_sheets++;
+    if (m.result === 'V') { out.wins++; streak++; if (streak > out.best_streak) out.best_streak = streak; }
+    else if (m.result === 'E') { out.draws++; streak = 0; }
+    else { out.losses++; streak = 0; }
+  });
+  out.goal_diff = out.goals_for - out.goals_against;
+  out.win_rate = matches.length ? Math.round((out.wins / matches.length) * 100) : 0;
+  out.goals_per_match = matches.length ? +(out.goals_for / matches.length).toFixed(2) : 0;
+  return out;
+}
+
+function renderVisao() {
+  const matches = filteredMatches();
+  const useFiltered = CURRENT_PERIOD !== 'todos';
+  const s = useFiltered ? computeStatsFor(matches) : (DATA.stats || {});
+  const wr = s.win_rate || 0;
+  const passPct = 80; // calc from data if available
+  const tackPct = 21;
+  const offense = 69;
+  
+  let html = `
+    <div class="stats-grid">
+      <div class="stat-card highlight">
+        <div class="stat-value green">${wr}%</div>
+        <div class="stat-label">Win Rate</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value green">${s.goals_for || 0}</div>
+        <div class="stat-label">Gols Pró</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value red">${s.goals_against || 0}</div>
+        <div class="stat-label">Gols Contra</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value green">${s.goal_diff || 0}</div>
+        <div class="stat-label">Saldo</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value compound">
+          <span class="green">${s.wins || 0}</span><span style="color:#555">/</span>
+          <span class="yellow">${s.draws || 0}</span><span style="color:#555">/</span>
+          <span class="red">${s.losses || 0}</span>
+        </div>
+        <div class="stat-label">${s.matches_played || 0} jogos</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value">${s.goals_per_match || 0}</div>
+        <div class="stat-label">Gols/Jogo</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value">${s.shots_per_match || 6}</div>
+        <div class="stat-label">Finaliz./Jogo</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value">${s.clean_sheets || 0}</div>
+        <div class="stat-label">Sem Sofrer Gol</div>
+      </div>
+    </div>
+    
+    <div class="circles-grid">
+      ${circle(wr, 'WIN RATE')}
+      ${circle(passPct, '% PASSES')}
+      ${circle(tackPct, '% DIVIDIDAS')}
+      ${circle(offense, 'OFENSIVIDADE')}
+    </div>
+    
+    <div class="stat-card highlight" style="display:flex;align-items:center;gap:16px;justify-content:flex-start;text-align:left;padding:20px;">
+      <div style="font-size:32px;color:var(--yellow);">⭐</div>
+      <div>
+        <div style="font-size:28px;font-weight:800;color:var(--green);">${s.best_streak || 0}</div>
+        <div class="stat-label">Melhor Sequência de Vitórias</div>
+      </div>
+    </div>
+  `;
+  
+  // MVP
+  if (DATA.mvp) {
+    const m = DATA.mvp;
+    html += `
+      <div class="section-title">🏆 MVP da Semana</div>
+      <div class="mvp-card">
+        <div class="mvp-badge">M.V.P.</div>
+        <div class="mvp-rating">${m.rating}</div>
+        <div class="mvp-info">
+          <div class="mvp-name">${m.name}</div>
+          <div class="mvp-meta">${m.position} · ${m.games} jogos</div>
+          <div class="mvp-stats">
+            <div class="mvp-stat">
+              <div class="mvp-stat-value">${m.goals}</div>
+              <div class="mvp-stat-label">Gols</div>
+            </div>
+            <div class="mvp-stat">
+              <div class="mvp-stat-value">${m.assists}</div>
+              <div class="mvp-stat-label">Assist</div>
+            </div>
+            <div class="mvp-stat">
+              <div class="mvp-stat-value">${m.mom}</div>
+              <div class="mvp-stat-label">MOM</div>
+            </div>
+            <div class="mvp-stat">
+              <div class="mvp-stat-value">${m.pass_pct}%</div>
+              <div class="mvp-stat-label">Pass%</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    `;
+  }
+  
+  // Média de gols por adversário
+  if (DATA.opponents && DATA.opponents.length) {
+    html += `
+      <div class="section-title">📊 Média de Gols por Adversário</div>
+      <div class="opponents-list">
+    `;
+    DATA.opponents.forEach(o => {
+      html += `
+        <div class="opp-row">
+          <div class="opp-name">${o.opponent}<span class="opp-name-small">${o.games}j</span></div>
+          <div class="opp-stats">
+            <div class="opp-stat">
+              <span class="opp-stat-val green">${o.avg_gf}</span>
+              <span class="opp-stat-label">PRO</span>
+            </div>
+            <div class="opp-stat">
+              <span class="opp-stat-val red">${o.avg_ga}</span>
+              <span class="opp-stat-label">SOF</span>
+            </div>
+          </div>
+        </div>
+      `;
+    });
+    html += '</div>';
+  }
+  
+  // Desempenho por partida
+  if (matches.length) {
+    html += `
+      <div class="section-title">📈 Desempenho por Partida</div>
+      <div class="perf-bars">
+    `;
+    const recent = matches.slice(0, 12).reverse();
+    const maxGoals = Math.max(...recent.map(m => m.goals_for + m.goals_against), 5);
+    recent.forEach(m => {
+      const cls = m.result === 'V' ? 'win' : m.result === 'D' ? 'loss' : 'draw';
+      const totalH = ((m.goals_for + m.goals_against) / maxGoals) * 100;
+      html += `
+        <div class="perf-bar ${cls}">
+          <div class="perf-bar-bar" style="height: ${Math.max(totalH, 20)}%;"></div>
+          <div class="perf-bar-score">${m.score}</div>
+          <div class="perf-bar-date">${m.date.slice(0,5)}</div>
+        </div>
+      `;
+    });
+    html += '</div>';
+  }
+  
+  // Últimas partidas com MOM
+  html += `
+    <div class="section-title">⚔️ Últimas Partidas</div>
+    <div class="matches-list">
+  `;
+  matches.slice(0, 10).forEach(m => {
+    html += `
+      <div class="match-card" onclick="showMatchDetails('${m.match_id}')">
+        <div>
+          <div class="match-opp">VS ${m.opponent.toUpperCase()}</div>
+          ${m.mom ? `<div class="match-mom">MOM: <strong>${m.mom}</strong> (${m.mom_rating})</div>` : ''}
+        </div>
+        <div class="match-results">
+          <span class="match-badge ${m.result.toLowerCase()}">${m.result}</span>
+          <span class="match-score">${m.score}</span>
+        </div>
+      </div>
+    `;
+  });
+  html += '</div>';
+  
+  return html;
+}
+
+function circle(pct, label) {
+  const r = 50;
+  const circ = 2 * Math.PI * r;
+  const offset = circ - (pct / 100) * circ;
+  return `
+    <div class="circle-card">
+      <div class="circle-svg">
+        <svg viewBox="0 0 130 130" width="130" height="130">
+          <circle class="circle-bg" cx="65" cy="65" r="${r}"></circle>
+          <circle class="circle-progress" cx="65" cy="65" r="${r}"
+            stroke-dasharray="${circ}" stroke-dashoffset="${offset}"></circle>
+        </svg>
+        <div class="circle-text">${pct}%</div>
+      </div>
+      <div class="circle-label">${label}</div>
+    </div>
+  `;
+}
+
+function renderJogadores() {
+  if (!DATA.players || !DATA.players.length) {
+    return '<div class="empty-state">Nenhum jogador encontrado</div>';
+  }
+  
+  let html = '<div class="players-grid">';
+  DATA.players.forEach(p => {
+    html += `
+      <div class="player-card" onclick="showPlayerDetail('${p.name.replace(/'/g, "\\'")}')">
+        <div class="player-rating-big">${p.rating}</div>
+        <div class="player-pos">
+          <span class="player-pos-badge">${p.position} · ${p.games}J</span>
+        </div>
+        <div class="player-name">${p.name}</div>
+        <div class="player-stats">
+          <div class="player-stat">
+            <span class="player-stat-label">Gols</span>
+            <span class="player-stat-val">${p.goals}</span>
+          </div>
+          <div class="player-stat">
+            <span class="player-stat-label">Assist</span>
+            <span class="player-stat-val">${p.assists}</span>
+          </div>
+          <div class="player-stat">
+            <span class="player-stat-label">Pass%</span>
+            <span class="player-stat-val">${p.pass_pct}%</span>
+          </div>
+          <div class="player-stat">
+            <span class="player-stat-label">Div%</span>
+            <span class="player-stat-val">${p.tackle_pct}%</span>
+          </div>
+          <div class="player-stat">
+            <span class="player-stat-label">MOM</span>
+            <span class="player-stat-val">${p.mom}</span>
+          </div>
+          <div class="player-stat">
+            <span class="player-stat-label">Chutes</span>
+            <span class="player-stat-val">${p.shots}</span>
+          </div>
+        </div>
+      </div>
+    `;
+  });
+  html += '</div>';
+  return html;
+}
+
+function renderComparar() {
+  if (!DATA.players || !DATA.players.length) {
+    return '<div class="empty-state">Nenhum jogador encontrado</div>';
+  }
+  const opts = DATA.players.map(p =>
+    `<option value="${p.name}">${p.name} · ${p.position} · ${p.rating}</option>`
+  ).join('');
+  const p1 = COMPARE_A || DATA.players[0]?.name;
+  const p2 = COMPARE_B || DATA.players[1]?.name || DATA.players[0]?.name;
+  const sel = (val) => opts.replace(`value="${val}"`, `value="${val}" selected`);
+
+  return `
+    <div class="compare-grid">
+      <div class="compare-pick">
+        <select onchange="setCompare('A', this.value)">${sel(p1)}</select>
+        <div id="cmp-a-card"></div>
+      </div>
+      <div class="compare-pick">
+        <select onchange="setCompare('B', this.value)">${sel(p2)}</select>
+        <div id="cmp-b-card"></div>
+      </div>
+    </div>
+    <div id="cmp-bars"></div>
+  `;
+}
+
+function setCompare(side, name) {
+  if (side === 'A') COMPARE_A = name; else COMPARE_B = name;
+  renderCompareBars();
+}
+
+function renderCompareBars() {
+  if (CURRENT_TAB !== 'comparar') return;
+  const a = DATA.players.find(p => p.name === COMPARE_A) || DATA.players[0];
+  const b = DATA.players.find(p => p.name === COMPARE_B) || DATA.players[1] || a;
+  if (!a || !b) return;
+
+  function card(p) {
+    return `
+      <div style="text-align:center;padding:14px 0;">
+        <div style="font-size:38px;font-weight:800;color:var(--green);text-shadow:0 0 18px var(--green-glow);">${p.rating}</div>
+        <div style="margin-top:4px;color:var(--text-2);text-transform:uppercase;font-size:10px;letter-spacing:1px;">${p.position} · ${p.games}J</div>
+        <div style="font-weight:800;font-size:16px;margin-top:4px;">${p.name}</div>
+      </div>
+    `;
+  }
+  const ca = document.getElementById('cmp-a-card');
+  const cb = document.getElementById('cmp-b-card');
+  if (ca) ca.innerHTML = card(a);
+  if (cb) cb.innerHTML = card(b);
+
+  const fields = [
+    {key:'rating', label:'Nota', max:10},
+    {key:'goals', label:'Gols', max: Math.max(a.goals, b.goals, 1)},
+    {key:'assists', label:'Assist', max: Math.max(a.assists, b.assists, 1)},
+    {key:'pass_pct', label:'Pass%', max:100},
+    {key:'tackle_pct', label:'Div%', max:100},
+    {key:'shots', label:'Chutes', max: Math.max(a.shots, b.shots, 1)},
+    {key:'mom', label:'MOMs', max: Math.max(a.mom, b.mom, 1)},
+    {key:'goals_per_game', label:'Gol/J', max: Math.max(a.goals_per_game, b.goals_per_game, 0.5)},
+  ];
+  let html = '<div class="compare-bars"><div style="font-weight:700;margin-bottom:8px;">Comparativo direto</div>';
+  fields.forEach(f => {
+    const va = Number(a[f.key] || 0), vb = Number(b[f.key] || 0);
+    const pa = Math.min(100, (va / f.max) * 100);
+    const pb = Math.min(100, (vb / f.max) * 100);
+    const wa = va > vb ? 'color:var(--green)' : '';
+    const wb = vb > va ? 'color:var(--green)' : '';
+    html += `
+      <div class="compare-bar-row">
+        <div class="compare-bar-val left" style="${wa}">${va}</div>
+        <div class="compare-bar left"><div class="fill" style="width:${pa}%"></div></div>
+        <div class="compare-bar-label">${f.label}</div>
+        <div class="compare-bar right"><div class="fill" style="width:${pb}%"></div></div>
+        <div class="compare-bar-val right" style="${wb}">${vb}</div>
+      </div>
+    `;
+  });
+  html += '</div>';
+  const target = document.getElementById('cmp-bars');
+  if (target) target.innerHTML = html;
+}
+
+function renderConfrontos() {
+  const matches = filteredMatches();
+  if (!matches.length) {
+    return '<div class="empty-state">Nenhuma partida no período selecionado</div>';
+  }
+  
+  // Agrupa por adversário
+  const byOpp = {};
+  matches.forEach(m => {
+    if (!byOpp[m.opponent]) {
+      byOpp[m.opponent] = { v: 0, e: 0, d: 0, last_score: m.score };
+    }
+    if (m.result === 'V') byOpp[m.opponent].v++;
+    else if (m.result === 'E') byOpp[m.opponent].e++;
+    else byOpp[m.opponent].d++;
+  });
+  
+  let html = '<div class="confronts-grid">';
+  Object.entries(byOpp).forEach(([opp, d]) => {
+    html += `
+      <div class="confront-card">
+        <div class="confront-name">${opp.toUpperCase()}</div>
+        <div class="confront-vs">
+          <span class="vs-tag v">${d.v}V</span>
+          <span class="vs-tag e">${d.e}E</span>
+          <span class="vs-tag d">${d.d}D</span>
+          <span style="margin-left:8px;color:var(--text);font-weight:700;">${d.last_score}</span>
+        </div>
+      </div>
+    `;
+  });
+  html += '</div>';
+  return html;
+}
+
+function renderTimeIdeal() {
+  if (!DATA.ideal_team) {
+    return '<div class="empty-state">Time ideal não disponível</div>';
+  }
+  
+  const team = DATA.ideal_team;
+  const formation = team.formation;
+  const players = team.players || [];
+  
+  // Posições no campo (3-5-2)
+  const positions = {
+    'GK': [{ x: 50, y: 92 }],
+    'CB': [{ x: 25, y: 75 }, { x: 50, y: 78 }, { x: 75, y: 75 }],
+    'LB': [{ x: 15, y: 60 }],
+    'RB': [{ x: 85, y: 60 }],
+    'CM': [{ x: 20, y: 50 }, { x: 40, y: 55 }, { x: 50, y: 45 }, { x: 60, y: 55 }, { x: 80, y: 50 }],
+    'LM': [{ x: 15, y: 40 }],
+    'RM': [{ x: 85, y: 40 }],
+    'LW': [{ x: 20, y: 20 }],
+    'RW': [{ x: 80, y: 20 }],
+    'ST': [{ x: 40, y: 15 }, { x: 60, y: 15 }],
+    'CF': [{ x: 50, y: 12 }],
+  };
+  
+  // Conta jogadores por posição
+  const usedPos = {};
+  let fieldHtml = '';
+  
+  players.forEach(p => {
+    const fp = p.field_pos;
+    if (!usedPos[fp]) usedPos[fp] = 0;
+    const posList = positions[fp] || [{ x: 50, y: 50 }];
+    const coord = posList[usedPos[fp]] || posList[0];
+    usedPos[fp]++;
+    
+    fieldHtml += `
+      <div class="player-on-field" style="left:${coord.x}%;top:${coord.y}%;">
+        <div class="player-circle">${p.rating}</div>
+        <div class="player-circle-name">${p.name.length > 12 ? p.name.slice(0,12) : p.name}</div>
+      </div>
+    `;
+  });
+  
+  let html = `
+    <div class="formation-wrapper">
+      <div class="formation-title">FORMAÇÃO ${formation}</div>
+      <div class="field">
+        <div class="field-line"></div>
+        <div class="field-circle"></div>
+        ${fieldHtml}
+      </div>
+      <div class="formation-label">Melhor 11 por nota média · ${formation}</div>
+    </div>
+    
+    <div class="section-title">📋 Análise Tática</div>
+    <button class="btn-primary" onclick="analyzeTeam()">🤖 GERAR ANÁLISE COM IA</button>
+  `;
+  
+  return html;
+}
+
+function renderAgenda() {
+  return `
+    <div class="section-title">✏️ ${AGENDA_EDIT_ID ? 'Editar Agendamento' : 'Novo Agendamento'}</div>
+    <form class="agenda-form" onsubmit="saveAgenda(event)">
+      <input id="ag-opp" type="text" placeholder="Adversário" required style="grid-column: span 3;">
+      <input id="ag-date" type="date" required style="grid-column: span 2;">
+      <input id="ag-time" type="time" style="grid-column: span 1;">
+      <select id="ag-type" style="grid-column: span 2;">
+        <option value="liga">Liga</option>
+        <option value="copa">Copa</option>
+        <option value="amistoso">Amistoso</option>
+      </select>
+      <input id="ag-loc" type="text" placeholder="Local (opcional)" style="grid-column: span 4;">
+      <textarea id="ag-notes" placeholder="Observações (opcional)"></textarea>
+      <div class="full">
+        ${AGENDA_EDIT_ID ? '<button type="button" class="btn-mini" onclick="cancelAgendaEdit()">Cancelar</button>' : ''}
+        <button type="submit" class="btn-primary" style="padding:8px 18px;">${AGENDA_EDIT_ID ? 'Salvar Alterações' : 'Adicionar'}</button>
+      </div>
+    </form>
+    <div class="section-title">📅 Próximos Jogos</div>
+    <div id="agenda-list" class="agenda-list">${renderAgendaList()}</div>
+  `;
+}
+
+function renderAgendaList() {
+  if (!AGENDA.length) {
+    return '<div class="empty-state" style="padding:40px 20px;"><div class="empty-text">Nenhum jogo agendado ainda.</div></div>';
+  }
+  const meses = ['JAN','FEV','MAR','ABR','MAI','JUN','JUL','AGO','SET','OUT','NOV','DEZ'];
+  return AGENDA.map(a => {
+    const d = new Date(a.match_date + 'T00:00:00');
+    const dia = d.getDate();
+    const mes = meses[d.getMonth()];
+    const hora = a.match_time || '--:--';
+    return `
+      <div class="agenda-row">
+        <div class="agenda-date">
+          <div class="d">${dia}</div>
+          <div class="m">${mes}</div>
+        </div>
+        <div class="agenda-info">
+          <div class="opp">VS ${a.opponent}</div>
+          <div class="meta">${hora} · <span class="tag ${a.match_type}">${a.match_type}</span> ${a.location ? '· ' + a.location : ''}</div>
+          ${a.notes ? '<div class="meta" style="margin-top:4px;">✍️ ' + a.notes + '</div>' : ''}
+        </div>
+        <button class="btn-mini" onclick="editAgenda(${a.id})">Editar</button>
+        <button class="btn-mini danger" onclick="deleteAgenda(${a.id})">Excluir</button>
+      </div>
+    `;
+  }).join('');
+}
+
+async function loadAgenda() {
+  try {
+    const r = await fetch('/api/agenda');
+    AGENDA = await r.json();
+  } catch (e) {
+    AGENDA = [];
+  }
+}
+
+function editAgenda(id) {
+  const a = AGENDA.find(x => x.id === id);
+  if (!a) return;
+  AGENDA_EDIT_ID = id;
+  renderTab();
+  setTimeout(() => {
+    document.getElementById('ag-opp').value = a.opponent;
+    document.getElementById('ag-date').value = a.match_date;
+    document.getElementById('ag-time').value = a.match_time || '';
+    document.getElementById('ag-type').value = a.match_type || 'liga';
+    document.getElementById('ag-loc').value = a.location || '';
+    document.getElementById('ag-notes').value = a.notes || '';
+    window.scrollTo({top: 0, behavior: 'smooth'});
+  }, 50);
+}
+
+function cancelAgendaEdit() {
+  AGENDA_EDIT_ID = null;
+  renderTab();
+}
+
+async function saveAgenda(ev) {
+  ev.preventDefault();
+  const body = {
+    opponent: document.getElementById('ag-opp').value.trim(),
+    match_date: document.getElementById('ag-date').value,
+    match_time: document.getElementById('ag-time').value || null,
+    match_type: document.getElementById('ag-type').value,
+    location: document.getElementById('ag-loc').value.trim() || null,
+    notes: document.getElementById('ag-notes').value.trim() || null,
+  };
+  if (!body.opponent || !body.match_date) return;
+  try {
+    const url = AGENDA_EDIT_ID ? `/api/agenda/${AGENDA_EDIT_ID}` : '/api/agenda';
+    const method = AGENDA_EDIT_ID ? 'PUT' : 'POST';
+    const r = await fetch(url, {
+      method,
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(body)
+    });
+    if (!r.ok) throw new Error('Erro ao salvar');
+    AGENDA_EDIT_ID = null;
+    await loadAgenda();
+    renderTab();
+  } catch (e) {
+    alert('Erro: ' + e.message);
+  }
+}
+
+async function deleteAgenda(id) {
+  if (!confirm('Excluir este agendamento?')) return;
+  try {
+    await fetch('/api/agenda/' + id, {method: 'DELETE'});
+    await loadAgenda();
+    renderTab();
+  } catch (e) {
+    alert('Erro: ' + e.message);
+  }
+}
+
+function showMatchDetails(matchId) {
+  const m = DATA.matches.find(x => x.match_id === matchId);
+  if (!m) return;
+  
+  let html = `
+    <h2>VS ${m.opponent.toUpperCase()}</h2>
+    <p><strong>Resultado:</strong> ${m.result === 'V' ? '✅ VITÓRIA' : m.result === 'E' ? '🟡 EMPATE' : '❌ DERROTA'} (${m.score})</p>
+    <p><strong>Data:</strong> ${m.date}</p>
+    <p><strong>Tipo:</strong> ${m.match_type}</p>
+    <h3>⭐ Melhor da Partida</h3>
+    <p><strong>${m.mom || 'N/A'}</strong> — Nota ${m.mom_rating}</p>
+    <h3>📊 Notas de Todos os Jogadores</h3>
+    <ul>
+  `;
+  (m.players_ratings || []).forEach(p => {
+    html += `<li><strong>${p.name}</strong> (${p.pos}) — Nota: ${p.rating} | Gols: ${p.goals} | Assist: ${p.assists}</li>`;
+  });
+  html += '</ul>';
+  
+  document.getElementById('modalContent').innerHTML = html;
+  document.getElementById('modal').classList.add('active');
+}
+
+async function analyzePlayer(name) {
+  document.getElementById('modalContent').innerHTML = '<div class="loading"><div class="spinner"></div> Analisando jogador com IA...</div>';
+  document.getElementById('modal').classList.add('active');
+  
+  try {
+    const r = await fetch(`/api/ai/player?player_name=${encodeURIComponent(name)}`, { method: 'POST' });
+    const data = await r.json();
+    document.getElementById('modalContent').innerHTML = renderMarkdown(data.analysis);
+  } catch (e) {
+    document.getElementById('modalContent').innerHTML = `<p style="color:var(--red);">Erro: ${e.message}</p>`;
+  }
+}
+
+async function showPlayerDetail(name) {
+  const mc = document.getElementById('modalContent');
+  mc.innerHTML = '<div class="loading"><div class="spinner"></div> Carregando analytics...</div>';
+  document.getElementById('modal').classList.add('active');
+  try {
+    const r = await fetch('/api/player/' + encodeURIComponent(name) + '/analytics');
+    if (!r.ok) throw new Error('Não encontrado ou sem dados suficientes');
+    const data = await r.json();
+    mc.innerHTML = renderPlayerDetailHTML(data);
+    setTimeout(() => renderPlayerCharts(data), 80);
+  } catch (e) {
+    mc.innerHTML = `<p style="color:var(--red);">Erro: ${e.message}</p>`;
+  }
+}
+
+function heatColor(v) {
+  const alpha = 0.08 + Math.min(0.82, Number(v || 0) * 0.82);
+  return `rgba(0,255,115,${alpha})`;
+}
+
+function renderHeatmap(heatmap) {
+  const z = (heatmap && heatmap.zones) || {};
+  const labels = [
+    ['att_left','Ataque E'], ['att_center','Ataque C'], ['att_right','Ataque D'],
+    ['mid_left','Meio E'], ['mid_center','Meio C'], ['mid_right','Meio D'],
+    ['def_left','Defesa E'], ['def_center','Defesa C'], ['def_right','Defesa D'],
+  ];
+  return `
+    <div class="heatmap-wrap">
+      <div class="heatmap-field">
+        ${labels.map(([key, label]) => `<div class="heat-zone" style="background:${heatColor(z[key])}">${label}</div>`).join('')}
+      </div>
+      <div class="mini-insights">
+        <div class="mini-insight"><div class="k">Perfil</div><div class="v">${heatmap?.profile || '-'}</div></div>
+        <div class="mini-insight"><div class="k">Leitura</div><div class="v">Quanto mais verde, maior a presença estimada naquela zona.</div></div>
+        <div class="analytics-note">${heatmap?.disclaimer || 'Mapa estimado por perfil estatístico.'}</div>
+      </div>
+    </div>`;
+}
+
+function matchLine(m) {
+  if (!m) return '<div class="mini-insight"><div class="v">Sem dados</div></div>';
+  return `<div class="mini-insight"><div class="k">${m.date} · ${m.match_type}</div><div class="v">VS ${m.opponent} · ${m.result} ${m.score} · Sofi ${m.sofi_rating} · EA ${m.rating}</div></div>`;
+}
+
+function renderPlayerDetailHTML(data) {
+  const p = data.player;
+  const h = data.history || [];
+  const avg = data.averages || {};
+  const totals = data.totals || {};
+  const adv = data.advanced || {};
+  const rank = data.ranking || {};
+  const cmp = data.team_comparison || {};
+  const trend = data.trend || {};
+  const safeName = p.name.replace(/'/g, "\\'");
+  const radar = adv.radar || {};
+
+  return `
+    <div class="player-detail">
+      <div class="analytics-hero">
+        <div>
+          <h2>${p.name} <span class="pos-tag">${p.position}</span></h2>
+          <div style="color:var(--text-2);font-size:13px;">${p.games} jogos no clube · ranking ${rank.rating_rank_label || '-'} · tendência ${trend.status || '-'}</div>
+          <div class="analytics-note" style="margin-top:8px;">${(data.scout_report || '').split('\\n').slice(0, 2).join(' ')}</div>
+        </div>
+        <div class="analytics-score"><div class="num">${adv.analytic_score || 0}</div><div class="lab">Analítica</div></div>
+      </div>
+
+      <div class="analytics-cards">
+        <div class="analytics-card"><div class="v">${avg.rating || '-'}</div><div class="l">Média EA</div></div>
+        <div class="analytics-card"><div class="v">${avg.sofi_rating || '-'}</div><div class="l">Média Sofi</div></div>
+        <div class="analytics-card"><div class="v">${totals.goals || 0}</div><div class="l">Gols</div></div>
+        <div class="analytics-card"><div class="v">${totals.assists || 0}</div><div class="l">Assist</div></div>
+        <div class="analytics-card"><div class="v">${totals.moms || 0}</div><div class="l">MOMs</div></div>
+        <div class="analytics-card"><div class="v">${adv.regularity || 0}%</div><div class="l">Regularidade</div></div>
+        <div class="analytics-card"><div class="v">${adv.analytic_score || 0}</div><div class="l">Final</div></div>
+      </div>
+
+      <div class="analytics-grid">
+        <div class="chart-box"><div class="chart-title">Evolução EA</div><canvas id="ratingChart" width="420" height="210"></canvas></div>
+        <div class="chart-box"><div class="chart-title">Evolução Sofi</div><canvas id="sofiChart" width="420" height="210"></canvas></div>
+        <div class="chart-box"><div class="chart-title">Gols por partida</div><canvas id="goalsChart" width="420" height="210"></canvas></div>
+        <div class="chart-box"><div class="chart-title">Assistências por partida</div><canvas id="assistsChart" width="420" height="210"></canvas></div>
+        <div class="chart-box wide"><div class="chart-title">Radar técnico</div><canvas id="radarChart" width="860" height="310"></canvas></div>
+      </div>
+
+      <div class="section-title">Mapa de Calor Estimado</div>
+      ${renderHeatmap(data.heatmap)}
+
+      <div class="section-title">Melhor / Pior / Tendência</div>
+      <div class="mini-insights" style="grid-template-columns:repeat(2,1fr);display:grid;">
+        ${matchLine(data.best_match)}
+        ${matchLine(data.worst_match)}
+        <div class="mini-insight"><div class="k">Contra quem mais performou</div><div class="v">${data.best_opponent ? `${data.best_opponent.opponent} · ${data.best_opponent.avg_sofi}` : '-'}</div></div>
+        <div class="mini-insight"><div class="k">Contra quem menos performou</div><div class="v">${data.worst_opponent ? `${data.worst_opponent.opponent} · ${data.worst_opponent.avg_sofi}` : '-'}</div></div>
+        <div class="mini-insight"><div class="k">Comparação elenco</div><div class="v">Rating vs média: ${cmp.player_vs_team_rating || 0} · G/J vs média: ${cmp.player_vs_team_goals_per_game || 0}</div></div>
+        <div class="mini-insight"><div class="k">Avançadas</div><div class="v">Ofensivo ${adv.offensive_impact || 0} · Defensivo ${adv.defensive_impact || 0} · Risco ${adv.risk || 0}</div></div>
+      </div>
+
+      <div class="section-title">Relatório Scout Offline</div>
+      <div class="analytics-note">${renderMarkdown(data.scout_report || '')}</div>
+
+      <div class="section-title" style="margin-top:18px;">Últimas ${h.length} Partidas</div>
+      ${h.length === 0 ? '<div style="color:var(--text-2);padding:20px;text-align:center;">Nenhuma partida com participação registrada.</div>' : `
+      <table class="history-table">
+        <thead><tr><th>Data</th><th>Tipo</th><th>Adversário</th><th>Resultado</th><th>Pos</th><th>Sofi</th><th>EA</th><th>G</th><th>A</th><th>Chu</th><th>P%</th><th>D%</th><th>MOM</th></tr></thead>
+        <tbody>
+          ${h.map(x => `<tr>
+            <td>${x.date}</td><td><span class="tag ${x.match_type}">${x.match_type}</span></td><td>${x.opponent}</td>
+            <td><span class="tag ${x.result.toLowerCase()}">${x.result} ${x.score}</span></td><td>${x.position}</td>
+            <td><span class="sofi">${x.sofi_rating}</span></td><td>${x.rating}</td><td>${x.goals}</td><td>${x.assists}</td><td>${x.shots}</td><td>${x.pass_pct}%</td><td>${x.tackle_pct}%</td><td>${x.mom ? '⭐' : ''}</td>
+          </tr>`).join('')}
+        </tbody>
+      </table>`}
+
+      <div style="margin-top:18px;display:flex;gap:8px;">
+        <button class="btn-primary" style="padding:8px 18px;" onclick="analyzePlayer('${safeName}')">🤖 Analisar com IA</button>
+      </div>
+    </div>`;
+}
+
+function renderPlayerCharts(data) {
+  if (!window.Chart) return;
+  if (window.PLAYER_CHARTS) { window.PLAYER_CHARTS.forEach(ch => { try { ch.destroy(); } catch(e) {} }); }
+  window.PLAYER_CHARTS = [];
+  const s = data.series || [];
+  const labels = s.map(x => (x.date || '').slice(0,5) + ' ' + (x.opponent || '').slice(0,8));
+  const grid = 'rgba(255,255,255,0.08)';
+  const ticks = '#888';
+  const green = '#00FF73';
+  const yellow = '#ffaa00';
+  const red = '#ff3344';
+  const common = {responsive:false, maintainAspectRatio:false, animation:false, plugins:{legend:{display:false}}, scales:{x:{ticks:{color:ticks, maxRotation:45, minRotation:0}, grid:{color:grid}}, y:{ticks:{color:ticks}, grid:{color:grid}}}};
+  const make = (id, type, values, color, extra={}) => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    const chart = new Chart(el, {type, data:{labels, datasets:[{data:values, borderColor:color, backgroundColor: color + '66', tension:0.35, fill:type==='line'?false:true}]}, options:{...common, ...extra}});
+    window.PLAYER_CHARTS.push(chart);
+  };
+  make('ratingChart', 'line', s.map(x => x.rating || 0), green, {scales:{...common.scales, y:{min:0,max:10,ticks:{color:ticks},grid:{color:grid}}}});
+  make('sofiChart', 'line', s.map(x => x.sofi_rating || 0), yellow, {scales:{...common.scales, y:{min:0,max:10,ticks:{color:ticks},grid:{color:grid}}}});
+  make('goalsChart', 'bar', s.map(x => x.goals || 0), green);
+  make('assistsChart', 'bar', s.map(x => x.assists || 0), yellow);
+  const radar = data.advanced?.radar || {};
+  const radarEl = document.getElementById('radarChart');
+  if (radarEl) { const radarChart = new Chart(radarEl, {type:'radar', data:{labels:Object.keys(radar), datasets:[{data:Object.values(radar), borderColor:green, backgroundColor:'rgba(0,255,115,0.22)', pointBackgroundColor:green}]}, options:{responsive:false, maintainAspectRatio:false, animation:false, scales:{r:{min:0,max:100, ticks:{display:false}, grid:{color:grid}, angleLines:{color:grid}, pointLabels:{color:ticks}}}, plugins:{legend:{display:false}}}}); window.PLAYER_CHARTS.push(radarChart); }
+}
+async function analyzeTeam() {
+  document.getElementById('modalContent').innerHTML = '<div class="loading"><div class="spinner"></div> Gerando análise do time ideal...</div>';
+  document.getElementById('modal').classList.add('active');
+  
+  try {
+    const r = await fetch('/api/ai/team');
+    const data = await r.json();
+    document.getElementById('modalContent').innerHTML = renderMarkdown(data.analysis);
+  } catch (e) {
+    document.getElementById('modalContent').innerHTML = `<p style="color:var(--red);">Erro: ${e.message}</p>`;
+  }
+}
+
+function renderMarkdown(md) {
+  if (!md) return '';
+  return md
+    .replace(/## (.+)/g, '<h2>$1</h2>')
+    .replace(/### (.+)/g, '<h3>$1</h3>')
+    .replace(/\\*\\*(.+?)\\*\\*/g, '<strong>$1</strong>')
+    .replace(/^- (.+)/gm, '<li>$1</li>')
+    .replace(/(<li>.*<\/li>)/gs, '<ul>$1</ul>')
+    .replace(/\\n\\n/g, '</p><p>')
+    .replace(/^([^<].+)$/gm, '<p>$1</p>')
+    .replace(/<p><\/p>/g, '');
+}
+
+function closeModal() {
+  document.getElementById('modal').classList.remove('active');
+}
+
+async function startSync() {
+  const progress = document.getElementById('syncProgress');
+  const log = document.getElementById('syncLog');
+  const fill = document.getElementById('syncFill');
+  const stepEl = document.getElementById('syncStep');
+  
+  progress.classList.add('active');
+  log.innerHTML = '';
+  fill.style.width = '0%';
+  
+  const clubName = (document.getElementById('clubInput')?.value || 'DESAGREGADOS SC').trim();
+  const evt = new EventSource('/api/sync-stream?club_name=' + encodeURIComponent(clubName));
+  
+  evt.onmessage = (e) => {
+    try {
+      const data = JSON.parse(e.data);
+      
+      if (data.msg) {
+        log.innerHTML += `<div class="sync-log-line">${data.msg}</div>`;
+        log.scrollTop = log.scrollHeight;
+      }
+      
+      if (data.step && data.total) {
+        const pct = (data.step / data.total) * 100;
+        fill.style.width = pct + '%';
+        stepEl.textContent = `Etapa ${data.step} de ${data.total}`;
+      }
+      
+      if (data.done) {
+        evt.close();
+        if (data.success) {
+          stepEl.textContent = '✅ Concluído!';
+          fill.style.width = '100%';
+          setTimeout(() => {
+            progress.classList.remove('active');
+            loadData();
+          }, 1500);
+        } else if (data.error) {
+          stepEl.textContent = `❌ Erro: ${data.error}`;
+        }
+      }
+    } catch (err) {
+      console.error(err);
+    }
+  };
+  
+  evt.onerror = () => {
+    evt.close();
+    stepEl.textContent = '❌ Conexão perdida';
+  };
+}
+
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') closeModal();
+});
+
+loadData();
+</script>
+</body>
+</html>"""
+
+
+# ============================================================
+# MAIN
+# ============================================================
+
+if __name__ == "__main__":
+    import uvicorn
+    print("\n" + "="*60)
+    print(f"  {APP_NAME}")
+    print("="*60)
+    print(f"  🌐 Acesse:  http://localhost:8000")
+    print(f"  📚 Docs:    http://localhost:8000/docs")
+    print(f"  💾 Cache:   {JSON_CACHE}")
+    print(f"  🗄️  Banco:   {DB_FILE}")
+    print("="*60 + "\n")
+    
+    uvicorn.run(app, host="0.0.0.0", port=8000)

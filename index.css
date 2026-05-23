@@ -1,0 +1,273 @@
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+}
+
+:root {
+  /* Dark theme with neon green accent (#00FF73) */
+  --radius: 0.65rem;
+  
+  /* Background & Foreground - Dark theme */
+  --background: oklch(0.035 0 0);
+  --foreground: oklch(0.97 0.001 0);
+  
+  /* Card colors */
+  --card: oklch(0.08 0.01 280);
+  --card-foreground: oklch(0.93 0.002 0);
+  
+  /* Popover */
+  --popover: oklch(0.08 0.01 280);
+  --popover-foreground: oklch(0.93 0.002 0);
+  
+  /* Secondary */
+  --secondary: oklch(0.15 0.02 280);
+  --secondary-foreground: oklch(0.9 0.002 0);
+  
+  /* Muted */
+  --muted: oklch(0.2 0.015 280);
+  --muted-foreground: oklch(0.6 0.01 0);
+  
+  /* Accent - Neon Green #00FF73 */
+  --accent: oklch(0.8 0.3 142);
+  --accent-foreground: oklch(0.05 0 0);
+  
+  /* Destructive */
+  --destructive: oklch(0.6 0.25 25);
+  --destructive-foreground: oklch(0.98 0 0);
+  
+  /* Border & Input */
+  --border: oklch(0.12 0.01 280);
+  --input: oklch(0.12 0.01 280);
+  --ring: oklch(0.8 0.3 142);
+  
+  /* Sidebar */
+  --sidebar: oklch(0.08 0.01 280);
+  --sidebar-foreground: oklch(0.93 0.002 0);
+  --sidebar-primary: oklch(0.8 0.3 142);
+  --sidebar-primary-foreground: oklch(0.05 0 0);
+  --sidebar-accent: oklch(0.8 0.3 142);
+  --sidebar-accent-foreground: oklch(0.05 0 0);
+  --sidebar-border: oklch(0.12 0.01 280);
+  --sidebar-ring: oklch(0.8 0.3 142);
+  
+  /* Primary colors */
+  --primary: oklch(0.8 0.3 142);
+  --primary-foreground: oklch(0.05 0 0);
+  
+  /* Chart colors */
+  --chart-1: oklch(0.8 0.3 142);
+  --chart-2: oklch(0.7 0.25 150);
+  --chart-3: oklch(0.6 0.2 160);
+  --chart-4: oklch(0.5 0.15 170);
+  --chart-5: oklch(0.4 0.1 180);
+}
+
+@layer base {
+  * {
+    border-color: rgb(var(--border));
+  }
+
+  html {
+    scroll-behavior: smooth;
+  }
+
+  body {
+    background-color: rgb(var(--background));
+    color: rgb(var(--foreground));
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
+      'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
+      sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6 {
+    font-weight: 600;
+  }
+
+  a {
+    color: rgb(var(--accent));
+    transition: opacity 0.2s;
+  }
+
+  a:hover {
+    opacity: 0.8;
+  }
+
+  button {
+    transition: all 0.2s;
+  }
+
+  /* Scrollbar styling */
+  ::-webkit-scrollbar {
+    width: 0.5rem;
+    height: 0.5rem;
+  }
+
+  ::-webkit-scrollbar-track {
+    background-color: rgb(var(--background));
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background-color: rgb(var(--border));
+    border-radius: 9999px;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background-color: rgb(var(--muted));
+  }
+}
+
+@layer components {
+  .container {
+    margin-left: auto;
+    margin-right: auto;
+    width: 100%;
+    max-width: 80rem;
+    padding-left: 1rem;
+    padding-right: 1rem;
+  }
+
+  @media (min-width: 768px) {
+    .container {
+      padding-left: 1.5rem;
+      padding-right: 1.5rem;
+    }
+  }
+
+  @media (min-width: 1024px) {
+    .container {
+      padding-left: 2rem;
+      padding-right: 2rem;
+    }
+  }
+
+  .flex {
+    display: flex;
+    min-width: 0;
+    min-height: 0;
+  }
+
+  /* Neon green accent utilities */
+  .accent-text {
+    color: rgb(var(--accent));
+  }
+
+  .accent-bg {
+    background-color: rgb(var(--accent));
+    color: rgb(var(--accent-foreground));
+  }
+
+  .accent-border {
+    border-color: rgb(var(--accent));
+  }
+
+  .accent-ring {
+    box-shadow: 0 0 0 3px rgb(var(--accent));
+  }
+
+  /* Status badges */
+  .badge-win {
+    background-color: rgba(0, 255, 115, 0.2);
+    color: rgb(var(--accent));
+    padding: 0.25rem 0.75rem;
+    border-radius: 9999px;
+    font-size: 0.875rem;
+    font-weight: 500;
+  }
+
+  .badge-draw {
+    background-color: rgba(255, 176, 32, 0.2);
+    color: #ffb020;
+    padding: 0.25rem 0.75rem;
+    border-radius: 9999px;
+    font-size: 0.875rem;
+    font-weight: 500;
+  }
+
+  .badge-loss {
+    background-color: rgba(255, 59, 92, 0.2);
+    color: rgb(var(--destructive));
+    padding: 0.25rem 0.75rem;
+    border-radius: 9999px;
+    font-size: 0.875rem;
+    font-weight: 500;
+  }
+
+  /* Card styling */
+  .card-stat {
+    background-color: rgb(var(--card));
+    border: 1px solid rgb(var(--border));
+    border-radius: 0.5rem;
+    padding: 1rem;
+    transition: border-color 0.2s;
+  }
+
+  .card-stat:hover {
+    border-color: rgba(0, 255, 115, 0.5);
+  }
+
+  .card-stat strong {
+    color: rgb(var(--accent));
+    font-size: 1.5rem;
+    font-weight: 700;
+    display: block;
+    margin-top: 0.5rem;
+  }
+
+  .card-stat span {
+    color: rgb(var(--muted-foreground));
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+}
+
+@layer utilities {
+  .text-balance {
+    text-wrap: balance;
+  }
+}
