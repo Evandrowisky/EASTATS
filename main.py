@@ -31,8 +31,14 @@ from fastapi.middleware.cors import CORSMiddleware
 # ============================================================
 
 APP_NAME = "Scout Clubs Pro"
-DB_FILE = "scout_clubs.db"
-JSON_CACHE = "dados_clube.json"
+
+# Vercel só permite escrita temporária em /tmp
+if os.getenv("VERCEL") == "1":
+    DB_FILE = "/tmp/scout_clubs.db"
+    JSON_CACHE = "/tmp/dados_clube.json"
+else:
+    DB_FILE = "scout_clubs.db"
+    JSON_CACHE = "dados_clube.json"
 
 try:
     from dotenv import load_dotenv
@@ -3349,6 +3355,34 @@ function normalizePlayerFamily(pos) {
   return 'MID';
 }
 
+function inferPlayerPositionIntel(player) {
+  const counts = {GK:0, DEF:0, MID:0, FWD:0};
+  let apps = 0;
+  const name = String(player.name || '').toLowerCase();
+  (DATA.matches || []).forEach(match => {
+    (match.players_ratings || []).forEach(pr => {
+      if (String(pr.name || '').toLowerCase() !== name) return;
+      const fam = normalizePlayerFamily(pr.pos);
+      counts[fam] = (counts[fam] || 0) + 1;
+      apps += 1;
+    });
+  });
+  const registered = normalizePlayerFamily(player.position);
+  let family = registered;
+  let source = 'cadastro';
+  if (apps > 0) {
+    const sorted = Object.entries(counts).sort((a,b) => b[1] - a[1]);
+    const top = sorted[0];
+    if (counts.GK >= 2 || counts.GK / Math.max(apps, 1) >= 0.25) {
+      family = 'GK';
+      source = 'historico-goleiro';
+    } else if (top && top[1] > 0) {
+      family = top[0];
+      source = 'historico';
+    }
+  }
+  return {family, source, apps, counts};
+}
 const FORMATION_SLOTS = {
   '3-5-2': ['GK','LCB','CB','RCB','LM','LCM','CM','RCM','RM','LST','RST'],
   '4-3-3': ['GK','LB','LCB','RCB','RB','LCM','CM','RCM','LW','ST','RW'],
@@ -3394,7 +3428,7 @@ function roleScore(p, targetFamily) {
 
 function buildIdealTeamClient(formation) {
   const slots = FORMATION_SLOTS[formation] || FORMATION_SLOTS['3-5-2'];
-  const pool = (DATA.players || []).map(p => ({...p, family: normalizePlayerFamily(p.position)})).sort((a,b) => Number(b.rating || 0) - Number(a.rating || 0));
+  const pool = (DATA.players || []).map(p => { const intel = inferPlayerPositionIntel(p); return {...p, family: intel.family, position_source: intel.source, position_counts: intel.counts, history_apps: intel.apps}; }).sort((a,b) => Number(b.rating || 0) - Number(a.rating || 0));
   const used = new Set();
   const picked = [];
   slots.forEach(slot => {
@@ -3403,7 +3437,7 @@ function buildIdealTeamClient(formation) {
     let bestScore = -999;
     pool.forEach(p => {
       if (used.has(p.name)) return;
-      const fitBonus = p.family === wanted[0] ? 18 : wanted.includes(p.family) ? 9 : -12;
+      const fitBonus = slot === 'GK' ? (p.family === 'GK' ? 80 : -120) : (p.family === wanted[0] ? 18 : wanted.includes(p.family) ? 9 : -12);
       const score = roleScore(p, wanted[0]) + fitBonus;
       if (score > bestScore) { bestScore = score; best = p; }
     });
@@ -3794,7 +3828,7 @@ async function analyzeTeam() {
   document.getElementById('modal').classList.add('active');
   
   try {
-    const r = await fetch('/api/ai/team');
+    const r = await fetch('/api/ai/team?formation=' + encodeURIComponent(IDEAL_FORMATION));
     const data = await r.json();
     document.getElementById('modalContent').innerHTML = renderMarkdown(data.analysis);
   } catch (e) {
