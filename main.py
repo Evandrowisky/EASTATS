@@ -1035,7 +1035,7 @@ def build_estimated_heatmap(player, history):
     }
 
 
-def build_player_analytics(player_name, cache):
+def build_player_analytics(player_name, cache, match_type="todos"):
     """Gera pacote analitico profissional do jogador a partir do cache local."""
     if not cache or not cache.get("players"):
         raise HTTPException(404, "Sincronize um clube primeiro")
@@ -1045,8 +1045,12 @@ def build_player_analytics(player_name, cache):
     if not player:
         raise HTTPException(404, f"Jogador '{player_name}' nao encontrado")
 
+    wanted_match_type = (match_type or "todos").lower()
     history = []
     for m in cache.get("matches", []):
+        current_match_type = str(m.get("match_type", "desconhecido") or "desconhecido").lower()
+        if wanted_match_type != "todos" and current_match_type != wanted_match_type:
+            continue
         for pr in (m.get("players_ratings") or []):
             if pr.get("name", "").lower() == pname:
                 history.append({
@@ -1203,13 +1207,13 @@ Priorize treinos e chamadas que maximizem os pontos fortes acima. Em jogos grand
 """
 
 @app.post("/api/ai/player")
-async def ai_player(player_name: str):
+async def ai_player(player_name: str, match_type: str = Query("todos")):
     """Analise de jogador por IA usando o pacote analitico completo."""
     cache = load_cache()
     if not cache or not cache.get("players"):
         raise HTTPException(404, "Sincronize um clube primeiro")
 
-    analytics = build_player_analytics(player_name, cache)
+    analytics = build_player_analytics(player_name, cache, match_type)
     player = analytics["player"]
 
     if not OPENAI_API_KEY:
@@ -1326,10 +1330,10 @@ A formação **{ideal['formation']}** foi escolhida com base no elenco disponív
 # ============================================================
 
 @app.get("/api/player/{player_name}/analytics")
-def get_player_analytics(player_name: str):
+def get_player_analytics(player_name: str, match_type: str = Query("todos")):
     """Retorna analytics profissional completo do jogador."""
     cache = load_cache()
-    return build_player_analytics(player_name, cache)
+    return build_player_analytics(player_name, cache, match_type)
 
 
 @app.get("/api/player/{player_name}")
@@ -2863,6 +2867,7 @@ body {
 let DATA = null;
 let CURRENT_TAB = 'visao';
 let CURRENT_PERIOD = 'todos';
+let CURRENT_MATCH_TYPE = 'todos';
 let COMPARE_A = null;
 let COMPARE_B = null;
 let AGENDA = [];
@@ -2870,7 +2875,10 @@ let AGENDA_EDIT_ID = null;
 let IDEAL_FORMATION = '3-5-2';
 
 function filteredMatches() {
-  const all = (DATA && DATA.matches) ? [...DATA.matches] : [];
+  let all = (DATA && DATA.matches) ? [...DATA.matches] : [];
+  if (CURRENT_MATCH_TYPE !== 'todos') {
+    all = all.filter(m => String(m.match_type || '').toLowerCase() === CURRENT_MATCH_TYPE);
+  }
   // Já vem ordenado por timestamp desc
   if (CURRENT_PERIOD === 'todos') return all;
   if (CURRENT_PERIOD === 'ult5') return all.slice(0, 5);
@@ -2893,6 +2901,58 @@ function setPeriod(p, ev) {
   if (ev && ev.target) ev.target.classList.add('active');
   renderTab();
 }
+
+
+function setMatchType(t, ev) {
+  CURRENT_MATCH_TYPE = t;
+  document.querySelectorAll('.matchtype').forEach(el => el.classList.remove('active'));
+  if (ev && ev.target) ev.target.classList.add('active');
+  renderTab();
+}
+
+function computePlayersForMatches(matches) {
+  const byName = {};
+  (DATA.players || []).forEach(p => {
+    byName[p.name] = {...p, games: 0, rating_sum: 0, sofi_sum: 0, goals: 0, assists: 0, shots: 0, passes_pct_sum: 0, tackle_pct_sum: 0, mom: 0, reds: 0};
+  });
+  (matches || []).forEach(m => {
+    (m.players_ratings || []).forEach(pr => {
+      if (!byName[pr.name]) {
+        byName[pr.name] = {name: pr.name, position: pr.pos || '?', games: 0, rating_sum: 0, sofi_sum: 0, goals: 0, assists: 0, shots: 0, passes_pct_sum: 0, tackle_pct_sum: 0, mom: 0, reds: 0};
+      }
+      const p = byName[pr.name];
+      p.games += 1;
+      p.position = pr.pos || p.position;
+      p.rating_sum += Number(pr.rating || 0);
+      p.sofi_sum += Number(pr.sofi_rating || pr.rating || 0);
+      p.goals += Number(pr.goals || 0);
+      p.assists += Number(pr.assists || 0);
+      p.shots += Number(pr.shots || 0);
+      p.passes_pct_sum += Number(pr.pass_pct || 0);
+      p.tackle_pct_sum += Number(pr.tackle_pct || 0);
+      p.mom += Number(pr.mom || 0);
+      p.reds += Number(pr.red || 0);
+    });
+  });
+  return Object.values(byName)
+    .filter(p => p.games > 0)
+    .map(p => ({
+      ...p,
+      rating: +(p.rating_sum / Math.max(p.games, 1)).toFixed(2),
+      sofi_rating: +(p.sofi_sum / Math.max(p.games, 1)).toFixed(2),
+      pass_pct: +(p.passes_pct_sum / Math.max(p.games, 1)).toFixed(1),
+      tackle_pct: +(p.tackle_pct_sum / Math.max(p.games, 1)).toFixed(1),
+      goals_per_game: +(p.goals / Math.max(p.games, 1)).toFixed(2),
+      assists_per_game: +(p.assists / Math.max(p.games, 1)).toFixed(2),
+    }))
+    .sort((a,b) => Number(b.rating || 0) - Number(a.rating || 0));
+}
+
+function scopedPlayers() {
+  if (CURRENT_PERIOD === 'todos' && CURRENT_MATCH_TYPE === 'todos') return DATA.players || [];
+  return computePlayersForMatches(filteredMatches());
+}
+
 
 async function loadData() {
   try {
@@ -2947,6 +3007,13 @@ function render() {
       <div class="period ${CURRENT_PERIOD==='mes'?'active':''}" onclick="setPeriod('mes', event)">MÊS</div>
     </div>
     
+    <div class="period-filter" style="margin-top:-10px;">
+      <div class="period matchtype ${CURRENT_MATCH_TYPE==='todos'?'active':''}" onclick="setMatchType('todos', event)">TODAS PARTIDAS</div>
+      <div class="period matchtype ${CURRENT_MATCH_TYPE==='liga'?'active':''}" onclick="setMatchType('liga', event)">LIGA</div>
+      <div class="period matchtype ${CURRENT_MATCH_TYPE==='copa'?'active':''}" onclick="setMatchType('copa', event)">COPA</div>
+      <div class="period matchtype ${CURRENT_MATCH_TYPE==='amistoso'?'active':''}" onclick="setMatchType('amistoso', event)">AMISTOSO</div>
+    </div>
+    
     <div class="container">
       <div id="tabContent"></div>
     </div>
@@ -2993,7 +3060,7 @@ function computeStatsFor(matches) {
 
 function renderVisao() {
   const matches = filteredMatches();
-  const useFiltered = CURRENT_PERIOD !== 'todos';
+  const useFiltered = CURRENT_PERIOD !== 'todos' || CURRENT_MATCH_TYPE !== 'todos';
   const s = useFiltered ? computeStatsFor(matches) : (DATA.stats || {});
   const wr = s.win_rate || 0;
   const passPct = 80; // calc from data if available
@@ -3182,12 +3249,13 @@ function circle(pct, label) {
 }
 
 function renderJogadores() {
-  if (!DATA.players || !DATA.players.length) {
-    return '<div class="empty-state">Nenhum jogador encontrado</div>';
+  const players = scopedPlayers();
+  if (!players.length) {
+    return '<div class="empty-state">Nenhum jogador encontrado neste filtro</div>';
   }
-  
-  let html = '<div class="players-grid">';
-  DATA.players.forEach(p => {
+  const scopeLabel = CURRENT_MATCH_TYPE === 'todos' ? 'todas as partidas' : CURRENT_MATCH_TYPE;
+  let html = `<div class="section-title">Jogadores · ${scopeLabel}</div><div class="players-grid">`;
+  players.forEach(p => {
     html += `
       <div class="player-card" onclick="showPlayerDetail('${p.name.replace(/'/g, "\\'")}')">
         <div class="player-rating-big">${p.rating}</div>
@@ -3229,14 +3297,17 @@ function renderJogadores() {
 }
 
 function renderComparar() {
-  if (!DATA.players || !DATA.players.length) {
+  const players = scopedPlayers();
+  if (!players.length) {
     return '<div class="empty-state">Nenhum jogador encontrado</div>';
   }
-  const opts = DATA.players.map(p =>
+  const opts = players.map(p =>
     `<option value="${p.name}">${p.name} · ${p.position} · ${p.rating}</option>`
   ).join('');
-  const p1 = COMPARE_A || DATA.players[0]?.name;
-  const p2 = COMPARE_B || DATA.players[1]?.name || DATA.players[0]?.name;
+  if (!players.some(p => p.name === COMPARE_A)) COMPARE_A = players[0]?.name || null;
+  if (!players.some(p => p.name === COMPARE_B)) COMPARE_B = players[1]?.name || players[0]?.name || null;
+  const p1 = COMPARE_A || players[0]?.name;
+  const p2 = COMPARE_B || players[1]?.name || players[0]?.name;
   const sel = (val) => opts.replace(`value="${val}"`, `value="${val}" selected`);
 
   return `
@@ -3261,8 +3332,11 @@ function setCompare(side, name) {
 
 function renderCompareBars() {
   if (CURRENT_TAB !== 'comparar') return;
-  const a = DATA.players.find(p => p.name === COMPARE_A) || DATA.players[0];
-  const b = DATA.players.find(p => p.name === COMPARE_B) || DATA.players[1] || a;
+  const players = scopedPlayers();
+  if (!players.some(p => p.name === COMPARE_A)) COMPARE_A = players[0]?.name || null;
+  if (!players.some(p => p.name === COMPARE_B)) COMPARE_B = players[1]?.name || players[0]?.name || null;
+  const a = players.find(p => p.name === COMPARE_A) || players[0];
+  const b = players.find(p => p.name === COMPARE_B) || players[1] || a;
   if (!a || !b) return;
 
   function card(p) {
@@ -3668,7 +3742,7 @@ async function analyzePlayer(name) {
   document.getElementById('modal').classList.add('active');
   
   try {
-    const r = await fetch(`/api/ai/player?player_name=${encodeURIComponent(name)}`, { method: 'POST' });
+    const r = await fetch(`/api/ai/player?player_name=${encodeURIComponent(name)}&match_type=${encodeURIComponent(CURRENT_MATCH_TYPE)}`, { method: 'POST' });
     const data = await r.json();
     document.getElementById('modalContent').innerHTML = renderMarkdown(data.analysis);
   } catch (e) {
@@ -3681,7 +3755,7 @@ async function showPlayerDetail(name) {
   mc.innerHTML = '<div class="loading"><div class="spinner"></div> Carregando analytics...</div>';
   document.getElementById('modal').classList.add('active');
   try {
-    const r = await fetch('/api/player/' + encodeURIComponent(name) + '/analytics');
+    const r = await fetch('/api/player/' + encodeURIComponent(name) + '/analytics?match_type=' + encodeURIComponent(CURRENT_MATCH_TYPE));
     if (!r.ok) throw new Error('Não encontrado ou sem dados suficientes');
     const data = await r.json();
     mc.innerHTML = renderPlayerDetailHTML(data);
@@ -3838,15 +3912,22 @@ async function analyzeTeam() {
 
 function renderMarkdown(md) {
   if (!md) return '';
-  return md
-    .replace(/## (.+)/g, '<h2>$1</h2>')
-    .replace(/### (.+)/g, '<h3>$1</h3>')
-    .replace(/\\*\\*(.+?)\\*\\*/g, '<strong>$1</strong>')
-    .replace(/^- (.+)/gm, '<li>$1</li>')
-    .replace(/(<li>.*<\/li>)/gs, '<ul>$1</ul>')
-    .replace(/\\n\\n/g, '</p><p>')
-    .replace(/^([^<].+)$/gm, '<p>$1</p>')
+  let html = String(md);
+  if (html.includes('<h2>') || html.includes('<h3>') || html.includes('<p>') || html.includes('<ul>')) {
+    return html
+      .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+      .replace(/\n/g, '<br>');
+  }
+  html = html
+    .replace(/^### (.+)$/gm, '<h3>$1</h3>')
+    .replace(/^## (.+)$/gm, '<h2>$1</h2>')
+    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+    .replace(/^- (.+)$/gm, '<li>$1</li>')
+    .replace(/(<li>.*?<\/li>)/gs, '<ul>$1</ul>')
+    .replace(/\n\n/g, '</p><p>')
+    .replace(/^([^<\n].+)$/gm, '<p>$1</p>')
     .replace(/<p><\/p>/g, '');
+  return html;
 }
 
 function closeModal() {
