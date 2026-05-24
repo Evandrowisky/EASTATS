@@ -274,6 +274,56 @@ def load_cache() -> Optional[dict]:
         return None
 
 
+
+
+def fallback_search_from_local(club_name: str = "", platform: str = "auto") -> Optional[dict]:
+    """Usa cache/SQLite quando a busca da EA por nome falha, sem travar a sync."""
+    wanted = (club_name or "").strip().lower()
+
+    cache = load_cache() or {}
+    club = cache.get("club") or {}
+    if club.get("id"):
+        cached_name = str(club.get("name") or "")
+        if not wanted or wanted in cached_name.lower() or cached_name.lower() in wanted or wanted == "desagregados sc":
+            return {
+                "success": True,
+                "clubId": str(club.get("id")),
+                "name": cached_name or club_name or "Clube em cache",
+                "platform": club.get("platform") or (platform if platform != "auto" else "common-gen5"),
+                "source": "cache",
+            }
+
+    try:
+        conn = sqlite3.connect(DB_FILE)
+        conn.row_factory = sqlite3.Row
+        row = None
+        if wanted:
+            row = conn.execute(
+                "SELECT club_id, name, platform FROM clubs WHERE lower(name)=? ORDER BY updated_at DESC LIMIT 1",
+                (wanted,),
+            ).fetchone()
+            if row is None:
+                row = conn.execute(
+                    "SELECT club_id, name, platform FROM clubs WHERE lower(name) LIKE ? ORDER BY updated_at DESC LIMIT 1",
+                    (f"%{wanted}%",),
+                ).fetchone()
+        if row is None:
+            row = conn.execute("SELECT club_id, name, platform FROM clubs ORDER BY updated_at DESC LIMIT 1").fetchone()
+        conn.close()
+        if row:
+            return {
+                "success": True,
+                "clubId": str(row["club_id"]),
+                "name": row["name"] or club_name or "Clube salvo",
+                "platform": row["platform"] or (platform if platform != "auto" else "common-gen5"),
+                "source": "sqlite",
+            }
+    except Exception as e:
+        print(f"[EA FC] Fallback local de clube falhou: {e}")
+
+    return None
+
+
 # ============================================================
 # PROCESSAMENTO DE DADOS
 # ============================================================
@@ -827,6 +877,8 @@ def test_matchtypes(
     """Diagnostico: busca o clube e testa todos os matchTypes conhecidos/candidatos."""
     search = ea_client.search_club(club_name, platform)
     if not search.get("success"):
+        search = fallback_search_from_local(club_name, platform) or {"success": False}
+    if not search.get("success"):
         raise HTTPException(404, "Clube nao encontrado")
 
     club_id = str(search["clubId"])
@@ -878,10 +930,16 @@ async def sync_stream(
             search = ea_client.search_club(club_name, plat)
             
             if not search.get("success"):
-                yield f"data: {log('❌ Clube nao encontrado em nenhuma plataforma', 2, 8)}\n\n"
-                yield f"data: {log('💡 Verifique o nome exato do clube e tente novamente', 2, 8)}\n\n"
-                yield f"data: {json.dumps({'error': 'Clube nao encontrado', 'done': True})}\n\n"
-                return
+                fallback = fallback_search_from_local(club_name, plat)
+                if fallback:
+                    search = fallback
+                    fallback_source = fallback.get("source", "local")
+                    yield f"data: {log(f'Busca por nome falhou; usando clube salvo em {fallback_source}', 2, 8)}\n\n"
+                else:
+                    yield f"data: {log('❌ Clube nao encontrado em nenhuma plataforma nem no cache local', 2, 8)}\n\n"
+                    yield f"data: {log('💡 Verifique o nome exato do clube e tente novamente', 2, 8)}\n\n"
+                    yield f"data: {json.dumps({'error': 'Clube nao encontrado', 'done': True})}\n\n"
+                    return
             
             club_id = str(search["clubId"])
             club_name_real = search["name"]
