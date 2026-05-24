@@ -1,4 +1,4 @@
-﻿# -*- coding: utf-8 -*-
+# -*- coding: utf-8 -*-
 """
 Scout Clubs Pro v2 - Análise Profissional EA FC
 Inspirado no app Scout Clubs original
@@ -3346,7 +3346,7 @@ function computePlayersForMatches(matches) {
       last_match_position: '',
       position_counts: {GK:0, DEF:0, MID:0, FWD:0},
       games: 0, rating_sum: 0, sofi_sum: 0, goals: 0, assists: 0, shots: 0,
-      passes_pct_sum: 0, tackle_pct_sum: 0, mom: 0, reds: 0, saves: 0, clean_sheet: 0
+      passes_pct_sum: 0, passes_made: 0, tackle_pct_sum: 0, tackles_made: 0, mom: 0, reds: 0, saves: 0, clean_sheet: 0, wins: 0, draws: 0, losses: 0
     };
   });
   (matches || []).forEach(m => {
@@ -3356,7 +3356,7 @@ function computePlayersForMatches(matches) {
           name: pr.name, position: pr.pos || '?', favorite_position: pr.pos || '?', last_match_position: '',
           position_counts: {GK:0, DEF:0, MID:0, FWD:0},
           games: 0, rating_sum: 0, sofi_sum: 0, goals: 0, assists: 0, shots: 0,
-          passes_pct_sum: 0, tackle_pct_sum: 0, mom: 0, reds: 0, saves: 0, clean_sheet: 0
+          passes_pct_sum: 0, passes_made: 0, tackle_pct_sum: 0, tackles_made: 0, mom: 0, reds: 0, saves: 0, clean_sheet: 0, wins: 0, draws: 0, losses: 0
         };
       }
       const p = byName[pr.name];
@@ -3370,8 +3370,11 @@ function computePlayersForMatches(matches) {
       p.assists += Number(pr.assists || 0);
       p.shots += Number(pr.shots || 0);
       p.passes_pct_sum += Number(pr.pass_pct || 0);
+      p.passes_made += Number(pr.passes_made || 0);
       p.tackle_pct_sum += Number(pr.tackle_pct || 0);
+      p.tackles_made += Number(pr.tackles_made || 0);
       p.mom += Number(pr.mom || 0);
+      if (m.result === 'V') p.wins += 1; else if (m.result === 'E') p.draws += 1; else if (m.result === 'D') p.losses += 1;
       p.reds += Number(pr.red || 0);
       p.saves += Number(pr.saves || 0);
       p.clean_sheet += Number(pr.clean_sheet || 0);
@@ -3392,6 +3395,12 @@ function computePlayersForMatches(matches) {
         tackle_pct: +(p.tackle_pct_sum / Math.max(p.games, 1)).toFixed(1),
         goals_per_game: +(p.goals / Math.max(p.games, 1)).toFixed(2),
         assists_per_game: +(p.assists / Math.max(p.games, 1)).toFixed(2),
+        shots_per_game: +(p.shots / Math.max(p.games, 1)).toFixed(2),
+        tackles_per_game: +(p.tackles_made / Math.max(p.games, 1)).toFixed(2),
+        saves_per_game: +(p.saves / Math.max(p.games, 1)).toFixed(2),
+        goal_involvements: Number(p.goals || 0) + Number(p.assists || 0),
+        goal_involvements_per_game: +((Number(p.goals || 0) + Number(p.assists || 0)) / Math.max(p.games, 1)).toFixed(2),
+        win_rate: +((Number(p.wins || 0) / Math.max(p.games, 1)) * 100).toFixed(1),
       };
     })
     .sort((a,b) => Number(b.rating || 0) - Number(a.rating || 0));
@@ -3586,14 +3595,87 @@ function calcOpponentAvgClient(matches) {
   })).sort((a,b) => b.avg_gf - a.avg_gf).slice(0, 10);
 }
 
+function avgFrom(values) {
+  const nums = (values || []).map(Number).filter(v => Number.isFinite(v));
+  return nums.length ? nums.reduce((a,b) => a + b, 0) / nums.length : 0;
+}
+
+function computeAdvancedGeneralStats(matches) {
+  const out = {
+    player_apps: 0,
+    avg_players: 0,
+    total_shots: 0,
+    shots_per_match: 0,
+    avg_pass_pct: 0,
+    avg_tackle_pct: 0,
+    tackles_made: 0,
+    saves: 0,
+    red_cards: 0,
+    moms: 0,
+    games_3gf: 0,
+    games_3ga: 0,
+    comeback_wins: 0,
+    best_attack: 0,
+    worst_defense: 0,
+    best_diff: 0,
+    worst_diff: 0,
+    scoreless_games: 0,
+    conceded_games: 0,
+    avg_sofi: 0,
+    avg_ea: 0,
+  };
+  const passVals = [];
+  const tackleVals = [];
+  const sofiVals = [];
+  const eaVals = [];
+  (matches || []).forEach(m => {
+    const gf = Number(m.goals_for || 0);
+    const ga = Number(m.goals_against || 0);
+    out.best_attack = Math.max(out.best_attack, gf);
+    out.worst_defense = Math.max(out.worst_defense, ga);
+    out.best_diff = Math.max(out.best_diff, gf - ga);
+    out.worst_diff = Math.min(out.worst_diff, gf - ga);
+    if (gf >= 3) out.games_3gf += 1;
+    if (ga >= 3) out.games_3ga += 1;
+    if (gf === 0) out.scoreless_games += 1;
+    if (ga > 0) out.conceded_games += 1;
+    const prs = m.players_ratings || [];
+    out.player_apps += prs.length;
+    prs.forEach(p => {
+      out.total_shots += Number(p.shots || 0);
+      out.tackles_made += Number(p.tackles_made || 0);
+      out.saves += Number(p.saves || 0);
+      out.red_cards += Number(p.red || 0);
+      out.moms += Number(p.mom || 0);
+      if (Number(p.pass_pct || 0) > 0) passVals.push(Number(p.pass_pct || 0));
+      if (Number(p.tackle_pct || 0) > 0) tackleVals.push(Number(p.tackle_pct || 0));
+      if (Number(p.sofi_rating || 0) > 0) sofiVals.push(Number(p.sofi_rating || 0));
+      if (Number(p.rating || 0) > 0) eaVals.push(Number(p.rating || 0));
+    });
+  });
+  const games = Math.max((matches || []).length, 1);
+  out.avg_players = +(out.player_apps / games).toFixed(1);
+  out.shots_per_match = +(out.total_shots / games).toFixed(1);
+  out.avg_pass_pct = +avgFrom(passVals).toFixed(1);
+  out.avg_tackle_pct = +avgFrom(tackleVals).toFixed(1);
+  out.avg_sofi = +avgFrom(sofiVals).toFixed(2);
+  out.avg_ea = +avgFrom(eaVals).toFixed(2);
+  return out;
+}
+
+function miniGeneralCard(label, value, tone='') {
+  return `<div class="stat-card"><div class="stat-value ${tone}">${value}</div><div class="stat-label">${label}</div></div>`;
+}
+
 function renderVisao() {
   const matches = filteredMatches();
   const playersInClub = computePlayersForMatches(matches);
   const s = computeStatsFor(matches);
+  const adv = computeAdvancedGeneralStats(matches);
   const wr = s.win_rate || 0;
-  const passPct = 80; // calc from data if available
-  const tackPct = 21;
-  const offense = 69;
+  const passPct = adv.avg_pass_pct || 0;
+  const tackPct = adv.avg_tackle_pct || 0;
+  const offense = matches.length ? Math.min(100, Math.round(((s.goals_per_match || 0) * 18) + ((adv.shots_per_match || 0) * 4))) : 0;
   
   let html = `
     <div class="stats-grid">
@@ -3626,8 +3708,8 @@ function renderVisao() {
         <div class="stat-label">Gols/Jogo</div>
       </div>
       <div class="stat-card">
-        <div class="stat-value">${s.shots_per_match || 6}</div>
-        <div class="stat-label">Finaliz./Jogo</div>
+        <div class="stat-value">${adv.shots_per_match || 0}</div>
+        <div class="stat-label">Chutes/Jogo</div>
       </div>
       <div class="stat-card">
         <div class="stat-value">${s.clean_sheets || 0}</div>
@@ -3648,6 +3730,28 @@ function renderVisao() {
         <div style="font-size:28px;font-weight:800;color:var(--green);">${s.best_streak || 0}</div>
         <div class="stat-label">Melhor Sequência de Vitórias</div>
       </div>
+    </div>
+  `;
+
+  html += `
+    <div class="section-title">📌 Métricas Gerais do Clube no Filtro</div>
+    <div class="stats-grid">
+      ${miniGeneralCard('Média EA Elenco', adv.avg_ea || 0, 'green')}
+      ${miniGeneralCard('Média Sofi', adv.avg_sofi || 0, 'green')}
+      ${miniGeneralCard('Jogadores/Jogo', adv.avg_players || 0)}
+      ${miniGeneralCard('Chutes Totais', adv.total_shots || 0)}
+      ${miniGeneralCard('Pass% Médio', (adv.avg_pass_pct || 0) + '%')}
+      ${miniGeneralCard('Des% Médio', (adv.avg_tackle_pct || 0) + '%')}
+      ${miniGeneralCard('Desarmes', adv.tackles_made || 0)}
+      ${miniGeneralCard('Defesas', adv.saves || 0)}
+      ${miniGeneralCard('MOMs', adv.moms || 0)}
+      ${miniGeneralCard('Vermelhos', adv.red_cards || 0, adv.red_cards ? 'red' : '')}
+      ${miniGeneralCard('Jogos 3+ Gols', adv.games_3gf || 0, 'green')}
+      ${miniGeneralCard('Sofreu 3+', adv.games_3ga || 0, adv.games_3ga ? 'red' : '')}
+      ${miniGeneralCard('Melhor Ataque', adv.best_attack || 0, 'green')}
+      ${miniGeneralCard('Pior Defesa', adv.worst_defense || 0, adv.worst_defense >= 3 ? 'red' : '')}
+      ${miniGeneralCard('Jogos sem Marcar', adv.scoreless_games || 0, adv.scoreless_games ? 'yellow' : '')}
+      ${miniGeneralCard('Sofreu Gol', adv.conceded_games || 0)}
     </div>
   `;
   
@@ -3762,6 +3866,10 @@ function circle(pct, label) {
   `;
 }
 
+function playerStatLine(label, value) {
+  return `<div class="player-stat"><span class="player-stat-label">${label}</span><span class="player-stat-val">${value ?? 0}</span></div>`;
+}
+
 function renderJogadores() {
   const players = scopedPlayers();
   if (!players.length) {
@@ -3778,30 +3886,24 @@ function renderJogadores() {
         </div>
         <div class="player-name">${p.name}</div>
         <div class="player-stats">
-          <div class="player-stat">
-            <span class="player-stat-label">Gols</span>
-            <span class="player-stat-val">${p.goals}</span>
-          </div>
-          <div class="player-stat">
-            <span class="player-stat-label">Assist</span>
-            <span class="player-stat-val">${p.assists}</span>
-          </div>
-          <div class="player-stat">
-            <span class="player-stat-label">Pass%</span>
-            <span class="player-stat-val">${p.pass_pct}%</span>
-          </div>
-          <div class="player-stat">
-            <span class="player-stat-label">Div%</span>
-            <span class="player-stat-val">${p.tackle_pct}%</span>
-          </div>
-          <div class="player-stat">
-            <span class="player-stat-label">MOM</span>
-            <span class="player-stat-val">${p.mom}</span>
-          </div>
-          <div class="player-stat">
-            <span class="player-stat-label">Chutes</span>
-            <span class="player-stat-val">${p.shots}</span>
-          </div>
+          ${playerStatLine('Sofi', p.sofi_rating)}
+          ${playerStatLine('Gols', p.goals)}
+          ${playerStatLine('Assist', p.assists)}
+          ${playerStatLine('G+A', p.goal_involvements)}
+          ${playerStatLine('G/J', p.goals_per_game)}
+          ${playerStatLine('A/J', p.assists_per_game)}
+          ${playerStatLine('Chutes', p.shots)}
+          ${playerStatLine('Chu/J', p.shots_per_game)}
+          ${playerStatLine('Pass%', p.pass_pct + '%')}
+          ${playerStatLine('Passes', p.passes_made)}
+          ${playerStatLine('Des%', p.tackle_pct + '%')}
+          ${playerStatLine('Desarmes', p.tackles_made)}
+          ${playerStatLine('Defesas', p.saves)}
+          ${playerStatLine('SG', p.clean_sheet)}
+          ${playerStatLine('MOM', p.mom)}
+          ${playerStatLine('V/E/D', `${p.wins}/${p.draws}/${p.losses}`)}
+          ${playerStatLine('Win%', p.win_rate + '%')}
+          ${playerStatLine('Verm.', p.reds)}
         </div>
       </div>
     `;
@@ -3904,28 +4006,18 @@ function renderConfrontos() {
   if (!matches.length) {
     return '<div class="empty-state">Nenhuma partida no período selecionado</div>';
   }
-  
-  // Agrupa por adversário
-  const byOpp = {};
-  matches.forEach(m => {
-    if (!byOpp[m.opponent]) {
-      byOpp[m.opponent] = { v: 0, e: 0, d: 0, last_score: m.score };
-    }
-    if (m.result === 'V') byOpp[m.opponent].v++;
-    else if (m.result === 'E') byOpp[m.opponent].e++;
-    else byOpp[m.opponent].d++;
-  });
-  
   let html = '<div class="confronts-grid">';
-  Object.entries(byOpp).forEach(([opp, d]) => {
+  matches.forEach(m => {
+    const top = (m.players_ratings || [])[0];
     html += `
-      <div class="confront-card">
-        <div class="confront-name">${opp.toUpperCase()}</div>
+      <div class="confront-card" onclick="showMatchDetails('${m.match_id}')" style="cursor:pointer;">
+        <div>
+          <div class="confront-name">${m.date} · VS ${String(m.opponent || '').toUpperCase()}</div>
+          <div style="font-size:11px;color:var(--text-2);margin-top:4px;">${m.match_type} · MOM ${m.mom || '-'} ${m.mom_rating ? '(' + m.mom_rating + ')' : ''}${top ? ' · Melhor Sofi: ' + top.name + ' ' + top.sofi_rating : ''}</div>
+        </div>
         <div class="confront-vs">
-          <span class="vs-tag v">${d.v}V</span>
-          <span class="vs-tag e">${d.e}E</span>
-          <span class="vs-tag d">${d.d}D</span>
-          <span style="margin-left:8px;color:var(--text);font-weight:700;">${d.last_score}</span>
+          <span class="vs-tag ${m.result.toLowerCase()}">${m.result}</span>
+          <span style="margin-left:8px;color:var(--text);font-weight:700;">${m.score}</span>
         </div>
       </div>
     `;
@@ -4323,24 +4415,48 @@ async function deleteAgenda(id) {
 }
 
 function showMatchDetails(matchId) {
-  const m = DATA.matches.find(x => x.match_id === matchId);
+  const m = DATA.matches.find(x => String(x.match_id) === String(matchId));
   if (!m) return;
-  
+  const players = [...(m.players_ratings || [])].sort((a,b) => Number(b.sofi_rating || b.rating || 0) - Number(a.sofi_rating || a.rating || 0));
+  const positives = [];
+  const negatives = [];
+  if (m.result === 'V') positives.push('Resultado positivo e eficiência para vencer o confronto.');
+  if (m.goals_for >= 3) positives.push(`Bom volume ofensivo: ${m.goals_for} gols marcados.`);
+  if (m.goals_against === 0) positives.push('Clean sheet coletivo: defesa não sofreu gols.');
+  if (players.some(p => Number(p.sofi_rating || 0) >= 8)) positives.push('Houve destaque individual com nota Sofi acima de 8.');
+  if (m.result === 'D') negatives.push('Resultado negativo: revisar tomada de decisão e transições.');
+  if (m.goals_against >= 3) negatives.push(`Atenção defensiva: ${m.goals_against} gols sofridos.`);
+  if (players.some(p => Number(p.red || 0) > 0)) negatives.push('Cartão vermelho impactou o desempenho coletivo.');
+  if (players.filter(p => Number(p.rating || 0) < 6).length) negatives.push('Jogadores com nota EA abaixo de 6 indicam oscilação individual.');
+  if (!positives.length) positives.push('Partida equilibrada, sem ponto positivo dominante nos dados disponíveis.');
+  if (!negatives.length) negatives.push('Sem alerta grave nos dados disponíveis.');
+
   let html = `
-    <h2>VS ${m.opponent.toUpperCase()}</h2>
-    <p><strong>Resultado:</strong> ${m.result === 'V' ? '✅ VITÓRIA' : m.result === 'E' ? '🟡 EMPATE' : '❌ DERROTA'} (${m.score})</p>
-    <p><strong>Data:</strong> ${m.date}</p>
-    <p><strong>Tipo:</strong> ${m.match_type}</p>
-    <h3>⭐ Melhor da Partida</h3>
-    <p><strong>${m.mom || 'N/A'}</strong> — Nota ${m.mom_rating}</p>
-    <h3>📊 Notas de Todos os Jogadores</h3>
-    <ul>
+    <h2>VS ${String(m.opponent || '').toUpperCase()}</h2>
+    <p><strong>Resultado:</strong> ${m.result === 'V' ? 'Vitória' : m.result === 'E' ? 'Empate' : 'Derrota'} (${m.score})</p>
+    <p><strong>Data:</strong> ${m.date} · <strong>Tipo:</strong> ${m.match_type} · <strong>ID:</strong> ${m.match_id}</p>
+    <div class="analytics-cards" style="margin:14px 0;">
+      <div class="analytics-card"><div class="v">${m.goals_for}</div><div class="l">Gols Pró</div></div>
+      <div class="analytics-card"><div class="v">${m.goals_against}</div><div class="l">Gols Contra</div></div>
+      <div class="analytics-card"><div class="v">${players.length}</div><div class="l">Jogadores</div></div>
+      <div class="analytics-card"><div class="v">${m.mom_rating || '-'}</div><div class="l">Nota MOM</div></div>
+    </div>
+    <h3>Resumo</h3>
+    <p><strong>MOM:</strong> ${m.mom || 'N/A'}${m.mom_rating ? ' · ' + m.mom_rating : ''}</p>
+    <h3>Pontos positivos</h3><ul>${positives.map(x => `<li>${x}</li>`).join('')}</ul>
+    <h3>Pontos negativos</h3><ul>${negatives.map(x => `<li>${x}</li>`).join('')}</ul>
+    <h3>Notas dos jogadores</h3>
+    <table class="history-table">
+      <thead><tr><th>#</th><th>Jogador</th><th>Pos</th><th>Sofi</th><th>EA</th><th>G</th><th>A</th><th>Chu</th><th>Pass%</th><th>Des%</th><th>Des</th><th>Def</th><th>SG</th><th>Verm</th><th>MOM</th></tr></thead>
+      <tbody>
+        ${players.map((p, idx) => `<tr>
+          <td>${idx + 1}</td><td><strong>${p.name}</strong></td><td>${p.pos || '-'}</td><td><span class="sofi">${p.sofi_rating ?? p.rating}</span></td><td>${p.rating ?? '-'}</td>
+          <td>${p.goals || 0}</td><td>${p.assists || 0}</td><td>${p.shots || 0}</td><td>${p.pass_pct || 0}%</td><td>${p.tackle_pct || 0}%</td><td>${p.tackles_made || 0}</td>
+          <td>${p.saves || 0}</td><td>${p.clean_sheet || 0}</td><td>${p.red || 0}</td><td>${p.mom ? 'Sim' : ''}</td>
+        </tr>`).join('')}
+      </tbody>
+    </table>
   `;
-  (m.players_ratings || []).forEach(p => {
-    html += `<li><strong>${p.name}</strong> (${p.pos}) — Nota: ${p.rating} | Gols: ${p.goals} | Assist: ${p.assists}</li>`;
-  });
-  html += '</ul>';
-  
   document.getElementById('modalContent').innerHTML = html;
   document.getElementById('modal').classList.add('active');
 }
