@@ -2823,6 +2823,191 @@ body {
   .heatmap-wrap { grid-template-columns: 1fr; }
   .heatmap-field { height: 320px; }
 }
+
+
+/* RESPONSIVE HARDENING */
+html, body { max-width: 100%; }
+.header-inner, .container, .club-card, .period-filter { width: 100%; }
+.period-filter { flex-wrap: wrap; align-items: center; }
+.tabs { flex-wrap: wrap; border-radius: 14px; scrollbar-width: thin; }
+.modal-content, .player-detail { max-width: 100%; overflow-x: hidden; }
+
+@media (max-width: 1024px) {
+  .container { padding: 0 12px 32px; }
+  .club-card { padding: 0 12px; }
+  .stats-grid, .circles-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .compare-grid, .analytics-grid, .heatmap-wrap { grid-template-columns: 1fr; }
+  .chart-box.wide { grid-column: span 1; }
+  .compare-bar-row { grid-template-columns: 52px 1fr 72px 1fr 52px; gap: 6px; }
+  .modal-box { max-width: calc(100vw - 20px); padding: 18px; }
+  .field { width: min(100%, 520px); height: 560px; }
+}
+
+@media (max-width: 640px) {
+  .header { padding: 12px; }
+  .header-inner { align-items: stretch; flex-direction: column; gap: 12px; }
+  .header-inner > div:last-child { width: 100%; }
+  #clubInput { width: 100% !important; min-width: 0; }
+  .btn-sync { justify-content: center; }
+  .tabs { margin: 12px; padding: 8px; gap: 6px; }
+  .tab { flex: 1 1 calc(50% - 6px); text-align: center; padding: 9px 8px; font-size: 10px; }
+  .period-filter { padding: 0 12px; gap: 6px; margin-bottom: 12px; }
+  .period { flex: 1 1 calc(50% - 6px); text-align: center; padding: 8px 8px; font-size: 10px; }
+  .player-scope-filter .period { flex-basis: 100%; }
+  .stats-grid, .circles-grid, .players-grid, .detail-grid, .analytics-cards { grid-template-columns: 1fr 1fr; gap: 8px; }
+  .players-grid { grid-template-columns: 1fr; }
+  .stat-card { padding: 16px 10px; border-radius: 10px; }
+  .stat-value { font-size: 25px; }
+  .club-info { padding: 14px; border-radius: 12px; }
+  .club-name { font-size: 18px; }
+  .match-card, .opp-row, .mvp-card { align-items: flex-start; flex-direction: column; gap: 10px; }
+  .opp-stats, .mvp-stats { width: 100%; justify-content: space-between; }
+  .field { height: 500px; max-width: 100%; }
+  .player-circle { width: 42px; height: 42px; font-size: 12px; }
+  .player-circle-name { max-width: 86px; white-space: normal; line-height: 1.15; }
+  .agenda-form { grid-template-columns: 1fr !important; }
+  .agenda-form input, .agenda-form select, .agenda-form textarea, .agenda-form .full { grid-column: span 1 !important; }
+  .agenda-row { grid-template-columns: 72px 1fr; }
+  .agenda-row .btn-mini { width: 100%; }
+  .history-table { font-size: 10px; min-width: 780px; }
+  .player-detail { overflow-x: hidden; }
+  .history-table { display: table; }
+  .modal-box { max-height: 92vh; border-radius: 10px; }
+  .analytics-hero, .heatmap-wrap { grid-template-columns: 1fr; }
+  .analytics-score { width: 86px; height: 86px; }
+  .chart-box { height: 230px; min-height: 230px; max-height: 230px; }
+  .chart-box canvas { height: 180px !important; max-height: 180px !important; }
+  .chart-box.wide { height: 300px; min-height: 300px; max-height: 300px; }
+  .chart-box.wide canvas { height: 250px !important; max-height: 250px !important; }
+}
+
+
+/* JERSEY FORMATION FIELD */
+.field {
+  background:
+    repeating-linear-gradient(90deg, rgba(255,255,255,0.035) 0 1px, transparent 1px 14.285%),
+    repeating-linear-gradient(0deg, rgba(255,255,255,0.025) 0 1px, transparent 1px 11%),
+    linear-gradient(180deg, #009d22 0%, #00891d 49%, #007918 50%, #008d1e 100%);
+  border: 4px solid rgba(255,255,255,0.9);
+  border-radius: 4px;
+  height: 720px;
+  max-width: 560px;
+  box-shadow: 0 0 30px rgba(0,255,115,0.22);
+}
+.field::before, .field::after {
+  border-color: rgba(255,255,255,0.88);
+  border-width: 3px;
+  width: 52%;
+}
+.field::before {
+  top: 0;
+  height: 118px;
+  border-radius: 0 0 4px 4px;
+}
+.field::after {
+  bottom: 0;
+  height: 118px;
+  border-radius: 4px 4px 0 0;
+}
+.field-line {
+  height: 3px;
+  background: rgba(255,255,255,0.88);
+}
+.field-circle {
+  width: 124px;
+  height: 124px;
+  border: 3px solid rgba(255,255,255,0.88);
+}
+.field-spot {
+  position: absolute;
+  left: 50%;
+  width: 9px;
+  height: 9px;
+  transform: translateX(-50%);
+  border-radius: 50%;
+  background: rgba(255,255,255,0.9);
+}
+.field-spot.top { top: 135px; }
+.field-spot.bottom { bottom: 135px; }
+.player-on-field {
+  width: 112px;
+  transform: translate(-50%, -50%);
+}
+.player-jersey {
+  width: 58px;
+  height: 62px;
+  margin: 0 auto;
+  position: relative;
+  background: #f6fff8;
+  color: #dd1633;
+  clip-path: polygon(28% 0, 72% 0, 92% 18%, 100% 39%, 82% 48%, 76% 35%, 76% 100%, 24% 100%, 24% 35%, 18% 48%, 0 39%, 8% 18%);
+  filter: drop-shadow(0 3px 4px rgba(0,0,0,0.35));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 26px;
+  font-weight: 900;
+  line-height: 1;
+}
+.player-jersey::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 36%;
+  width: 28%;
+  height: 10px;
+  border: 3px solid #dd1633;
+  border-top: none;
+  border-radius: 0 0 12px 12px;
+}
+.player-jersey.gk {
+  background: #ffd233;
+  color: #111;
+}
+.player-jersey.gk::before { border-color: #111; }
+.player-circle { display: none; }
+.player-circle-name {
+  display: block;
+  min-width: 92px;
+  max-width: 112px;
+  margin: 3px auto 0;
+  padding: 2px 8px;
+  background: rgba(0, 42, 20, 0.86);
+  border-radius: 999px;
+  color: #fff;
+  font-size: 9px;
+  font-weight: 800;
+  line-height: 1.15;
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.24);
+}
+.player-role-label {
+  color: rgba(255,255,255,0.86);
+  font-size: 8px;
+  font-weight: 900;
+  letter-spacing: 1px;
+  text-align: center;
+  margin-top: 1px;
+}
+.player-rating-label {
+  color: #eaffef;
+  font-size: 10px;
+  font-weight: 900;
+  text-align: center;
+  text-shadow: 0 1px 5px rgba(0,0,0,0.55);
+  margin-top: 1px;
+}
+@media (max-width: 640px) {
+  .field { height: 620px; }
+  .player-on-field { width: 92px; }
+  .player-jersey { width: 46px; height: 50px; font-size: 21px; }
+  .player-circle-name { min-width: 76px; max-width: 92px; font-size: 8px; padding: 2px 6px; }
+  .player-rating-label { font-size: 9px; }
+}
+
 </style>
 </head>
 <body>
@@ -2868,6 +3053,7 @@ let DATA = null;
 let CURRENT_TAB = 'visao';
 let CURRENT_PERIOD = 'todos';
 let CURRENT_MATCH_TYPE = 'todos';
+let CURRENT_PLAYER_SCOPE = 'clube';
 let COMPARE_A = null;
 let COMPARE_B = null;
 let AGENDA = [];
@@ -2910,6 +3096,15 @@ function setMatchType(t, ev) {
   renderTab();
 }
 
+function setPlayerScope(scope, ev) {
+  CURRENT_PLAYER_SCOPE = scope;
+  document.querySelectorAll('.playerscope').forEach(el => el.classList.remove('active'));
+  if (ev && ev.target) ev.target.classList.add('active');
+  COMPARE_A = null;
+  COMPARE_B = null;
+  renderTab();
+}
+
 function computePlayersForMatches(matches) {
   const byName = {};
   (DATA.players || []).forEach(p => {
@@ -2948,8 +3143,34 @@ function computePlayersForMatches(matches) {
     .sort((a,b) => Number(b.rating || 0) - Number(a.rating || 0));
 }
 
+function computeOtherClubPlayers() {
+  const current = computePlayersForMatches(DATA.matches || []);
+  const byName = {};
+  current.forEach(p => byName[p.name] = p);
+  return (DATA.players || []).map(p => {
+    const club = byName[p.name] || {};
+    const games = Math.max(0, Number(p.games || 0) - Number(club.games || 0));
+    const goals = Math.max(0, Number(p.goals || 0) - Number(club.goals || 0));
+    const assists = Math.max(0, Number(p.assists || 0) - Number(club.assists || 0));
+    const shots = Math.max(0, Number(p.shots || 0) - Number(club.shots || 0));
+    const mom = Math.max(0, Number(p.mom || 0) - Number(club.mom || 0));
+    return {
+      ...p,
+      games,
+      goals,
+      assists,
+      shots,
+      mom,
+      goals_per_game: +(goals / Math.max(games, 1)).toFixed(2),
+      assists_per_game: +(assists / Math.max(games, 1)).toFixed(2),
+      scope_note: 'Estimado: EA geral menos jogos registrados no clube buscado',
+    };
+  }).filter(p => p.games > 0).sort((a,b) => Number(b.rating || 0) - Number(a.rating || 0));
+}
+
 function scopedPlayers() {
-  if (CURRENT_PERIOD === 'todos' && CURRENT_MATCH_TYPE === 'todos') return DATA.players || [];
+  if (CURRENT_PLAYER_SCOPE === 'geral') return DATA.players || [];
+  if (CURRENT_PLAYER_SCOPE === 'outros') return computeOtherClubPlayers();
   return computePlayersForMatches(filteredMatches());
 }
 
@@ -3012,6 +3233,12 @@ function render() {
       <div class="period matchtype ${CURRENT_MATCH_TYPE==='liga'?'active':''}" onclick="setMatchType('liga', event)">LIGA</div>
       <div class="period matchtype ${CURRENT_MATCH_TYPE==='copa'?'active':''}" onclick="setMatchType('copa', event)">COPA</div>
       <div class="period matchtype ${CURRENT_MATCH_TYPE==='amistoso'?'active':''}" onclick="setMatchType('amistoso', event)">AMISTOSO</div>
+    </div>
+    
+    <div class="period-filter player-scope-filter" style="margin-top:-10px;">
+      <div class="period playerscope ${CURRENT_PLAYER_SCOPE==='clube'?'active':''}" onclick="setPlayerScope('clube', event)">NÚMEROS: CLUBE BUSCADO</div>
+      <div class="period playerscope ${CURRENT_PLAYER_SCOPE==='outros'?'active':''}" onclick="setPlayerScope('outros', event)">OUTROS CLUBES</div>
+      <div class="period playerscope ${CURRENT_PLAYER_SCOPE==='geral'?'active':''}" onclick="setPlayerScope('geral', event)">EA GERAL</div>
     </div>
     
     <div class="container">
@@ -3253,14 +3480,14 @@ function renderJogadores() {
   if (!players.length) {
     return '<div class="empty-state">Nenhum jogador encontrado neste filtro</div>';
   }
-  const scopeLabel = CURRENT_MATCH_TYPE === 'todos' ? 'todas as partidas' : CURRENT_MATCH_TYPE;
+  const scopeLabel = CURRENT_PLAYER_SCOPE === 'clube' ? (CURRENT_MATCH_TYPE === 'todos' ? 'clube buscado' : `clube buscado · ${CURRENT_MATCH_TYPE}`) : CURRENT_PLAYER_SCOPE === 'outros' ? 'outros clubes' : 'EA geral';
   let html = `<div class="section-title">Jogadores · ${scopeLabel}</div><div class="players-grid">`;
   players.forEach(p => {
     html += `
       <div class="player-card" onclick="showPlayerDetail('${p.name.replace(/'/g, "\\'")}')">
         <div class="player-rating-big">${p.rating}</div>
         <div class="player-pos">
-          <span class="player-pos-badge">${p.position} · ${p.games}J</span>
+          <span class="player-pos-badge">${p.position} · ${p.games}J${p.scope_note ? " · estimado" : ""}</span>
         </div>
         <div class="player-name">${p.name}</div>
         <div class="player-stats">
@@ -3541,11 +3768,15 @@ function renderTimeIdeal() {
   const formations = Object.keys(FORMATION_SLOTS);
 
   let fieldHtml = '';
-  players.forEach(p => {
+  players.forEach((p, idx) => {
+    const shirtNo = p.role === 'GK' ? 1 : idx + 1;
+    const displayName = p.name.length > 14 ? p.name.slice(0, 14) : p.name;
     fieldHtml += `
       <div class="player-on-field" style="left:${p.x}%;top:${p.y}%;" title="${p.role}: ${p.role_description}">
-        <div class="player-circle">${p.rating}</div>
-        <div class="player-circle-name"><strong>${p.role}</strong> ${p.name.length > 12 ? p.name.slice(0,12) : p.name}</div>
+        <div class="player-jersey ${p.role === 'GK' ? 'gk' : ''}">${shirtNo}</div>
+        <div class="player-circle-name">${displayName}</div>
+        <div class="player-rating-label">EA ${p.rating}</div>
+        <div class="player-role-label">${p.role}</div>
       </div>
     `;
   });
@@ -3577,6 +3808,8 @@ function renderTimeIdeal() {
       <div class="field">
         <div class="field-line"></div>
         <div class="field-circle"></div>
+        <div class="field-spot top"></div>
+        <div class="field-spot bottom"></div>
         ${fieldHtml}
       </div>
       <div class="formation-label">Escolha automática por função, nota e encaixe posicional</div>
