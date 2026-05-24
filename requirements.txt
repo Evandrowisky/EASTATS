@@ -9,3 +9,4 @@ supabase
 passlib[bcrypt]
 python-jose[cryptography]
 python-multipart
+bcrypt<5

@@ -851,7 +851,7 @@ def _get_pwd_context():
     if _pwd_context is None:
         try:
             from passlib.context import CryptContext
-            _pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+            _pwd_context = CryptContext(schemes=["bcrypt_sha256", "bcrypt"], deprecated="auto")
         except Exception as e:
             print(f"[AUTH] passlib/bcrypt indisponivel: {type(e).__name__}: {e}")
             raise HTTPException(500, "Dependencia de autenticacao ausente: passlib[bcrypt]")
@@ -6889,6 +6889,7 @@ if __name__ == "__main__":
     print("="*60 + "\n")
     
     uvicorn.run(app, host="0.0.0.0", port=8000)
+
 
 
 
