@@ -226,6 +226,7 @@ def init_db():
             player_name TEXT NOT NULL,
             manual_position TEXT,
             archetype TEXT,
+            playstyles TEXT,
             notes TEXT,
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             UNIQUE(club_id, player_name)
@@ -251,6 +252,14 @@ def init_db():
                 print(f"[DB] Migracao: coluna 'data' adicionada em '{table}'")
         except Exception as e:
             print(f"[DB] Aviso ao migrar {table}: {e}")
+    try:
+        c.execute("PRAGMA table_info(player_profiles)")
+        profile_cols = [row[1] for row in c.fetchall()]
+        if profile_cols and "playstyles" not in profile_cols:
+            c.execute("ALTER TABLE player_profiles ADD COLUMN playstyles TEXT")
+            print("[DB] Migracao: coluna 'playstyles' adicionada em 'player_profiles'")
+    except Exception as e:
+        print(f"[DB] Aviso ao migrar player_profiles: {e}")
     conn.commit()
     conn.close()
 
@@ -276,15 +285,27 @@ def load_cache() -> Optional[dict]:
 
 
 
+def _norm_club_name(value: str) -> str:
+    return " ".join(str(value or "").strip().lower().split())
+
+
+def _club_name_matches(wanted: str, candidate: str) -> bool:
+    wanted = _norm_club_name(wanted)
+    candidate = _norm_club_name(candidate)
+    if not wanted or not candidate:
+        return False
+    return wanted == candidate or wanted in candidate or candidate in wanted
+
+
 def fallback_search_from_local(club_name: str = "", platform: str = "auto") -> Optional[dict]:
-    """Usa cache/SQLite quando a busca da EA por nome falha, sem travar a sync."""
-    wanted = (club_name or "").strip().lower()
+    """Usa cache/SQLite somente quando o nome pedido bate com o clube salvo."""
+    wanted = _norm_club_name(club_name)
 
     cache = load_cache() or {}
     club = cache.get("club") or {}
     if club.get("id"):
         cached_name = str(club.get("name") or "")
-        if not wanted or wanted in cached_name.lower() or cached_name.lower() in wanted or wanted == "desagregados sc":
+        if not wanted or _club_name_matches(wanted, cached_name):
             return {
                 "success": True,
                 "clubId": str(club.get("id")),
@@ -307,10 +328,10 @@ def fallback_search_from_local(club_name: str = "", platform: str = "auto") -> O
                     "SELECT club_id, name, platform FROM clubs WHERE lower(name) LIKE ? ORDER BY updated_at DESC LIMIT 1",
                     (f"%{wanted}%",),
                 ).fetchone()
-        if row is None:
+        elif not wanted:
             row = conn.execute("SELECT club_id, name, platform FROM clubs ORDER BY updated_at DESC LIMIT 1").fetchone()
         conn.close()
-        if row:
+        if row and (not wanted or _club_name_matches(wanted, row["name"])):
             return {
                 "success": True,
                 "clubId": str(row["club_id"]),
@@ -1603,6 +1624,7 @@ def get_player_detail(player_name: str):
 class PlayerProfileUpdate(BaseModel):
     manual_position: Optional[str] = None
     archetype: Optional[str] = None
+    playstyles: Optional[List[str]] = None
     notes: Optional[str] = None
 
 
@@ -1618,7 +1640,7 @@ def load_player_profiles(club_id: Optional[str] = None) -> Dict[str, Dict[str, A
         conn = sqlite3.connect(DB_FILE)
         conn.row_factory = sqlite3.Row
         rows = conn.execute(
-            "SELECT player_name, manual_position, archetype, notes FROM player_profiles WHERE club_id=?",
+            "SELECT player_name, manual_position, archetype, playstyles, notes FROM player_profiles WHERE club_id=?",
             (club_id,),
         ).fetchall()
         conn.close()
@@ -1626,6 +1648,7 @@ def load_player_profiles(club_id: Optional[str] = None) -> Dict[str, Dict[str, A
             r["player_name"]: {
                 "manual_position": r["manual_position"],
                 "archetype": r["archetype"],
+                "playstyles": json.loads(r["playstyles"] or "[]") if r["playstyles"] else [],
                 "notes": r["notes"],
             }
             for r in rows
@@ -1651,21 +1674,23 @@ def update_player_profile(player_name: str, item: PlayerProfileUpdate):
     club_id = _current_club_id_from_cache()
     manual_position = (item.manual_position or "").strip() or None
     archetype = (item.archetype or "").strip() or None
+    playstyles = [str(x).strip() for x in (item.playstyles or []) if str(x).strip()][:3]
     notes = (item.notes or "").strip() or None
     try:
         conn = sqlite3.connect(DB_FILE)
-        if manual_position or archetype or notes:
+        if manual_position or archetype or playstyles or notes:
             conn.execute(
                 """
-                INSERT INTO player_profiles (club_id, player_name, manual_position, archetype, notes, updated_at)
-                VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                INSERT INTO player_profiles (club_id, player_name, manual_position, archetype, playstyles, notes, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
                 ON CONFLICT(club_id, player_name) DO UPDATE SET
                     manual_position=excluded.manual_position,
                     archetype=excluded.archetype,
+                    playstyles=excluded.playstyles,
                     notes=excluded.notes,
                     updated_at=CURRENT_TIMESTAMP
                 """,
-                (club_id, player_name, manual_position, archetype, notes),
+                (club_id, player_name, manual_position, archetype, json.dumps(playstyles, ensure_ascii=False), notes),
             )
         else:
             conn.execute(
@@ -1682,6 +1707,7 @@ def update_player_profile(player_name: str, item: PlayerProfileUpdate):
         "player_name": player_name,
         "manual_position": manual_position,
         "archetype": archetype,
+        "playstyles": playstyles,
         "notes": notes,
     }
 
@@ -3115,7 +3141,7 @@ body {
   border-radius: 10px;
   padding: 12px;
   display: grid;
-  grid-template-columns: minmax(220px, 1fr) 160px 180px minmax(160px, 1fr) auto;
+  grid-template-columns: minmax(220px, 1.4fr) repeat(5, minmax(130px, 1fr)) minmax(160px, 1fr) auto;
   gap: 10px;
   align-items: center;
 }
@@ -3431,6 +3457,43 @@ let AGENDA = [];
 let AGENDA_EDIT_ID = null;
 let IDEAL_FORMATION = '3-5-2';
 
+const PLAYSTYLE_CATALOG = [
+  {name:'Power Shot', group:'Finalizacao', desc:'Chutes fortes de media/longa distancia com mais potencia.'},
+  {name:'Dead Ball', group:'Finalizacao', desc:'Faltas, escanteios e bolas paradas com mais curva/precisao.'},
+  {name:'Chip Shot', group:'Finalizacao', desc:'Cavadinhas e finalizacoes por cobertura mais eficientes.'},
+  {name:'Finesse Shot', group:'Finalizacao', desc:'Chutes colocados com curva e precisao.'},
+  {name:'Power Header', group:'Finalizacao', desc:'Cabeceios ofensivos mais fortes e precisos.'},
+  {name:'Incisive Pass', group:'Passe', desc:'Enfiadas e passes que quebram linhas.'},
+  {name:'Pinged Pass', group:'Passe', desc:'Passes rasteiros fortes com velocidade e controle.'},
+  {name:'Long Ball Pass', group:'Passe', desc:'Lancamentos longos mais precisos.'},
+  {name:'Tiki Taka', group:'Passe', desc:'Passes curtos de primeira e combinacoes rapidas.'},
+  {name:'Whipped Pass', group:'Passe', desc:'Cruzamentos com curva, velocidade e perigo.'},
+  {name:'First Touch', group:'Controle', desc:'Primeiro toque orientado e dominio sob pressao.'},
+  {name:'Flair', group:'Controle', desc:'Passes e finalizacoes de estilo com mais eficacia.'},
+  {name:'Press Proven', group:'Controle', desc:'Protege a bola melhor sob pressao.'},
+  {name:'Rapid', group:'Controle', desc:'Corridas em velocidade com a bola.'},
+  {name:'Technical', group:'Controle', desc:'Conducao tecnica e dribles controlados.'},
+  {name:'Trickster', group:'Controle', desc:'Dribles especiais e movimentos de habilidade.'},
+  {name:'Block', group:'Defesa', desc:'Bloqueios defensivos mais eficazes.'},
+  {name:'Bruiser', group:'Defesa', desc:'Duelos fisicos e disputas de corpo mais fortes.'},
+  {name:'Intercept', group:'Defesa', desc:'Interceptacoes e cortes de passe melhores.'},
+  {name:'Jockey', group:'Defesa', desc:'Contencao lateral e marcacao em jockey mais eficiente.'},
+  {name:'Slide Tackle', group:'Defesa', desc:'Carrinhos com maior alcance e precisao.'},
+  {name:'Anticipate', group:'Defesa', desc:'Botes em pe e antecipacoes mais limpos.'},
+  {name:'Acrobatic', group:'Fisico', desc:'Voleios, bicicletas e acoes acrobaticas.'},
+  {name:'Aerial', group:'Fisico', desc:'Disputas aereas ofensivas e defensivas.'},
+  {name:'Trivela', group:'Fisico', desc:'Passes e chutes de tres dedos.'},
+  {name:'Relentless', group:'Fisico', desc:'Folego, recomposicao e pressao por mais tempo.'},
+  {name:'Quick Step', group:'Fisico', desc:'Explosao nos primeiros metros.'},
+  {name:'Long Throw', group:'Fisico', desc:'Laterais longos para area ou profundidade.'},
+  {name:'Far Throw', group:'Goleiro', desc:'Reposicao longa com as maos.'},
+  {name:'Footwork', group:'Goleiro', desc:'Defesas com os pes e ajustes curtos.'},
+  {name:'Cross Claimer', group:'Goleiro', desc:'Saidas em cruzamentos.'},
+  {name:'Rush Out', group:'Goleiro', desc:'Saidas rapidas do gol para abafar.'},
+  {name:'Far Reach', group:'Goleiro', desc:'Alcance em defesas no canto.'},
+  {name:'Quick Reflexes', group:'Goleiro', desc:'Reflexos em chutes proximos.'},
+];
+
 function filteredMatches() {
   let all = (DATA && DATA.matches) ? [...DATA.matches] : [];
   if (CURRENT_MATCH_TYPE !== 'todos') {
@@ -3578,9 +3641,10 @@ async function loadPlayerProfiles() {
   saveLocalPlayerProfiles();
 }
 
-async function savePlayerProfile(name, manualPosition, archetype, notes) {
-  if (manualPosition || archetype || notes) {
-    PLAYER_PROFILES[name] = {manual_position: manualPosition || null, archetype: archetype || null, notes: notes || null, manual_saved_at: new Date().toISOString()};
+async function savePlayerProfile(name, manualPosition, archetype, notes, playstyles=[]) {
+  playstyles = (playstyles || []).filter(Boolean).slice(0, 3);
+  if (manualPosition || archetype || notes || playstyles.length) {
+    PLAYER_PROFILES[name] = {manual_position: manualPosition || null, archetype: archetype || null, playstyles, notes: notes || null, manual_saved_at: new Date().toISOString()};
     if (DATA) DATA.player_profiles = {...(DATA.player_profiles || {}), [name]: PLAYER_PROFILES[name]};
   } else {
     delete PLAYER_PROFILES[name];
@@ -3593,6 +3657,7 @@ async function savePlayerProfile(name, manualPosition, archetype, notes) {
     body: JSON.stringify({
       manual_position: manualPosition || null,
       archetype: archetype || null,
+      playstyles,
       notes: notes || null,
     })
   });
@@ -3644,6 +3709,7 @@ function render() {
       <div class="tab ${CURRENT_TAB==='confrontos'?'active':''}" onclick="setTab('confrontos')">CONFRONTOS</div>
       <div class="tab ${CURRENT_TAB==='time-ideal'?'active':''}" onclick="setTab('time-ideal')">TIME IDEAL</div>
       <div class="tab ${CURRENT_TAB==='cadastro'?'active':''}" onclick="setTab('cadastro')">CADASTRO</div>
+      <div class="tab ${CURRENT_TAB==='playstyles'?'active':''}" onclick="setTab('playstyles')">PLAYSTYLES</div>
       <div class="tab ${CURRENT_TAB==='agenda'?'active':''}" onclick="setTab('agenda')">AGENDA</div>
     </div>
     
@@ -3688,6 +3754,7 @@ function renderTab() {
   else if (CURRENT_TAB === 'confrontos') tc.innerHTML = renderConfrontos();
   else if (CURRENT_TAB === 'time-ideal') tc.innerHTML = renderTimeIdeal();
   else if (CURRENT_TAB === 'cadastro') tc.innerHTML = renderCadastroJogadores();
+  else if (CURRENT_TAB === 'playstyles') tc.innerHTML = renderPlaystyles();
   else if (CURRENT_TAB === 'agenda') tc.innerHTML = renderAgenda();
 }
 
@@ -4294,6 +4361,10 @@ function setIdealFormation(value) {
   renderTab();
 }
 
+function playstyleSelectOptions(selected='') {
+  return ['<option value="">PlayStyle</option>'].concat(PLAYSTYLE_CATALOG.map(ps => `<option value="${ps.name}" ${selected === ps.name ? 'selected' : ''}>${ps.name}</option>`)).join('');
+}
+
 function renderCadastroJogadores() {
   const players = computePlayersForMatches(DATA.matches || []);
   const fallback = (DATA.players || []).map(p => {
@@ -4311,14 +4382,18 @@ function renderCadastroJogadores() {
     const profile = profileForPlayer(p.name);
     const intel = inferPlayerPositionIntel(p);
     const selectHtml = opts.map(([v,l]) => `<option value="${v}" ${String(profile.manual_position || '') === v ? 'selected' : ''}>${l}</option>`).join('');
+    const selectedStyles = profile.playstyles || [];
     return `
       <div class="profile-row">
         <div>
           <div class="profile-name">${p.name}</div>
-          <div class="profile-meta">EA favorita: ${p.favorite_position || p.position || '?'} · último: ${p.last_match_position || '-'} · sugerida: ${intel.label} (${intel.source}) · ${p.games || 0}j no clube</div>
+          <div class="profile-meta">EA favorita: ${p.favorite_position || p.position || '?'} - ultimo: ${p.last_match_position || '-'} - sugerida: ${intel.label} (${intel.source}) - ${p.games || 0}j no clube</div>
         </div>
         <select id="prof-pos-${cssSafeId(p.name)}">${selectHtml}</select>
-        <input id="prof-arch-${cssSafeId(p.name)}" placeholder="Arquétipo/playstyle" value="${escapeAttr(profile.archetype || '')}">
+        <input id="prof-arch-${cssSafeId(p.name)}" placeholder="Arquetipo" value="${escapeAttr(profile.archetype || '')}">
+        <select id="prof-ps-1-${cssSafeId(p.name)}">${playstyleSelectOptions(selectedStyles[0] || '')}</select>
+        <select id="prof-ps-2-${cssSafeId(p.name)}">${playstyleSelectOptions(selectedStyles[1] || '')}</select>
+        <select id="prof-ps-3-${cssSafeId(p.name)}">${playstyleSelectOptions(selectedStyles[2] || '')}</select>
         <input id="prof-notes-${cssSafeId(p.name)}" placeholder="Notas" value="${escapeAttr(profile.notes || '')}">
         <button class="btn-mini" onclick="saveProfileFromRow('${p.name.replace(/'/g, "\'")}')">Salvar</button>
       </div>
@@ -4346,12 +4421,59 @@ async function saveProfileFromRow(name) {
   const pos = document.getElementById('prof-pos-' + id)?.value || '';
   const arch = document.getElementById('prof-arch-' + id)?.value || '';
   const notes = document.getElementById('prof-notes-' + id)?.value || '';
+  const playstyles = [1,2,3].map(i => document.getElementById(`prof-ps-${i}-` + id)?.value || '').filter(Boolean);
   try {
-    await savePlayerProfile(name, pos, arch, notes);
+    await savePlayerProfile(name, pos, arch, notes, playstyles);
     renderTab();
   } catch (e) {
     alert(e.message);
   }
+}
+
+
+function suggestPlaystylesLocal(position, text) {
+  const t = (String(position || '') + ' ' + String(text || '')).toLowerCase();
+  let picks = [];
+  if (/gk|goleiro/.test(t)) picks = ['Quick Reflexes','Rush Out','Far Reach'];
+  else if (/zague|def|marcar|antecip|desarme|volante/.test(t)) picks = ['Anticipate','Intercept','Aerial'];
+  else if (/lateral|ala|cruz|assistir/.test(t)) picks = ['Whipped Pass','Relentless','Quick Step'];
+  else if (/meia|cam|criador|passe|armar|assist/.test(t)) picks = ['Incisive Pass','Tiki Taka','Press Proven'];
+  else if (/ponta|drible|veloc|1x1/.test(t)) picks = ['Rapid','Technical','Quick Step'];
+  else if (/atac|st|gol|final|chute|artilheiro/.test(t)) picks = ['Finesse Shot','Power Shot','First Touch'];
+  else picks = ['First Touch','Relentless','Tiki Taka'];
+  return picks.map(name => PLAYSTYLE_CATALOG.find(p => p.name === name)).filter(Boolean);
+}
+
+function runPlaystyleSimulator() {
+  const pos = document.getElementById('sim-pos')?.value || '';
+  const txt = document.getElementById('sim-text')?.value || '';
+  const picks = suggestPlaystylesLocal(pos, txt);
+  const html = picks.map((p, i) => `<div class="analytics-card" style="text-align:left;"><div class="v" style="font-size:18px;">${i+1}. ${p.name}</div><div class="l" style="font-size:11px;line-height:1.45;">${p.group}</div><div style="color:var(--text-2);font-size:12px;margin-top:8px;line-height:1.45;">${p.desc}</div></div>`).join('');
+  document.getElementById('sim-result').innerHTML = html;
+}
+
+function renderPlaystyles() {
+  const groups = {};
+  PLAYSTYLE_CATALOG.forEach(ps => { if (!groups[ps.group]) groups[ps.group] = []; groups[ps.group].push(ps); });
+  const legend = Object.entries(groups).map(([group, list]) => `
+    <div class="section-title">${group}</div>
+    <div class="players-grid">
+      ${list.map(ps => `<div class="player-card" style="cursor:default;"><div class="player-name" style="text-align:left;margin-top:0;">${ps.name}</div><div style="color:var(--text-2);font-size:12px;line-height:1.5;">${ps.desc}</div></div>`).join('')}
+    </div>
+  `).join('');
+  return `
+    <div class="section-title">Simulador de PlayStyles</div>
+    <div class="agenda-form" style="grid-template-columns:repeat(6,1fr);">
+      <select id="sim-pos" style="grid-column:span 2;">
+        <option value="ST">Atacante</option><option value="LW">Ponta</option><option value="CAM">Meia criador</option><option value="CM">Meio-campo</option><option value="CDM">Volante</option><option value="CB">Zagueiro</option><option value="LB">Lateral/Ala</option><option value="GK">Goleiro</option>
+      </select>
+      <textarea id="sim-text" style="grid-column:span 4;" placeholder="Descreva o que voce espera do jogador: ex. zagueiro rapido para antecipar, atacante que finaliza de longe, meia que acha passe... "></textarea>
+      <div class="full"><button type="button" class="btn-primary" onclick="runPlaystyleSimulator()">Sugerir 3 PlayStyles</button></div>
+    </div>
+    <div id="sim-result" class="analytics-cards"></div>
+    <div class="section-title">Legenda de PlayStyles Pro Clubs</div>
+    ${legend}
+  `;
 }
 
 function renderTimeIdeal() {
@@ -4672,6 +4794,8 @@ function renderPlayerDetailHTML(data) {
   const trend = data.trend || {};
   const safeName = p.name.replace(/'/g, "\\'");
   const radar = adv.radar || {};
+  const profile = profileForPlayer(p.name);
+  const psBadges = (profile.playstyles || []).map(x => `<span class="tag liga" style="margin-right:6px;">${x}</span>`).join('');
   const analyzedGames = Number(data.games_with_history ?? h.length ?? 0) || h.length || 0;
 
   return `
@@ -4680,6 +4804,7 @@ function renderPlayerDetailHTML(data) {
         <div>
           <h2>${p.name} <span class="pos-tag">${p.position}</span></h2>
           <div style="color:var(--text-2);font-size:13px;">${analyzedGames} partidas analisadas neste filtro · ranking ${rank.rating_rank_label || '-'} · tendência ${trend.status || '-'}</div>
+          ${psBadges ? `<div style="margin-top:8px;">${psBadges}</div>` : ''}
           <div class="analytics-note" style="margin-top:8px;">${plainScoutSummary(data.scout_report || '').slice(0, 360)}</div>
         </div>
         <div class="analytics-score"><div class="num">${adv.analytic_score || 0}</div><div class="lab">Analítica</div></div>
