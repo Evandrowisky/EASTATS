@@ -576,10 +576,19 @@ def parse_matches(matches_raw, our_club_id):
             
             timestamp = int(m.get("timestamp", 0))
             date_str = datetime.fromtimestamp(timestamp).strftime("%d/%m/%Y") if timestamp else "—"
+            opponent_name = opp.get("details", {}).get("name", "Adversário")
+            raw_match_id = str(m.get("matchId") or m.get("matchid") or m.get("id") or "").strip()
+            if not raw_match_id or raw_match_id.lower() in ("none", "null", "undefined", "0"):
+                # Algumas respostas da EA nao trazem matchId. Sem esse ID estavel,
+                # o SQLite substitui jogos diferentes e o historico parece diminuir.
+                raw_match_id = (
+                    f"{our_club_id}:{timestamp}:{opp_id or opponent_name}:"
+                    f"{our_goals}-{opp_goals}:{m.get('_origin', '')}"
+                )
             
             result.append({
-                "match_id": m.get("matchId"),
-                "opponent": opp.get("details", {}).get("name", "Adversário"),
+                "match_id": raw_match_id,
+                "opponent": opponent_name,
                 "score": f"{our_goals}-{opp_goals}",
                 "goals_for": our_goals,
                 "goals_against": opp_goals,
@@ -998,8 +1007,8 @@ async def sync_stream(
                         if not isinstance(item, dict):
                             continue
                         mid = str(item.get("match_id") or item.get("matchId") or "").strip()
-                        if not mid:
-                            mid = f"fallback:{item.get('timestamp', '')}:{item.get('opponent', '')}:{item.get('score', '')}:{fallback_i}"
+                        if not mid or mid.lower() in ("none", "null", "undefined", "0"):
+                            mid = f"fallback:{club_id}:{item.get('timestamp', '')}:{item.get('opponent', '')}:{item.get('score', '')}:{item.get('match_type', '')}:{fallback_i}"
                             fallback_i += 1
                         current = merged.get(mid, {})
                         merged[mid] = {**current, **item}
@@ -1012,7 +1021,7 @@ async def sync_stream(
                     c.execute(
                         "INSERT OR REPLACE INTO matches (match_id, club_id, opponent, score, result, match_type, timestamp, data) VALUES (?,?,?,?,?,?,?,?)",
                         (
-                            str(m.get("match_id", "")),
+                            str(m.get("match_id") or f"{club_id}:{m.get('timestamp', '')}:{m.get('opponent', '')}:{m.get('score', '')}:{m.get('match_type', '')}"),
                             club_id,
                             m.get("opponent", ""),
                             m.get("score", ""),
