@@ -3430,9 +3430,10 @@ async function loadPlayerProfiles() {
   try {
     const r = await fetch('/api/player-profiles');
     const data = await r.json();
-    PLAYER_PROFILES = {...localProfiles, ...dashboardProfiles, ...(data.profiles || {})};
+    // Ordem importa: o ajuste manual salvo no navegador e na sessão atual vence o cache/API da EA após sincronizar.
+    PLAYER_PROFILES = {...dashboardProfiles, ...(data.profiles || {}), ...localProfiles, ...(PLAYER_PROFILES || {})};
   } catch (e) {
-    PLAYER_PROFILES = {...localProfiles, ...dashboardProfiles};
+    PLAYER_PROFILES = {...dashboardProfiles, ...localProfiles, ...(PLAYER_PROFILES || {})};
     console.warn('Perfis manuais via API indisponiveis; usando cache local/dashboard', e);
   }
   saveLocalPlayerProfiles();
@@ -3440,9 +3441,11 @@ async function loadPlayerProfiles() {
 
 async function savePlayerProfile(name, manualPosition, archetype, notes) {
   if (manualPosition || archetype || notes) {
-    PLAYER_PROFILES[name] = {manual_position: manualPosition || null, archetype: archetype || null, notes: notes || null};
+    PLAYER_PROFILES[name] = {manual_position: manualPosition || null, archetype: archetype || null, notes: notes || null, manual_saved_at: new Date().toISOString()};
+    if (DATA) DATA.player_profiles = {...(DATA.player_profiles || {}), [name]: PLAYER_PROFILES[name]};
   } else {
     delete PLAYER_PROFILES[name];
+    if (DATA && DATA.player_profiles) delete DATA.player_profiles[name];
   }
   saveLocalPlayerProfiles();
   const r = await fetch('/api/player-profiles/' + encodeURIComponent(name), {
@@ -4578,9 +4581,15 @@ async function startSync() {
         if (data.success) {
           stepEl.textContent = '✅ Concluído!';
           fill.style.width = '100%';
-          setTimeout(() => {
+          setTimeout(async () => {
             progress.classList.remove('active');
-            loadData();
+            const profileBackup = {...(PLAYER_PROFILES || {})};
+            try { saveLocalPlayerProfiles(); } catch (e) {}
+            await loadData();
+            PLAYER_PROFILES = {...(DATA?.player_profiles || {}), ...profileBackup, ...loadLocalPlayerProfiles()};
+            if (DATA) DATA.player_profiles = {...PLAYER_PROFILES};
+            saveLocalPlayerProfiles();
+            render();
           }, 1500);
         } else if (data.error) {
           stepEl.textContent = `❌ Erro: ${data.error}`;
