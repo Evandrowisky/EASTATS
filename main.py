@@ -3919,7 +3919,8 @@ function inferPlayerPositionIntel(player) {
     const top = sorted[0];
     const topShare = top ? top[1] / Math.max(apps, 1) : 0;
     const gkShare = (counts.GK || 0) / Math.max(apps, 1);
-    if (registered === 'GK' || ((counts.GK || 0) >= 3 && gkShare >= 0.7)) {
+    const maxOutfield = Math.max(counts.DEF || 0, counts.MID || 0, counts.FWD || 0);
+    if (registered === 'GK' || ((counts.GK || 0) >= 2 && gkShare >= 0.5 && (counts.GK || 0) >= maxOutfield)) {
       family = 'GK';
       source = registered === 'GK' ? 'posição favorita EA' : 'histórico como GK';
     } else if (top && top[1] >= 2 && topShare >= 0.45 && top[0] !== 'GK') {
@@ -3986,7 +3987,9 @@ function buildIdealTeamClient(formation) {
     let bestScore = -999;
     pool.forEach(p => {
       if (used.has(p.name)) return;
-      const fitBonus = slot === 'GK' ? (p.family === 'GK' ? 80 : -120) : (p.family === wanted[0] ? 18 : wanted.includes(p.family) ? 9 : -12);
+      if (slot === 'GK' && p.family !== 'GK') return;
+      if (slot !== 'GK' && !wanted.includes(p.family)) return;
+      const fitBonus = p.family === wanted[0] ? 18 : 9;
       const score = roleScore(p, wanted[0]) + fitBonus;
       if (score > bestScore) { bestScore = score; best = p; }
     });
@@ -4128,7 +4131,7 @@ function renderTimeIdeal() {
       ${listHtml}
     </div>
 
-    ${team.missing_slots.length ? `<div style="color:var(--yellow);font-size:12px;margin-bottom:14px;">Atenção: faltaram jogadores para ${team.missing_slots.join(', ')}.</div>` : ''}
+    ${team.missing_slots.length ? `<div style="color:var(--yellow);font-size:12px;margin-bottom:14px;">Atenção: não encontrei jogador compatível para ${team.missing_slots.join(', ')} neste filtro/cadastro.</div>` : ''}
 
     <div class="section-title">Análise Tática</div>
     <button class="btn-primary" onclick="analyzeTeam()">Gerar Análise com IA</button>
