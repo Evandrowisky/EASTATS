@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-
+﻿# -*- coding: utf-8 -*-
 """
 Scout Clubs Pro v2 - Análise Profissional EA FC
 Inspirado no app Scout Clubs original
@@ -3177,6 +3177,33 @@ body {
 }
 
 
+
+/* PLAYSTYLE / ARCHETYPE ICONS */
+.style-icon {
+  width: 48px;
+  height: 48px;
+  min-width: 48px;
+  border-radius: 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #07140c;
+  background: linear-gradient(135deg, #d9bd66, #fff8dc);
+  border: 1px solid rgba(255,255,255,0.35);
+  box-shadow: 0 0 16px rgba(0,255,115,0.18);
+  font-size: 24px;
+  font-weight: 900;
+  transform: rotate(45deg);
+}
+.style-icon span { transform: rotate(-45deg); display:inline-block; }
+.style-icon.plus { background: linear-gradient(135deg, #f3f3f3, #ffffff); color:#050505; }
+.style-card-head { display:flex; align-items:center; gap:12px; margin-bottom:10px; }
+.style-card-title { font-size:18px; font-weight:900; color:var(--text); line-height:1.15; }
+.style-card-code { font-size:9px; color:var(--text-3); letter-spacing:1px; text-transform:uppercase; margin-top:3px; }
+.style-card-group { color:var(--green); font-size:10px; text-transform:uppercase; letter-spacing:1.6px; margin-bottom:8px; font-weight:800; }
+.history-guard-note { color:var(--green); font-size:11px; letter-spacing:1px; margin-top:4px; text-transform:uppercase; }
+@media (max-width: 640px) { .style-icon { width:40px; height:40px; min-width:40px; font-size:20px; } }
+
 /* RESPONSIVE HARDENING */
 html, body { max-width: 100%; }
 .header-inner, .container, .club-card, .period-filter { width: 100%; }
@@ -3791,7 +3818,7 @@ function render() {
       <div class="tab ${CURRENT_TAB==='confrontos'?'active':''}" onclick="setTab('confrontos')">CONFRONTOS</div>
       <div class="tab ${CURRENT_TAB==='time-ideal'?'active':''}" onclick="setTab('time-ideal')">TIME IDEAL</div>
       <div class="tab ${CURRENT_TAB==='cadastro'?'active':''}" onclick="setTab('cadastro')">CADASTRO</div>
-      <div class="tab ${CURRENT_TAB==='playstyles'?'active':''}" onclick="setTab('playstyles')">PLAYSTYLES</div>
+      <div class="tab ${CURRENT_TAB==='playstyles'?'active':''}" onclick="setTab('playstyles')">ESTILOS</div>
       <div class="tab ${CURRENT_TAB==='agenda'?'active':''}" onclick="setTab('agenda')">AGENDA</div>
     </div>
     
@@ -4443,6 +4470,36 @@ function setIdealFormation(value) {
   renderTab();
 }
 
+function playstyleIcon(nameOrCode) {
+  const key = String(nameOrCode || '').toLowerCase();
+  const map = {
+    'chute forte':'💥', 'power shot':'💥', 'bola parada':'🎯', 'dead ball':'🎯', 'cavadinha':'🧤', 'chip shot':'🧤',
+    'chute colocado':'🌀', 'finesse shot':'🌀', 'cabeceio forte':'🦅', 'power header':'🦅', 'acrobático':'🤸', 'acrobatic':'🤸',
+    'chute rasteiro':'⬇', 'low driven shot':'⬇', 'decisivo':'⚡', 'gamechanger':'⚡', 'passe incisivo':'🧭', 'incisive pass':'🧭',
+    'passe pingado':'➡', 'pinged pass':'➡', 'bola longa':'↗', 'long ball pass':'↗', 'tiki taka':'🔁', 'passe curvado':'〰', 'whipped pass':'〰',
+    'inventivo':'🎩', 'inventive':'🎩', 'jóquei':'🕺', 'jockey':'🕺', 'bloqueio':'🚧', 'block':'🚧', 'interceptação':'🪝', 'intercept':'🪝',
+    'antecipação':'🦊', 'anticipate':'🦊', 'carrinho':'🛝', 'slide tackle':'🛝', 'fortaleza aérea':'🛡', 'aerial fortress':'🛡',
+    'técnico':'🎮', 'technical':'🎮', 'rápido':'💨', 'rapid':'💨', 'primeiro toque':'🧲', 'first touch':'🧲', 'malandro':'✨', 'trickster':'✨',
+    'pressão provada':'🧱', 'press proven':'🧱', 'arranque':'🚀', 'quick step':'🚀', 'incansável':'♾', 'relentless':'♾', 'arremesso longo':'🙌', 'long throw':'🙌',
+    'brutamontes':'💪', 'bruiser':'💪', 'protetor':'🥊', 'enforcer':'🥊', 'lançamento longo':'🎯', 'far throw':'🎯', 'jogo com os pés':'🦶', 'footwork':'🦶',
+    'pegador de cruzamento':'🧤', 'cross claimer':'🧤', 'saída rápida':'🏃', 'rush out':'🏃', 'alcance longo':'🪽', 'far reach':'🪽', 'defletor':'🪞', 'deflector':'🪞'
+  };
+  return map[key] || '◆';
+}
+
+function archetypeIcon(name) {
+  const key = String(name || '').toLowerCase();
+  const map = {
+    'chefia':'🛡', 'líbero':'↗', 'libero':'↗', 'cão de guarda':'🐕', 'cao de guarda':'🐕', 'muralha':'🧱',
+    'regista':'🎼', 'motor':'⚙', 'armador':'🧠', 'box-to-box':'🔄', 'ponta veloz':'💨', 'camisa 10':'🔟',
+    'finalizador':'🎯', 'homem alvo':'🗼', 'goleiro linha':'🧤', 'paredão':'🧱', 'ala profundo':'↕'
+  };
+  return map[key] || '◆';
+}
+
+function styleIconHtml(icon, plus=false) {
+  return `<span class="style-icon ${plus ? 'plus' : ''}" aria-hidden="true"><span>${icon}</span></span>`;
+}
 function playstyleSelectOptions(selected='') {
   return ['<option value="">Estilo de jogo</option>'].concat(PLAYSTYLE_CATALOG.map(ps => `<option value="${ps.name}" ${selected === ps.name ? 'selected' : ''}>${ps.name}</option>`)).join('');
 }
@@ -4530,7 +4587,10 @@ function runPlaystyleSimulator() {
   const pos = document.getElementById('sim-pos')?.value || '';
   const txt = document.getElementById('sim-text')?.value || '';
   const picks = suggestPlaystylesLocal(pos, txt);
-  const html = picks.map((p, i) => `<div class="analytics-card" style="text-align:left;"><div class="v" style="font-size:18px;">${i+1}. ${p.name}</div><div class="l" style="font-size:11px;line-height:1.45;">${p.group}</div><div style="color:var(--text-2);font-size:12px;margin-top:8px;line-height:1.45;">${p.desc}</div></div>`).join('');
+  const html = picks.map((p, i) => `<div class="analytics-card" style="text-align:left;">
+    <div class="style-card-head">${styleIconHtml(playstyleIcon(p.name))}<div><div class="style-card-title">${i+1}. ${p.name}</div><div class="style-card-code">${p.code || ''} · ${p.group}</div></div></div>
+    <div style="color:var(--text-2);font-size:12px;margin-top:8px;line-height:1.45;">${p.desc}</div>
+  </div>`).join('');
   document.getElementById('sim-result').innerHTML = html;
 }
 
@@ -4540,7 +4600,11 @@ function renderPlaystyles() {
   const legend = Object.entries(groups).map(([group, list]) => `
     <div class="section-title">${group}</div>
     <div class="players-grid">
-      ${list.map(ps => `<div class="player-card" style="cursor:default;"><div class="player-name" style="text-align:left;margin-top:0;">${ps.name}</div><div style="color:var(--text-2);font-size:12px;line-height:1.5;">${ps.desc}</div></div>`).join('')}
+      ${list.map(ps => `<div class="player-card" style="cursor:default;">
+        <div class="style-card-group">${ps.group}</div>
+        <div class="style-card-head">${styleIconHtml(playstyleIcon(ps.name))}${styleIconHtml(playstyleIcon(ps.name), true)}<div><div class="style-card-title">${ps.name}</div><div class="style-card-code">${ps.code || ''}</div></div></div>
+        <div style="color:var(--text-2);font-size:12px;line-height:1.5;">${ps.desc}</div>
+      </div>`).join('')}
     </div>
   `).join('');
   const archGroups = {};
@@ -4548,7 +4612,11 @@ function renderPlaystyles() {
   const archetypes = Object.entries(archGroups).map(([group, list]) => `
     <div class="section-title">Arquétipos - ${group}</div>
     <div class="players-grid">
-      ${list.map(a => `<div class="player-card" style="cursor:default;"><div class="player-name" style="text-align:left;margin-top:0;">${a.name}</div><div style="color:var(--text-2);font-size:12px;line-height:1.5;">${a.desc}</div></div>`).join('')}
+      ${list.map(a => `<div class="player-card" style="cursor:default;">
+        <div class="style-card-group">${a.group}</div>
+        <div class="style-card-head">${styleIconHtml(archetypeIcon(a.name))}<div><div class="style-card-title">${a.name}</div><div class="style-card-code">Arquétipo</div></div></div>
+        <div style="color:var(--text-2);font-size:12px;line-height:1.5;">${a.desc}</div>
+      </div>`).join('')}
     </div>
   `).join('');
   return `
@@ -4888,7 +4956,7 @@ function renderPlayerDetailHTML(data) {
   const safeName = p.name.replace(/'/g, "\\'");
   const radar = adv.radar || {};
   const profile = profileForPlayer(p.name);
-  const psBadges = (profile.playstyles || []).map(x => `<span class="tag liga" style="margin-right:6px;">${x}</span>`).join('');
+  const psBadges = (profile.playstyles || []).map(x => `<span class="tag liga" style="margin-right:6px;">${playstyleIcon(x)} ${x}</span>`).join('');
   const analyzedGames = Number(data.games_with_history ?? h.length ?? 0) || h.length || 0;
 
   return `
@@ -5161,3 +5229,5 @@ if __name__ == "__main__":
     print("="*60 + "\n")
     
     uvicorn.run(app, host="0.0.0.0", port=8000)
+
+
