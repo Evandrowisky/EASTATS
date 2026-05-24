@@ -5138,30 +5138,139 @@ async function saveProfileFromRow(name) {
 }
 
 
-function suggestPlaystylesLocal(position, text) {
+function findPlaystyle(name) {
+  return PLAYSTYLE_CATALOG.find(p => p.name === name || p.code === name) || {name, code:'', group:'', desc:'Estilo recomendado para complementar a função.'};
+}
+
+function findArchetype(name) {
+  return ARCHETYPE_CATALOG.find(a => a.name === name) || {name, group:'', desc:'Perfil tático recomendado para a função descrita.'};
+}
+
+function uniqueStyleNames(names) {
+  const seen = new Set();
+  return names.filter(name => {
+    if (!name || seen.has(name)) return false;
+    seen.add(name);
+    return true;
+  });
+}
+
+function suggestBuildRecipe(position, text) {
   const t = (String(position || '') + ' ' + String(text || '')).toLowerCase();
-  let picks = [];
-  if (/gk|goleiro/.test(t)) picks = ['Reflexos Rápidos','Saída Rápida','Alcance Longo'];
-  else if (/zague|def|marcar|antecip|desarme|volante/.test(t)) picks = ['Antecipação','Interceptação','Jogo Aéreo'];
-  else if (/lateral|ala|cruz|assistir/.test(t)) picks = ['Cruzamento Tenso','Incansável','Arranque'];
-  else if (/meia|cam|criador|passe|armar|assist/.test(t)) picks = ['Passe Incisivo','Tiki-Taka','Resistente à Pressão'];
-  else if (/ponta|drible|veloc|1x1/.test(t)) picks = ['Rápido com Bola','Técnico','Arranque'];
-  else if (/atac|st|gol|final|chute|artilheiro/.test(t)) picks = ['Chute Colocado','Chute Forte','Primeiro Toque'];
-  else picks = ['Primeiro Toque','Incansável','Tiki-Taka'];
-  return picks.map(name => PLAYSTYLE_CATALOG.find(p => p.name === name)).filter(Boolean);
+  const wants = {
+    gk: /gk|gol|goleiro|defesa|reflex|sair do gol|linha|reposi/.test(t),
+    cb: /zague|defensor|defesa|marcar|antecip|desarme|xerife|chefia|cobertura/.test(t),
+    fullback: /lateral|ala|cruz|corredor|linha de fundo|apoio/.test(t),
+    cdm: /volante|cdm|cão|cao|protege|marca|roubar|intercept/.test(t),
+    creator: /cam|meia|criador|armador|passe|assist|maestro|10|achar passe/.test(t),
+    winger: /ponta|drible|veloc|1x1|aberto|profundidade/.test(t),
+    striker: /atac|st|gol|final|chute|artilheiro|matador|pivô|pivo|referencia/.test(t),
+  };
+
+  let role = 'equilibrado';
+  if (position === 'GK' || wants.gk) role = 'goleiro';
+  else if (position === 'CB' || wants.cb) role = 'zagueiro';
+  else if (position === 'CDM' || wants.cdm) role = 'volante';
+  else if (position === 'LB' || position === 'RB' || wants.fullback) role = 'lateral';
+  else if (position === 'CAM' || position === 'CM' || wants.creator) role = 'criador';
+  else if (position === 'LW' || position === 'RW' || wants.winger) role = 'ponta';
+  else if (position === 'ST' || wants.striker) role = 'atacante';
+
+  const recipes = {
+    goleiro: {
+      archetype: /linha|sair|pé|pe|reposi/.test(t) ? 'Goleiro Líbero' : 'Paredão',
+      main: ['Defesa com os Pés','Alcance Longo','Saída Rápida'],
+      silver: ['Pegador de Cruzamento','Reposição Longa','Incansável','Primeiro Toque','Passe Pingado','Lançamento Longo','Resistente à Pressão','Jogo Aéreo'],
+      why: 'A prioridade é evitar gols primeiro, mas sem virar um goleiro passivo. Os principais aumentam reação, cobertura e saída; os complementares ajudam reposição, controle e segurança em bola aérea.'
+    },
+    zagueiro: {
+      archetype: /sair|constru|passe|veloc|cobertura/.test(t) ? 'Líbero' : /fisic|area|aereo|muralha/.test(t) ? 'Muralha' : 'Chefia',
+      main: ['Antecipação','Interceptação','Bloqueio'],
+      silver: ['Jogo Aéreo','Contenção','Brigador','Carrinho','Incansável','Passe Pingado','Lançamento Longo','Resistente à Pressão'],
+      why: 'Para zagueiro útil, o mais importante é cortar jogada antes do chute. Os três principais melhoram bote, leitura de passe e bloqueio; os oito de apoio dão físico, saída simples e fôlego.'
+    },
+    volante: {
+      archetype: /box|chegar|ida|volta|motor/.test(t) ? 'Motor' : 'Cão de Guarda',
+      main: ['Interceptação','Antecipação','Incansável'],
+      silver: ['Passe Pingado','Tiki-Taka','Resistente à Pressão','Contenção','Brigador','Lançamento Longo','Primeiro Toque','Bloqueio'],
+      why: 'Volante bom precisa recuperar e entregar limpo. Os principais aumentam roubo e presença; os complementares melhoram passe curto, proteção sob pressão e distribuição.'
+    },
+    lateral: {
+      archetype: 'Ala Criador',
+      main: ['Cruzamento Tenso','Incansável','Arranque'],
+      silver: ['Rápido com Bola','Passe Pingado','Tiki-Taka','Interceptação','Contenção','Primeiro Toque','Lançamento Longo','Jogo Aéreo'],
+      why: 'Lateral/ala precisa repetir corrida e gerar jogada pelo lado. Os principais dão cruzamento, fôlego e explosão; os complementares equilibram defesa, passe e condução.'
+    },
+    criador: {
+      archetype: /ritmo|controle|maestro|cm|meio/.test(t) ? 'Maestro' : 'Camisa 10',
+      main: ['Passe Incisivo','Tiki-Taka','Resistente à Pressão'],
+      silver: ['Primeiro Toque','Lançamento Longo','Passe Pingado','Técnico','Incansável','Trivela','Chute Colocado','Cruzamento Tenso'],
+      why: 'Criador precisa receber pressionado e transformar posse em chance. Os principais melhoram passe entre linhas, tabela e proteção; os complementares dão repertório para variar jogadas.'
+    },
+    ponta: {
+      archetype: 'Ponta Agudo',
+      main: ['Rápido com Bola','Técnico','Arranque'],
+      silver: ['Primeiro Toque','Chute Colocado','Cruzamento Tenso','Passe Incisivo','Trivela','Incansável','Driblador','Resistente à Pressão'],
+      why: 'Ponta útil precisa vencer 1x1 e decidir depois. Os principais favorecem aceleração e condução; os complementares ajudam passe final, cruzamento e finalização.'
+    },
+    atacante: {
+      archetype: /pivo|refer|alto|cabe/.test(t) ? 'Referência' : /criar|falso|sair da area|sair da área/.test(t) ? 'Falso 9' : 'Matador',
+      main: ['Chute Colocado','Chute Forte','Primeiro Toque'],
+      silver: ['Cabeceio Forte','Trivela','Passe Incisivo','Rápido com Bola','Técnico','Resistente à Pressão','Acrobático','Incansável'],
+      why: 'Atacante precisa transformar poucas chances em gol. Os principais cobrem finalização colocada, chute forte e domínio; os complementares ampliam jogo aéreo, mobilidade, pivô e criação.'
+    },
+    equilibrado: {
+      archetype: 'Motor',
+      main: ['Primeiro Toque','Incansável','Tiki-Taka'],
+      silver: ['Passe Pingado','Resistente à Pressão','Interceptação','Arranque','Técnico','Passe Incisivo','Lançamento Longo','Chute Colocado'],
+      why: 'Quando a função ainda está aberta, a melhor base é um jogador seguro e útil em várias fases. Essa combinação dá passe, fôlego, controle e participação sem especializar demais.'
+    }
+  };
+
+  const recipe = recipes[role] || recipes.equilibrado;
+  const mainNames = uniqueStyleNames(recipe.main).slice(0, 3);
+  const silverNames = uniqueStyleNames([...recipe.silver, ...Object.values(recipes).flatMap(r => r.silver)]).filter(x => !mainNames.includes(x)).slice(0, 8);
+  const archetype = findArchetype(recipe.archetype);
+  return {
+    role,
+    archetype,
+    main: mainNames.map(findPlaystyle),
+    silver: silverNames.map(findPlaystyle),
+    why: recipe.why,
+    practical: 'Use os 3 principais como identidade do jogador. Os 8 complementares/prata fecham as fraquezas e deixam o boneco mais confiável em partida competitiva.'
+  };
+}
+
+function suggestPlaystylesLocal(position, text) {
+  return suggestBuildRecipe(position, text).main;
 }
 
 function runPlaystyleSimulator() {
   const pos = document.getElementById('sim-pos')?.value || '';
   const txt = document.getElementById('sim-text')?.value || '';
-  const picks = suggestPlaystylesLocal(pos, txt);
-  const html = picks.map((p, i) => `<div class="analytics-card" style="text-align:left;">
-    <div class="style-card-head">${styleIconHtml(playstyleIcon(p.name))}<div><div class="style-card-title">${i+1}. ${p.name}</div><div class="style-card-code">${p.code || ''} · ${p.group}</div></div></div>
+  const build = suggestBuildRecipe(pos, txt);
+  const mainHtml = build.main.map((p, i) => `<div class="analytics-card" style="text-align:left;">
+    <div class="style-card-head">${styleIconHtml(playstyleIcon(p.name))}<div><div class="style-card-title">${i+1}. ${p.name}</div><div class="style-card-code">Principal · ${p.code || ''} · ${p.group}</div></div></div>
     <div style="color:var(--text-2);font-size:12px;margin-top:8px;line-height:1.45;">${p.desc}</div>
   </div>`).join('');
-  document.getElementById('sim-result').innerHTML = html;
+  const silverHtml = build.silver.map((p, i) => `<div class="analytics-card" style="text-align:left;">
+    <div class="style-card-head">${styleIconHtml(playstyleIcon(p.name), true)}<div><div class="style-card-title">${i+1}. ${p.name}</div><div class="style-card-code">Complementar/prata · ${p.code || ''} · ${p.group}</div></div></div>
+    <div style="color:var(--text-2);font-size:12px;margin-top:8px;line-height:1.45;">${p.desc}</div>
+  </div>`).join('');
+  document.getElementById('sim-result').innerHTML = `
+    <div class="section-title" style="grid-column:1/-1;margin-top:8px;">Arquétipo recomendado</div>
+    <div class="player-card" style="cursor:default;grid-column:1/-1;">
+      <div class="style-card-head">${styleIconHtml(archetypeIcon(build.archetype.name))}<div><div class="style-card-title">${build.archetype.name}</div><div class="style-card-code">${build.archetype.group} · função detectada: ${build.role}</div></div></div>
+      <div style="color:var(--text-2);font-size:13px;line-height:1.55;">${build.archetype.desc}</div>
+      <div style="color:var(--green);font-size:12px;line-height:1.55;margin-top:10px;">Por que: ${build.why}</div>
+    </div>
+    <div class="section-title" style="grid-column:1/-1;">3 PlayStyles principais</div>
+    ${mainHtml}
+    <div class="section-title" style="grid-column:1/-1;">8 PlayStyles complementares/prata</div>
+    ${silverHtml}
+    <div class="player-card" style="cursor:default;grid-column:1/-1;"><div class="style-card-title">Como montar o jogador</div><div style="color:var(--text-2);font-size:13px;line-height:1.55;margin-top:8px;">${build.practical}</div></div>
+  `;
 }
-
 function renderPlaystyles() {
   const groups = {};
   PLAYSTYLE_CATALOG.forEach(ps => { if (!groups[ps.group]) groups[ps.group] = []; groups[ps.group].push(ps); });
@@ -5188,13 +5297,13 @@ function renderPlaystyles() {
     </div>
   `).join('');
   return `
-    <div class="section-title">Simulador de Estilos de Jogo</div>
+    <div class="section-title">Simulador de Arquétipo e Estilos</div>
     <div class="agenda-form" style="grid-template-columns:repeat(6,1fr);">
       <select id="sim-pos" style="grid-column:span 2;">
         <option value="ST">Atacante</option><option value="LW">Ponta</option><option value="CAM">Meia criador</option><option value="CM">Meio-campo</option><option value="CDM">Volante</option><option value="CB">Zagueiro</option><option value="LB">Lateral/Ala</option><option value="GK">Goleiro</option>
       </select>
       <textarea id="sim-text" style="grid-column:span 4;" placeholder="Descreva o que você espera do jogador: ex. zagueiro rápido para antecipar, atacante que finaliza de longe, meia que acha passe... "></textarea>
-      <div class="full"><button type="button" class="btn-primary" onclick="runPlaystyleSimulator()">Sugerir 3 estilos</button></div>
+      <div class="full"><button type="button" class="btn-primary" onclick="runPlaystyleSimulator()">Sugerir build completo</button></div>
     </div>
     <div id="sim-result" class="analytics-cards"></div>
     <div class="section-title">Legenda de Arquétipos</div>
@@ -5813,6 +5922,7 @@ if __name__ == "__main__":
     print("="*60 + "\n")
     
     uvicorn.run(app, host="0.0.0.0", port=8000)
+
 
 
 
