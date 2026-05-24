@@ -765,6 +765,11 @@ def get_dashboard():
         ):
             cache["ideal_team"] = build_ideal_team(cache["players"], "3-5-2")
             save_cache(cache)
+        try:
+            cache["player_profiles"] = load_player_profiles(str((cache.get("club") or {}).get("id") or "default"))
+        except Exception as e:
+            print(f"[profiles] dashboard sem perfis: {e}")
+            cache.setdefault("player_profiles", {})
         return cache
     return {"club": None, "stats": None, "players": [], "matches": [], "opponents": [], "ideal_team": None}
 
@@ -3388,18 +3393,48 @@ function scopedPlayers() {
 
 
 
-async function loadPlayerProfiles() {
+function profileStorageKey() {
+  const clubId = DATA && DATA.club ? DATA.club.id : 'default';
+  return 'scout_player_profiles_' + clubId;
+}
+
+function loadLocalPlayerProfiles() {
   try {
-    const r = await fetch('/api/player-profiles');
-    const data = await r.json();
-    PLAYER_PROFILES = data.profiles || {};
+    return JSON.parse(localStorage.getItem(profileStorageKey()) || '{}') || {};
   } catch (e) {
-    PLAYER_PROFILES = {};
-    console.warn('Perfis manuais indisponiveis', e);
+    return {};
   }
 }
 
+function saveLocalPlayerProfiles() {
+  try {
+    localStorage.setItem(profileStorageKey(), JSON.stringify(PLAYER_PROFILES || {}));
+  } catch (e) {
+    console.warn('Nao salvou perfis no navegador', e);
+  }
+}
+
+async function loadPlayerProfiles() {
+  const localProfiles = loadLocalPlayerProfiles();
+  const dashboardProfiles = (DATA && DATA.player_profiles) ? DATA.player_profiles : {};
+  try {
+    const r = await fetch('/api/player-profiles');
+    const data = await r.json();
+    PLAYER_PROFILES = {...localProfiles, ...dashboardProfiles, ...(data.profiles || {})};
+  } catch (e) {
+    PLAYER_PROFILES = {...localProfiles, ...dashboardProfiles};
+    console.warn('Perfis manuais via API indisponiveis; usando cache local/dashboard', e);
+  }
+  saveLocalPlayerProfiles();
+}
+
 async function savePlayerProfile(name, manualPosition, archetype, notes) {
+  if (manualPosition || archetype || notes) {
+    PLAYER_PROFILES[name] = {manual_position: manualPosition || null, archetype: archetype || null, notes: notes || null};
+  } else {
+    delete PLAYER_PROFILES[name];
+  }
+  saveLocalPlayerProfiles();
   const r = await fetch('/api/player-profiles/' + encodeURIComponent(name), {
     method: 'PUT',
     headers: {'Content-Type': 'application/json'},
