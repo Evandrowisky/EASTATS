@@ -2238,6 +2238,40 @@ def build_player_analytics(player_name, cache, match_type="todos"):
         "heatmap": build_estimated_heatmap(player, history),
         "scout_report": None,
     }
+    detail_games = games
+    club_total_games = int(float(player.get("ea_global_games") or player.get("games") or detail_games or 0))
+    use_member_totals = wanted_match_type == "todos" and club_total_games > detail_games
+    if use_member_totals:
+        analytics["club_total_games"] = club_total_games
+        analytics["detail_games"] = detail_games
+        analytics["uses_member_totals"] = True
+        analytics["display_averages"] = {
+            "rating": round(float(player.get("rating", 0) or 0), 2),
+            "sofi_rating": round(float(analytics["averages"].get("sofi_rating", player.get("rating", 0)) or player.get("rating", 0) or 0), 2),
+            "goals_per_game": round(float(player.get("goals_per_game", 0) or 0), 2),
+            "assists_per_game": round(float(player.get("assists_per_game", 0) or 0), 2),
+            "shots_per_game": round(float(player.get("shots", 0) or 0) / max(club_total_games, 1), 2),
+            "passes_pct": round(float(player.get("pass_pct", 0) or 0), 1),
+            "tackle_pct": round(float(player.get("tackle_pct", 0) or 0), 1),
+            "tackles_per_game": round(float(player.get("tackles_made", 0) or 0) / max(club_total_games, 1), 2),
+            "saves_per_game": round(float(analytics["totals"].get("saves", 0) or 0) / max(detail_games, 1), 2) if detail_games else 0,
+        }
+        analytics["display_totals"] = {
+            "goals": int(player.get("goals", 0) or 0),
+            "assists": int(player.get("assists", 0) or 0),
+            "shots": int(player.get("shots", 0) or 0),
+            "tackles": int(player.get("tackles_made", 0) or 0),
+            "moms": int(player.get("mom", 0) or 0),
+            "red_cards": int(analytics["totals"].get("red_cards", 0) or 0),
+            "clean_sheets": int(analytics["totals"].get("clean_sheets", 0) or 0),
+            "saves": int(analytics["totals"].get("saves", 0) or 0),
+        }
+    else:
+        analytics["club_total_games"] = detail_games
+        analytics["detail_games"] = detail_games
+        analytics["uses_member_totals"] = False
+        analytics["display_averages"] = analytics["averages"]
+        analytics["display_totals"] = analytics["totals"]
     analytics["scout_report"] = generate_player_scout_report_offline(analytics)
     return analytics
 
@@ -5112,7 +5146,44 @@ function computePlayersForMatches(matches) {
     .sort((a,b) => Number(b.rating || 0) - Number(a.rating || 0));
 }
 
+function playersFromMemberTotals() {
+  const detailed = computePlayersForMatches(playerStatMatches());
+  const detailByName = {};
+  detailed.forEach(p => { detailByName[p.name] = p; });
+  const rows = (DATA.players || []).map(base => {
+    const d = detailByName[base.name] || {};
+    const merged = {
+      ...d,
+      ...base,
+      favorite_position: base.position || d.favorite_position || d.position || '?',
+      last_match_position: d.last_match_position || '',
+      position_counts: d.position_counts || {GK:0, DEF:0, MID:0, FWD:0},
+      sofi_rating: d.sofi_rating || base.rating || 0,
+      shots_per_game: Number(base.shots || 0) / Math.max(Number(base.games || 0), 1),
+      tackles_per_game: Number(base.tackles_made || 0) / Math.max(Number(base.games || 0), 1),
+      saves_per_game: d.saves_per_game || 0,
+      wins: d.wins || 0,
+      draws: d.draws || 0,
+      losses: d.losses || 0,
+      reds: d.reds || 0,
+      saves: d.saves || 0,
+      clean_sheet: d.clean_sheet || 0,
+    };
+    merged.goal_involvements = Number(merged.goals || 0) + Number(merged.assists || 0);
+    merged.goal_involvements_per_game = +(merged.goal_involvements / Math.max(Number(merged.games || 0), 1)).toFixed(2);
+    merged.shots_per_game = +Number(merged.shots_per_game || 0).toFixed(2);
+    merged.tackles_per_game = +Number(merged.tackles_per_game || 0).toFixed(2);
+    const intel = inferPlayerPositionIntel(merged);
+    return {...merged, position: intel.label, position_family: intel.family, position_source: intel.source, history_apps: intel.apps};
+  });
+  detailed.forEach(d => {
+    if (!rows.some(p => p.name === d.name)) rows.push(d);
+  });
+  return rows.filter(p => Number(p.games || 0) > 0).sort((a,b) => Number(b.rating || 0) - Number(a.rating || 0));
+}
+
 function scopedPlayers() {
+  if (CURRENT_MATCH_TYPE === 'todos') return playersFromMemberTotals();
   return computePlayersForMatches(playerStatMatches());
 }
 
@@ -5675,7 +5746,7 @@ function renderJogadores() {
       <div class="player-card" onclick="showPlayerDetail('${p.name.replace(/'/g, "\\'")}')">
         <div class="player-rating-big">${p.rating}</div>
         <div class="player-pos">
-          <span class="player-pos-badge">${p.position} · ${p.games}J no clube/tipo · ${p.position_source || 'auto'}</span>
+          <span class="player-pos-badge">${p.position} · ${p.games}J ${CURRENT_MATCH_TYPE === 'todos' ? 'no clube' : 'no clube/tipo'} · ${p.position_source || 'auto'}</span>
         </div>
         <div class="player-name">${p.name}</div>
         <div class="player-stats">
@@ -5752,7 +5823,7 @@ function renderCompareBars() {
     return `
       <div style="text-align:center;padding:14px 0;">
         <div style="font-size:38px;font-weight:800;color:var(--green);text-shadow:0 0 18px var(--green-glow);">${p.rating}</div>
-        <div style="margin-top:4px;color:var(--text-2);text-transform:uppercase;font-size:10px;letter-spacing:1px;">${p.position} · ${p.games}J no clube/tipo</div>
+        <div style="margin-top:4px;color:var(--text-2);text-transform:uppercase;font-size:10px;letter-spacing:1px;">${p.position} · ${p.games}J ${CURRENT_MATCH_TYPE === 'todos' ? 'no clube' : 'no clube/tipo'}</div>
         <div style="font-weight:800;font-size:16px;margin-top:4px;">${p.name}</div>
       </div>
     `;
@@ -6669,8 +6740,8 @@ function plainScoutSummary(text) {
 function renderPlayerDetailHTML(data) {
   const p = data.player;
   const h = data.history || [];
-  const avg = data.averages || {};
-  const totals = data.totals || {};
+  const avg = data.display_averages || data.averages || {};
+  const totals = data.display_totals || data.totals || {};
   const adv = data.advanced || {};
   const rank = data.ranking || {};
   const cmp = data.team_comparison || {};
@@ -6679,14 +6750,17 @@ function renderPlayerDetailHTML(data) {
   const radar = adv.radar || {};
   const profile = profileForPlayer(p.name);
   const psBadges = (profile.playstyles || []).map(x => `<span class="tag liga" style="margin-right:6px;">${playstyleIcon(x)} ${x}</span>`).join('');
-  const analyzedGames = Number(data.games_with_history ?? h.length ?? 0) || h.length || 0;
-
+  const detailedGames = Number(data.detail_games ?? data.games_with_history ?? h.length ?? 0) || h.length || 0;
+  const clubTotalGames = Number(data.club_total_games ?? p.ea_global_games ?? p.games ?? detailedGames) || detailedGames;
+  const gamesLine = data.uses_member_totals
+    ? `${clubTotalGames} jogos no clube · ${detailedGames} partidas detalhadas salvas · ranking ${rank.rating_rank_label || '-'} · tendência ${trend.status || '-'}`
+    : `${detailedGames} partidas analisadas neste filtro · ranking ${rank.rating_rank_label || '-'} · tendência ${trend.status || '-'}`;
   return `
     <div class="player-detail">
       <div class="analytics-hero">
         <div>
           <h2>${p.name} <span class="pos-tag">${p.position}</span></h2>
-          <div style="color:var(--text-2);font-size:13px;">${analyzedGames} partidas analisadas neste filtro · ranking ${rank.rating_rank_label || '-'} · tendência ${trend.status || '-'}</div>
+          <div style="color:var(--text-2);font-size:13px;">${gamesLine}</div>
           ${psBadges ? `<div style="margin-top:8px;">${psBadges}</div>` : ''}
           <div class="analytics-note" style="margin-top:8px;">${plainScoutSummary(data.scout_report || '').slice(0, 360)}</div>
         </div>
@@ -6968,6 +7042,8 @@ if __name__ == "__main__":
     print("="*60 + "\n")
     
     uvicorn.run(app, host="0.0.0.0", port=8000)
+
+
 
 
 
