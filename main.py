@@ -4292,6 +4292,11 @@ body {
   border-radius: 8px;
   font-size: 13px;
 }
+.auth-error.success {
+  border-color: var(--green-dim);
+  background: rgba(0,255,115,0.08);
+  color: var(--green);
+}
 .auth-user-box {
   display: flex;
   align-items: center;
@@ -4802,11 +4807,16 @@ function updateAuthHeader() {
   box.innerHTML = `<div class="auth-user-pill">${AUTH_USER.nome || AUTH_USER.usuario} · <span class="auth-role">${AUTH_USER.cargo}</span></div><button class="btn-mini" onclick="logout()">Sair</button>`;
 }
 
-function showAuthError(msg) {
+function showAuthMessage(msg, type = 'error') {
   const el = document.getElementById('authError');
   if (!el) return;
-  el.textContent = msg || 'Erro de autenticação';
+  el.textContent = msg || (type === 'success' ? 'Tudo certo' : 'Erro de autenticação');
+  el.classList.toggle('success', type === 'success');
   el.style.display = 'block';
+}
+
+function showAuthError(msg) {
+  showAuthMessage(msg, 'error');
 }
 
 function renderAuth(mode = 'login') {
@@ -4860,6 +4870,13 @@ async function submitLogin(ev) {
 
 async function submitRegister(ev) {
   ev.preventDefault();
+  const btn = ev.submitter || ev.target.querySelector('button[type="submit"]');
+  const oldText = btn ? btn.textContent : '';
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = 'CRIANDO...';
+  }
+
   try {
     const body = {
       nome: document.getElementById('authNome').value.trim(),
@@ -4870,9 +4887,21 @@ async function submitRegister(ev) {
     const r = await fetch('/api/auth/register', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
     const data = await r.json().catch(() => ({}));
     if (!r.ok) throw new Error(data.detail || data.message || 'Erro ao criar conta');
-    renderAuth('login');
-    setTimeout(() => showAuthError('Conta criada como jogador. Se ainda não houver admin ativo, o login ficará bloqueado até a liberação.'), 50);
+
+    showAuthMessage('Conta criada com sucesso. Indo para o login...', 'success');
+    setTimeout(() => {
+      renderAuth('login');
+      setTimeout(() => {
+        const userInput = document.getElementById('authUsuario');
+        if (userInput) userInput.value = body.usuario;
+        showAuthMessage('Conta criada. Agora faça login com sua senha.', 'success');
+      }, 60);
+    }, 900);
   } catch (e) {
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = oldText;
+    }
     showAuthError(e.message);
   }
 }
@@ -6939,6 +6968,7 @@ if __name__ == "__main__":
     print("="*60 + "\n")
     
     uvicorn.run(app, host="0.0.0.0", port=8000)
+
 
 
 
