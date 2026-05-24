@@ -1237,46 +1237,70 @@ def parse_matches(matches_raw, our_club_id):
 
 
 def parse_players(members_data):
-    """Processa dados dos jogadores"""
+    """Processa dados dos jogadores.
+
+    A API de members/career/stats do EA FC traz totais de jogos/gols/assist/MOM,
+    mas em muitos retornos nao envia chutes, passes ou desarmes. Nesses casos a
+    UI deve mostrar N/D, nao zero, para nao fingir uma estatistica inexistente.
+    """
     if not members_data or "members" not in members_data:
         return []
     
     players = []
     for m in members_data.get("members", []):
-        gp = int(m.get("gamesPlayed", 0))
+        lower_m = {str(k).lower(): v for k, v in m.items()}
+
+        def gv(*keys, default=0):
+            for key in keys:
+                if key in m:
+                    return m.get(key)
+                lk = str(key).lower()
+                if lk in lower_m:
+                    return lower_m.get(lk)
+            return default
+
+        def has_any(*keys):
+            return any((key in m) or (str(key).lower() in lower_m) for key in keys)
+
+        gp = int(float(gv("gamesPlayed", "gamesplayed", default=0) or 0))
         if gp == 0:
             continue
         
-        goals = int(m.get("goals", 0))
-        assists = int(m.get("assists", 0))
-        passes_made = int(m.get("passesMade", 0))
-        pass_attempts = int(m.get("passAttempts", 1))
-        tackles_made = int(m.get("tacklesMade", 0))
-        tackle_attempts = int(m.get("tackleAttempts", 1))
-        rating = float(m.get("ratingAve", 0))
-        mom = int(m.get("manOfTheMatch", 0))
-        shots = int(m.get("shots", 0))
-        pos = m.get("favoritePosition", "?")
+        goals = int(float(gv("goals", default=0) or 0))
+        assists = int(float(gv("assists", default=0) or 0))
+        has_shot_stats = has_any("shots", "totalShots", "shotAttempts")
+        has_pass_stats = has_any("passesMade", "passesmade", "passAttempts", "passattempts")
+        has_tackle_stats = has_any("tacklesMade", "tacklesmade", "tackleAttempts", "tackleattempts")
+        passes_made = int(float(gv("passesMade", "passesmade", default=0) or 0))
+        pass_attempts = int(float(gv("passAttempts", "passattempts", default=0) or 0))
+        tackles_made = int(float(gv("tacklesMade", "tacklesmade", default=0) or 0))
+        tackle_attempts = int(float(gv("tackleAttempts", "tackleattempts", default=0) or 0))
+        rating = float(gv("ratingAve", "ratingave", default=0) or 0)
+        mom = int(float(gv("manOfTheMatch", "manofthematch", "mom", default=0) or 0))
+        shots = int(float(gv("shots", "totalShots", "shotAttempts", default=0) or 0))
+        pos = gv("favoritePosition", "favoriteposition", default="?")
         
         players.append({
-            "name": m.get("name", "Unknown"),
+            "name": gv("name", default="Unknown"),
             "position": pos,
             "games": gp,
             "rating": round(rating, 2),
             "goals": goals,
             "assists": assists,
-            "shots": shots,
-            "passes_made": passes_made,
-            "pass_pct": round((passes_made / max(pass_attempts, 1)) * 100, 1),
-            "tackles_made": tackles_made,
-            "tackle_pct": round((tackles_made / max(tackle_attempts, 1)) * 100, 1),
+            "shots": shots if has_shot_stats else None,
+            "passes_made": passes_made if has_pass_stats else None,
+            "pass_pct": round((passes_made / max(pass_attempts, 1)) * 100, 1) if has_pass_stats and pass_attempts else None,
+            "tackles_made": tackles_made if has_tackle_stats else None,
+            "tackle_pct": round((tackles_made / max(tackle_attempts, 1)) * 100, 1) if has_tackle_stats and tackle_attempts else None,
             "mom": mom,
             "goals_per_game": round(goals / gp, 2),
             "assists_per_game": round(assists / gp, 2),
+            "has_shot_stats": has_shot_stats,
+            "has_pass_stats": has_pass_stats,
+            "has_tackle_stats": has_tackle_stats,
         })
     
     return sorted(players, key=lambda x: x["rating"], reverse=True)
-
 
 def calc_opponent_avg(matches_list):
     """Calcula média de gols por adversário"""
@@ -2245,6 +2269,9 @@ def build_player_analytics(player_name, cache, match_type="todos"):
     use_member_totals = wanted_match_type == "todos" and club_total_games > detail_games
     if use_member_totals:
         member = player.get("member_stats") or player
+        has_shot_stats = bool(member.get("has_shot_stats"))
+        has_pass_stats = bool(member.get("has_pass_stats"))
+        has_tackle_stats = bool(member.get("has_tackle_stats"))
         analytics["club_total_games"] = club_total_games
         analytics["detail_games"] = detail_games
         analytics["uses_member_totals"] = True
@@ -2253,23 +2280,28 @@ def build_player_analytics(player_name, cache, match_type="todos"):
             "sofi_rating": round(float(analytics["averages"].get("sofi_rating", member.get("rating", 0)) or member.get("rating", 0) or 0), 2),
             "goals_per_game": round(float(member.get("goals_per_game", 0) or 0), 2),
             "assists_per_game": round(float(member.get("assists_per_game", 0) or 0), 2),
-            "shots_per_game": round(float(member.get("shots", 0) or 0) / max(club_total_games, 1), 2),
-            "passes_pct": round(float(member.get("pass_pct", 0) or 0), 1),
-            "tackle_pct": round(float(member.get("tackle_pct", 0) or 0), 1),
-            "tackles_per_game": round(float(member.get("tackles_made", 0) or 0) / max(club_total_games, 1), 2),
+            "shots_per_game": round(float(member.get("shots", 0) or 0) / max(club_total_games, 1), 2) if has_shot_stats else None,
+            "passes_pct": round(float(member.get("pass_pct", 0) or 0), 1) if has_pass_stats else None,
+            "tackle_pct": round(float(member.get("tackle_pct", 0) or 0), 1) if has_tackle_stats else None,
+            "tackles_per_game": round(float(member.get("tackles_made", 0) or 0) / max(club_total_games, 1), 2) if has_tackle_stats else None,
             "saves_per_game": round(float(analytics["totals"].get("saves", 0) or 0) / max(detail_games, 1), 2) if detail_games else 0,
         }
         analytics["display_totals"] = {
             "goals": int(member.get("goals", 0) or 0),
             "assists": int(member.get("assists", 0) or 0),
-            "shots": int(member.get("shots", 0) or 0),
-            "tackles": int(member.get("tackles_made", 0) or 0),
+            "shots": int(member.get("shots", 0) or 0) if has_shot_stats else None,
+            "tackles": int(member.get("tackles_made", 0) or 0) if has_tackle_stats else None,
             "moms": int(member.get("mom", 0) or 0),
             "red_cards": int(analytics["totals"].get("red_cards", 0) or 0),
             "clean_sheets": int(analytics["totals"].get("clean_sheets", 0) or 0),
             "saves": int(analytics["totals"].get("saves", 0) or 0),
         }
         analytics["member_stats_used"] = True
+        analytics["unavailable_member_stats"] = {
+            "shots": not has_shot_stats,
+            "passes": not has_pass_stats,
+            "tackles": not has_tackle_stats,
+        }
     else:
         analytics["club_total_games"] = detail_games
         analytics["detail_games"] = detail_games
@@ -5156,6 +5188,10 @@ function playersFromMemberTotals() {
   detailed.forEach(p => { detailByName[p.name] = p; });
   const rows = (DATA.players || []).map(base => {
     const d = detailByName[base.name] || {};
+    const hasShotStats = base.has_shot_stats === true;
+    const hasPassStats = base.has_pass_stats === true;
+    const hasTackleStats = base.has_tackle_stats === true;
+    const games = Math.max(Number(base.games || 0), 1);
     const merged = {
       ...d,
       ...base,
@@ -5163,8 +5199,13 @@ function playersFromMemberTotals() {
       last_match_position: d.last_match_position || '',
       position_counts: d.position_counts || {GK:0, DEF:0, MID:0, FWD:0},
       sofi_rating: d.sofi_rating || base.rating || 0,
-      shots_per_game: Number(base.shots || 0) / Math.max(Number(base.games || 0), 1),
-      tackles_per_game: Number(base.tackles_made || 0) / Math.max(Number(base.games || 0), 1),
+      shots: hasShotStats ? Number(base.shots || 0) : null,
+      shots_per_game: hasShotStats ? Number(base.shots || 0) / games : null,
+      passes_made: hasPassStats ? Number(base.passes_made || 0) : null,
+      pass_pct: hasPassStats ? base.pass_pct : null,
+      tackles_made: hasTackleStats ? Number(base.tackles_made || 0) : null,
+      tackle_pct: hasTackleStats ? base.tackle_pct : null,
+      tackles_per_game: hasTackleStats ? Number(base.tackles_made || 0) / games : null,
       saves_per_game: d.saves_per_game || 0,
       wins: d.wins || 0,
       draws: d.draws || 0,
@@ -5174,9 +5215,9 @@ function playersFromMemberTotals() {
       clean_sheet: d.clean_sheet || 0,
     };
     merged.goal_involvements = Number(merged.goals || 0) + Number(merged.assists || 0);
-    merged.goal_involvements_per_game = +(merged.goal_involvements / Math.max(Number(merged.games || 0), 1)).toFixed(2);
-    merged.shots_per_game = +Number(merged.shots_per_game || 0).toFixed(2);
-    merged.tackles_per_game = +Number(merged.tackles_per_game || 0).toFixed(2);
+    merged.goal_involvements_per_game = +(merged.goal_involvements / games).toFixed(2);
+    merged.shots_per_game = hasShotStats ? +Number(merged.shots_per_game || 0).toFixed(2) : null;
+    merged.tackles_per_game = hasTackleStats ? +Number(merged.tackles_per_game || 0).toFixed(2) : null;
     const intel = inferPlayerPositionIntel(merged);
     return {...merged, position: intel.label, position_family: intel.family, position_source: intel.source, history_apps: intel.apps};
   });
@@ -5734,8 +5775,13 @@ function circle(pct, label) {
   `;
 }
 
-function playerStatLine(label, value) {
-  return `<div class="player-stat"><span class="player-stat-label">${label}</span><span class="player-stat-val">${value ?? 0}</span></div>`;
+function fmtStat(value, suffix = '') {
+  if (value === null || value === undefined || value === '' || Number.isNaN(value)) return 'N/D';
+  return `${value}${suffix}`;
+}
+
+function playerStatLine(label, value, suffix = '') {
+  return `<div class="player-stat"><span class="player-stat-label">${label}</span><span class="player-stat-val">${fmtStat(value, suffix)}</span></div>`;
 }
 
 function renderJogadores() {
@@ -5743,14 +5789,14 @@ function renderJogadores() {
   if (!players.length) {
     return '<div class="empty-state">Nenhum jogador encontrado neste filtro</div>';
   }
-  const scopeLabel = CURRENT_MATCH_TYPE === 'todos' ? 'todos os jogos do clube' : 'jogos de ' + CURRENT_MATCH_TYPE + ' no clube';
+  const scopeLabel = CURRENT_MATCH_TYPE === 'todos' ? 'todos os jogos do clube' : 'partidas detalhadas salvas de ' + CURRENT_MATCH_TYPE;
   let html = `<div class="section-title">Jogadores · ${scopeLabel}</div><div class="players-grid">`;
   players.forEach(p => {
     html += `
       <div class="player-card" onclick="showPlayerDetail('${p.name.replace(/'/g, "\\'")}')">
         <div class="player-rating-big">${p.rating}</div>
         <div class="player-pos">
-          <span class="player-pos-badge">${p.position} · ${p.games}J ${CURRENT_MATCH_TYPE === 'todos' ? 'no clube' : 'no clube/tipo'} · ${p.position_source || 'auto'}</span>
+          <span class="player-pos-badge">${p.position} · ${p.games}J ${CURRENT_MATCH_TYPE === 'todos' ? 'no clube' : 'detalhadas salvas'} · ${p.position_source || 'auto'}</span>
         </div>
         <div class="player-name">${p.name}</div>
         <div class="player-stats">
@@ -5762,15 +5808,15 @@ function renderJogadores() {
           ${playerStatLine('A/J', p.assists_per_game)}
           ${playerStatLine('Chutes', p.shots)}
           ${playerStatLine('Chu/J', p.shots_per_game)}
-          ${playerStatLine('Pass%', p.pass_pct + '%')}
+          ${playerStatLine('Pass%', p.pass_pct, '%')}
           ${playerStatLine('Passes', p.passes_made)}
-          ${playerStatLine('Des%', p.tackle_pct + '%')}
+          ${playerStatLine('Des%', p.tackle_pct, '%')}
           ${playerStatLine('Desarmes', p.tackles_made)}
           ${playerStatLine('Defesas', p.saves)}
           ${playerStatLine('SG', p.clean_sheet)}
           ${playerStatLine('MOM', p.mom)}
           ${playerStatLine('V/E/D', `${p.wins}/${p.draws}/${p.losses}`)}
-          ${playerStatLine('Win%', p.win_rate + '%')}
+          ${playerStatLine('Win%', p.win_rate, '%')}
           ${playerStatLine('Verm.', p.reds)}
         </div>
       </div>
@@ -5827,7 +5873,7 @@ function renderCompareBars() {
     return `
       <div style="text-align:center;padding:14px 0;">
         <div style="font-size:38px;font-weight:800;color:var(--green);text-shadow:0 0 18px var(--green-glow);">${p.rating}</div>
-        <div style="margin-top:4px;color:var(--text-2);text-transform:uppercase;font-size:10px;letter-spacing:1px;">${p.position} · ${p.games}J ${CURRENT_MATCH_TYPE === 'todos' ? 'no clube' : 'no clube/tipo'}</div>
+        <div style="margin-top:4px;color:var(--text-2);text-transform:uppercase;font-size:10px;letter-spacing:1px;">${p.position} · ${p.games}J ${CURRENT_MATCH_TYPE === 'todos' ? 'no clube' : 'detalhadas salvas'}</div>
         <div style="font-weight:800;font-size:16px;margin-top:4px;">${p.name}</div>
       </div>
     `;
@@ -5849,18 +5895,20 @@ function renderCompareBars() {
   ];
   let html = '<div class="compare-bars"><div style="font-weight:700;margin-bottom:8px;">Comparativo direto</div>';
   fields.forEach(f => {
-    const va = Number(a[f.key] || 0), vb = Number(b[f.key] || 0);
+    const rawA = a[f.key], rawB = b[f.key];
+    const va = rawA === null || rawA === undefined ? 0 : Number(rawA || 0);
+    const vb = rawB === null || rawB === undefined ? 0 : Number(rawB || 0);
     const pa = Math.min(100, (va / f.max) * 100);
     const pb = Math.min(100, (vb / f.max) * 100);
     const wa = va > vb ? 'color:var(--green)' : '';
     const wb = vb > va ? 'color:var(--green)' : '';
     html += `
       <div class="compare-bar-row">
-        <div class="compare-bar-val left" style="${wa}">${va}</div>
+        <div class="compare-bar-val left" style="${wa}">${fmtStat(rawA)}</div>
         <div class="compare-bar left"><div class="fill" style="width:${pa}%"></div></div>
         <div class="compare-bar-label">${f.label}</div>
         <div class="compare-bar right"><div class="fill" style="width:${pb}%"></div></div>
-        <div class="compare-bar-val right" style="${wb}">${vb}</div>
+        <div class="compare-bar-val right" style="${wb}">${fmtStat(rawB)}</div>
       </div>
     `;
   });
@@ -6783,12 +6831,12 @@ function renderPlayerDetailHTML(data) {
         <div class="analytics-card"><div class="v">${(totals.goals || 0) + (totals.assists || 0)}</div><div class="l">G+A</div></div>
         <div class="analytics-card"><div class="v">${avg.goals_per_game || 0}</div><div class="l">G/J</div></div>
         <div class="analytics-card"><div class="v">${avg.assists_per_game || 0}</div><div class="l">A/J</div></div>
-        <div class="analytics-card"><div class="v">${totals.shots || 0}</div><div class="l">Chutes</div></div>
-        <div class="analytics-card"><div class="v">${avg.shots_per_game || 0}</div><div class="l">Chu/J</div></div>
-        <div class="analytics-card"><div class="v">${avg.passes_pct || 0}%</div><div class="l">Pass%</div></div>
-        <div class="analytics-card"><div class="v">${totals.tackles || 0}</div><div class="l">Desarmes</div></div>
-        <div class="analytics-card"><div class="v">${avg.tackle_pct || 0}%</div><div class="l">Des%</div></div>
-        <div class="analytics-card"><div class="v">${avg.tackles_per_game || 0}</div><div class="l">Des/J</div></div>
+        <div class="analytics-card"><div class="v">${fmtStat(totals.shots)}</div><div class="l">Chutes</div></div>
+        <div class="analytics-card"><div class="v">${fmtStat(avg.shots_per_game)}</div><div class="l">Chu/J</div></div>
+        <div class="analytics-card"><div class="v">${fmtStat(avg.passes_pct, "%")}</div><div class="l">Pass%</div></div>
+        <div class="analytics-card"><div class="v">${fmtStat(totals.tackles)}</div><div class="l">Desarmes</div></div>
+        <div class="analytics-card"><div class="v">${fmtStat(avg.tackle_pct, "%")}</div><div class="l">Des%</div></div>
+        <div class="analytics-card"><div class="v">${fmtStat(avg.tackles_per_game)}</div><div class="l">Des/J</div></div>
         <div class="analytics-card"><div class="v">${totals.saves || 0}</div><div class="l">Defesas</div></div>
         <div class="analytics-card"><div class="v">${avg.saves_per_game || 0}</div><div class="l">Def/J</div></div>
         <div class="analytics-card"><div class="v">${totals.clean_sheets || 0}</div><div class="l">SG</div></div>
@@ -7049,6 +7097,12 @@ if __name__ == "__main__":
     print("="*60 + "\n")
     
     uvicorn.run(app, host="0.0.0.0", port=8000)
+
+
+
+
+
+
 
 
 
