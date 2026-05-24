@@ -3772,6 +3772,20 @@ body {
 .history-guard-note { color:var(--green); font-size:11px; letter-spacing:1px; margin-top:4px; text-transform:uppercase; }
 @media (max-width: 640px) { .style-icon { width:40px; height:40px; min-width:40px; font-size:20px; } }
 
+
+/* BUILD SIMULATOR */
+.build-result-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(280px, 1fr)); gap:12px; width:100%; }
+.build-result-grid .section-title { grid-column:1/-1; margin-top:18px; }
+.build-card { background:rgba(0,255,115,0.05); border:1px solid var(--border); border-radius:12px; padding:16px; min-height:150px; overflow:hidden; }
+.build-card.primary { border-color:rgba(0,255,115,0.45); background:rgba(0,255,115,0.08); }
+.build-card .style-card-head { align-items:center; }
+.build-card .style-card-title { font-size:16px; line-height:1.2; overflow-wrap:anywhere; }
+.build-card .style-card-code { font-size:9px; line-height:1.35; }
+.build-card-desc { color:var(--text-2); font-size:12px; margin-top:10px; line-height:1.5; }
+.build-why { color:var(--green); font-size:12px; line-height:1.55; margin-top:12px; }
+.build-note { color:var(--text-2); font-size:13px; line-height:1.55; }
+@media (max-width: 640px) { .build-result-grid { grid-template-columns:1fr; } .build-card { min-height:auto; } }
+
 /* RESPONSIVE HARDENING */
 html, body { max-width: 100%; }
 .header-inner, .container, .club-card, .period-filter { width: 100%; }
@@ -5156,9 +5170,11 @@ function uniqueStyleNames(names) {
 }
 
 function suggestBuildRecipe(position, text) {
-  const t = (String(position || '') + ' ' + String(text || '')).toLowerCase();
+  const inputText = String(text || '').trim();
+  const t = inputText.toLowerCase();
+  const selectedPosition = String(position || '');
   const wants = {
-    gk: /gk|gol|goleiro|defesa|reflex|sair do gol|linha|reposi/.test(t),
+    gk: /\b(gk|goleiro)\b|reflex|sair do gol|defesa com os pés|defesa com os pes|reposi/.test(t),
     cb: /zague|defensor|defesa|marcar|antecip|desarme|xerife|chefia|cobertura/.test(t),
     fullback: /lateral|ala|cruz|corredor|linha de fundo|apoio/.test(t),
     cdm: /volante|cdm|cão|cao|protege|marca|roubar|intercept/.test(t),
@@ -5168,13 +5184,24 @@ function suggestBuildRecipe(position, text) {
   };
 
   let role = 'equilibrado';
-  if (position === 'GK' || wants.gk) role = 'goleiro';
-  else if (position === 'CB' || wants.cb) role = 'zagueiro';
-  else if (position === 'CDM' || wants.cdm) role = 'volante';
-  else if (position === 'LB' || position === 'RB' || wants.fullback) role = 'lateral';
-  else if (position === 'CAM' || position === 'CM' || wants.creator) role = 'criador';
-  else if (position === 'LW' || position === 'RW' || wants.winger) role = 'ponta';
-  else if (position === 'ST' || wants.striker) role = 'atacante';
+  if (inputText) {
+    if (wants.cb) role = 'zagueiro';
+    else if (wants.cdm) role = 'volante';
+    else if (wants.fullback) role = 'lateral';
+    else if (wants.creator) role = 'criador';
+    else if (wants.winger) role = 'ponta';
+    else if (wants.striker) role = 'atacante';
+    else if (wants.gk) role = 'goleiro';
+  }
+  if (role === 'equilibrado') {
+    if (selectedPosition === 'GK') role = 'goleiro';
+    else if (selectedPosition === 'CB') role = 'zagueiro';
+    else if (selectedPosition === 'CDM') role = 'volante';
+    else if (selectedPosition === 'LB' || selectedPosition === 'RB') role = 'lateral';
+    else if (selectedPosition === 'CAM' || selectedPosition === 'CM') role = 'criador';
+    else if (selectedPosition === 'LW' || selectedPosition === 'RW') role = 'ponta';
+    else if (selectedPosition === 'ST') role = 'atacante';
+  }
 
   const recipes = {
     goleiro: {
@@ -5249,26 +5276,26 @@ function runPlaystyleSimulator() {
   const pos = document.getElementById('sim-pos')?.value || '';
   const txt = document.getElementById('sim-text')?.value || '';
   const build = suggestBuildRecipe(pos, txt);
-  const mainHtml = build.main.map((p, i) => `<div class="analytics-card" style="text-align:left;">
+  const mainHtml = build.main.map((p, i) => `<div class="build-card primary">
     <div class="style-card-head">${styleIconHtml(playstyleIcon(p.name))}<div><div class="style-card-title">${i+1}. ${p.name}</div><div class="style-card-code">Principal · ${p.code || ''} · ${p.group}</div></div></div>
-    <div style="color:var(--text-2);font-size:12px;margin-top:8px;line-height:1.45;">${p.desc}</div>
+    <div class="build-card-desc">${p.desc}</div>
   </div>`).join('');
-  const silverHtml = build.silver.map((p, i) => `<div class="analytics-card" style="text-align:left;">
+  const silverHtml = build.silver.map((p, i) => `<div class="build-card">
     <div class="style-card-head">${styleIconHtml(playstyleIcon(p.name), true)}<div><div class="style-card-title">${i+1}. ${p.name}</div><div class="style-card-code">Complementar/prata · ${p.code || ''} · ${p.group}</div></div></div>
-    <div style="color:var(--text-2);font-size:12px;margin-top:8px;line-height:1.45;">${p.desc}</div>
+    <div class="build-card-desc">${p.desc}</div>
   </div>`).join('');
   document.getElementById('sim-result').innerHTML = `
     <div class="section-title" style="grid-column:1/-1;margin-top:8px;">Arquétipo recomendado</div>
-    <div class="player-card" style="cursor:default;grid-column:1/-1;">
+    <div class="build-card primary" style="grid-column:1/-1;">
       <div class="style-card-head">${styleIconHtml(archetypeIcon(build.archetype.name))}<div><div class="style-card-title">${build.archetype.name}</div><div class="style-card-code">${build.archetype.group} · função detectada: ${build.role}</div></div></div>
       <div style="color:var(--text-2);font-size:13px;line-height:1.55;">${build.archetype.desc}</div>
-      <div style="color:var(--green);font-size:12px;line-height:1.55;margin-top:10px;">Por que: ${build.why}</div>
+      <div class="build-why">Por que: ${build.why}</div>
     </div>
     <div class="section-title" style="grid-column:1/-1;">3 PlayStyles principais</div>
     ${mainHtml}
     <div class="section-title" style="grid-column:1/-1;">8 PlayStyles complementares/prata</div>
     ${silverHtml}
-    <div class="player-card" style="cursor:default;grid-column:1/-1;"><div class="style-card-title">Como montar o jogador</div><div style="color:var(--text-2);font-size:13px;line-height:1.55;margin-top:8px;">${build.practical}</div></div>
+    <div class="build-card" style="grid-column:1/-1;"><div class="style-card-title">Como montar o jogador</div><div class="build-note" style="margin-top:8px;">${build.practical}</div></div>
   `;
 }
 function renderPlaystyles() {
@@ -5305,7 +5332,7 @@ function renderPlaystyles() {
       <textarea id="sim-text" style="grid-column:span 4;" placeholder="Descreva o que você espera do jogador: ex. zagueiro rápido para antecipar, atacante que finaliza de longe, meia que acha passe... "></textarea>
       <div class="full"><button type="button" class="btn-primary" onclick="runPlaystyleSimulator()">Sugerir build completo</button></div>
     </div>
-    <div id="sim-result" class="analytics-cards"></div>
+    <div id="sim-result" class="build-result-grid"></div>
     <div class="section-title">Legenda de Arquétipos</div>
     <div style="color:var(--text-2);font-size:12px;margin-bottom:12px;line-height:1.5;">Arquétipo é o perfil tático/manual do jogador no seu elenco. Ele ajuda a IA, a análise scout e o Time Ideal a entenderem a função real do jogador, mesmo quando a API da EA erra a posição.</div>
     ${archetypes}
@@ -5922,6 +5949,10 @@ if __name__ == "__main__":
     print("="*60 + "\n")
     
     uvicorn.run(app, host="0.0.0.0", port=8000)
+
+
+
+
 
 
 
