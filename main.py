@@ -1080,7 +1080,7 @@ def build_player_analytics(player_name, cache, match_type="todos"):
 
     history.sort(key=lambda x: x.get("timestamp", 0), reverse=True)
     if not history:
-        print(f"[ANALYTICS] Jogador sem dados suficientes: {player_name}")
+        print(f"[ANALYTICS] Jogador sem dados suficientes no clube/filtro atual: {player_name}")
 
     games = len(history)
     ratings = [h["rating"] for h in history]
@@ -1094,10 +1094,60 @@ def build_player_analytics(player_name, cache, match_type="todos"):
     moms = sum(1 for h in history if h.get("mom"))
     reds = sum(h["red"] for h in history)
 
-    team_rating_avg = _avg([p.get("rating", 0) for p in players], 0)
-    team_goal_avg = _avg([p.get("goals_per_game", 0) for p in players], 0)
-    ranking = sorted(players, key=lambda p: float(p.get("rating", 0) or 0), reverse=True)
-    rank_position = next((i + 1 for i, p in enumerate(ranking) if p.get("name") == player.get("name")), None)
+    # Todas as metricas de elenco/ranking abaixo vêm SOMENTE das partidas salvas do clube atual.
+    # Nao usa games/goals globais de members/career/stats, porque esses numeros podem incluir outros clubes.
+    club_player_rows = {}
+    for m in cache.get("matches", []):
+        current_match_type = str(m.get("match_type", "desconhecido") or "desconhecido").lower()
+        if wanted_match_type != "todos" and current_match_type != wanted_match_type:
+            continue
+        for pr in (m.get("players_ratings") or []):
+            nm = pr.get("name") or "Unknown"
+            row = club_player_rows.setdefault(nm, {
+                "name": nm, "position": pr.get("pos") or "?", "games": 0,
+                "rating_sum": 0.0, "sofi_sum": 0.0, "goals": 0, "assists": 0, "shots": 0,
+                "pass_pct_sum": 0.0, "tackle_pct_sum": 0.0, "mom": 0,
+            })
+            row["games"] += 1
+            row["position"] = pr.get("pos") or row["position"]
+            row["rating_sum"] += float(pr.get("rating", 0) or 0)
+            row["sofi_sum"] += float(pr.get("sofi_rating", pr.get("rating", 0)) or 0)
+            row["goals"] += int(pr.get("goals", 0) or 0)
+            row["assists"] += int(pr.get("assists", 0) or 0)
+            row["shots"] += int(pr.get("shots", 0) or 0)
+            row["pass_pct_sum"] += float(pr.get("pass_pct", 0) or 0)
+            row["tackle_pct_sum"] += float(pr.get("tackle_pct", 0) or 0)
+            row["mom"] += int(pr.get("mom", 0) or 0)
+
+    club_players = []
+    for row in club_player_rows.values():
+        gp = max(int(row.get("games", 0) or 0), 1)
+        club_players.append({
+            "name": row["name"],
+            "position": row.get("position") or "?",
+            "games": row["games"],
+            "rating": round(row["rating_sum"] / gp, 2),
+            "sofi_rating": round(row["sofi_sum"] / gp, 2),
+            "goals": row["goals"],
+            "assists": row["assists"],
+            "shots": row["shots"],
+            "pass_pct": round(row["pass_pct_sum"] / gp, 1),
+            "tackle_pct": round(row["tackle_pct_sum"] / gp, 1),
+            "mom": row["mom"],
+            "goals_per_game": round(row["goals"] / gp, 2),
+            "assists_per_game": round(row["assists"] / gp, 2),
+        })
+
+    player_club = next((p for p in club_players if p.get("name", "").lower() == pname), None)
+    if player_club:
+        player = {**player, **player_club, "ea_global_games": player.get("games"), "club_games": player_club.get("games", 0)}
+    else:
+        player = {**player, "games": 0, "club_games": 0, "ea_global_games": player.get("games")}
+
+    team_rating_avg = _avg([p.get("rating", 0) for p in club_players], 0)
+    team_goal_avg = _avg([p.get("goals_per_game", 0) for p in club_players], 0)
+    ranking = sorted(club_players, key=lambda p: float(p.get("rating", 0) or 0), reverse=True)
+    rank_position = next((i + 1 for i, p in enumerate(ranking) if p.get("name", "").lower() == pname), None)
 
     recent_asc = sorted(history[:8], key=lambda x: x.get("timestamp", 0))
     first_half = recent_asc[:max(1, len(recent_asc)//2)]
@@ -1134,6 +1184,7 @@ def build_player_analytics(player_name, cache, match_type="todos"):
     analytics = {
         "player": player,
         "games_with_history": games,
+        "scope": {"club_id": (cache.get("club") or {}).get("id"), "match_type": wanted_match_type, "label": "clube atual"},
         "history": history[:20],
         "series": list(reversed(history[:20])),
         "averages": {
@@ -1145,8 +1196,8 @@ def build_player_analytics(player_name, cache, match_type="todos"):
         },
         "totals": {"goals": goals, "assists": assists, "shots": shots, "tackles": tackles, "moms": moms, "red_cards": reds, "clean_sheets": clean_sheets, "saves": saves},
         "advanced": {"offensive_impact": round(offensive_impact, 1), "defensive_impact": round(defensive_impact, 1), "consistency": round(consistency, 1), "regularity": regularity, "clutch_score": round(clutch, 1), "risk": round(risk, 1), "analytic_score": analytic_score, "radar": radar},
-        "ranking": {"position": rank_position, "total_players": len(players), "rating_rank_label": f"{rank_position}/{len(players)}" if rank_position else "-"},
-        "team_comparison": {"team_avg_rating": team_rating_avg, "player_vs_team_rating": round(float(player.get("rating", 0) or 0) - team_rating_avg, 2), "team_avg_goals_per_game": team_goal_avg, "player_vs_team_goals_per_game": round(float(player.get("goals_per_game", 0) or 0) - team_goal_avg, 2)},
+        "ranking": {"position": rank_position, "total_players": len(club_players), "rating_rank_label": f"{rank_position}/{len(club_players)}" if rank_position else "-"},
+        "team_comparison": {"team_avg_rating": team_rating_avg, "team_scope": "clube_atual", "player_vs_team_rating": round(float(player.get("rating", 0) or 0) - team_rating_avg, 2), "team_avg_goals_per_game": team_goal_avg, "player_vs_team_goals_per_game": round(float(player.get("goals_per_game", 0) or 0) - team_goal_avg, 2)},
         "trend": {"status": trend, "delta_recent_sofi": round(delta, 2)},
         "best_match": best_match,
         "worst_match": worst_match,
@@ -3672,7 +3723,7 @@ function renderJogadores() {
       <div class="player-card" onclick="showPlayerDetail('${p.name.replace(/'/g, "\\'")}')">
         <div class="player-rating-big">${p.rating}</div>
         <div class="player-pos">
-          <span class="player-pos-badge">${p.position} · ${p.games}J · ${p.position_source || 'auto'}</span>
+          <span class="player-pos-badge">${p.position} · ${p.games}J no filtro · ${p.position_source || 'auto'}</span>
         </div>
         <div class="player-name">${p.name}</div>
         <div class="player-stats">
@@ -4285,6 +4336,18 @@ function matchLine(m) {
   return `<div class="mini-insight"><div class="k">${m.date} · ${m.match_type}</div><div class="v">VS ${m.opponent} · ${m.result} ${m.score} · Sofi ${m.sofi_rating} · EA ${m.rating}</div></div>`;
 }
 
+function plainScoutSummary(text) {
+  return String(text || '')
+    .replace(/#{1,6}\s*/g, '')
+    .replace(/\*\*/g, '')
+    .replace(/^-\s*/gm, '')
+    .split('\n')
+    .map(x => x.trim())
+    .filter(Boolean)
+    .slice(0, 3)
+    .join(' ');
+}
+
 function renderPlayerDetailHTML(data) {
   const p = data.player;
   const h = data.history || [];
@@ -4302,7 +4365,7 @@ function renderPlayerDetailHTML(data) {
       <div class="analytics-hero">
         <div>
           <h2>${p.name} <span class="pos-tag">${p.position}</span></h2>
-          <div style="color:var(--text-2);font-size:13px;">${p.games} jogos no clube · ranking ${rank.rating_rank_label || '-'} · tendência ${trend.status || '-'}</div>
+          <div style="color:var(--text-2);font-size:13px;">${data.games_with_history || 0} jogos no clube neste filtro · ranking ${rank.rating_rank_label || '-'} · tendência ${trend.status || '-'}</div>
           <div class="analytics-note" style="margin-top:8px;">${(data.scout_report || '').split('\\n').slice(0, 2).join(' ')}</div>
         </div>
         <div class="analytics-score"><div class="num">${adv.analytic_score || 0}</div><div class="lab">Analítica</div></div>
