@@ -3605,6 +3605,70 @@ function scopedPlayers() {
 
 
 
+
+function clubHistoryKey(club) {
+  const id = club && club.id ? String(club.id) : 'default';
+  const name = club && club.name ? String(club.name).toLowerCase().replace(/[^a-z0-9]+/g, '_') : 'club';
+  return 'scout_match_history_' + id + '_' + name;
+}
+
+function validMatchIdValue(value) {
+  const s = String(value || '').trim().toLowerCase();
+  return s && !['none','null','undefined','0'].includes(s);
+}
+
+function stableClientMatchId(match, club) {
+  if (validMatchIdValue(match?.match_id)) return String(match.match_id).trim();
+  if (validMatchIdValue(match?.matchId)) return String(match.matchId).trim();
+  const clubId = club && club.id ? club.id : 'club';
+  return [clubId, match?.timestamp || '', match?.opponent || '', match?.score || '', match?.match_type || ''].join(':');
+}
+
+function mergeMatchHistoryForClub(club, ...groups) {
+  const merged = new Map();
+  groups.forEach(group => {
+    (group || []).forEach(match => {
+      if (!match || typeof match !== 'object') return;
+      const key = stableClientMatchId(match, club);
+      const old = merged.get(key) || {};
+      merged.set(key, {...old, ...match, match_id: key});
+    });
+  });
+  return [...merged.values()].sort((a,b) => Number(b.timestamp || 0) - Number(a.timestamp || 0));
+}
+
+function loadLocalMatchHistory(club) {
+  try {
+    return JSON.parse(localStorage.getItem(clubHistoryKey(club)) || '[]') || [];
+  } catch (e) {
+    console.warn('Historico local invalido', e);
+    return [];
+  }
+}
+
+function saveLocalMatchHistory(club, matches) {
+  try {
+    if (!club || !club.id) return;
+    const merged = mergeMatchHistoryForClub(club, matches || []);
+    localStorage.setItem(clubHistoryKey(club), JSON.stringify(merged));
+  } catch (e) {
+    console.warn('Nao salvou historico local', e);
+  }
+}
+
+function protectDataMatchHistory() {
+  if (!DATA || !DATA.club) return;
+  const serverMatches = DATA.matches || [];
+  const localMatches = loadLocalMatchHistory(DATA.club);
+  const merged = mergeMatchHistoryForClub(DATA.club, localMatches, serverMatches);
+  if (merged.length < localMatches.length) {
+    DATA.matches = localMatches;
+  } else {
+    DATA.matches = merged;
+  }
+  saveLocalMatchHistory(DATA.club, DATA.matches);
+}
+
 function profileStorageKey() {
   const clubId = DATA && DATA.club ? DATA.club.id : 'default';
   return 'scout_player_profiles_' + clubId;
@@ -3669,6 +3733,7 @@ async function loadData() {
   try {
     const r = await fetch('/api/dashboard');
     DATA = await r.json();
+    protectDataMatchHistory();
     await loadPlayerProfiles();
     await loadAgenda();
     render();
@@ -4992,6 +5057,7 @@ async function startSync() {
   log.innerHTML = '';
   fill.style.width = '0%';
   
+  if (DATA && DATA.club && DATA.matches) saveLocalMatchHistory(DATA.club, DATA.matches);
   const clubName = (document.getElementById('clubInput')?.value || 'DESAGREGADOS SC').trim();
   const evt = new EventSource('/api/sync-stream?club_name=' + encodeURIComponent(clubName));
   
@@ -5020,6 +5086,7 @@ async function startSync() {
             const profileBackup = {...(PLAYER_PROFILES || {})};
             try { saveLocalPlayerProfiles(); } catch (e) {}
             await loadData();
+            protectDataMatchHistory();
             PLAYER_PROFILES = {...(DATA?.player_profiles || {}), ...profileBackup, ...loadLocalPlayerProfiles()};
             if (DATA) DATA.player_profiles = {...PLAYER_PROFILES};
             saveLocalPlayerProfiles();
