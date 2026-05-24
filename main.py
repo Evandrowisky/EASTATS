@@ -220,6 +220,16 @@ def init_db():
             timestamp INTEGER,
             data TEXT
         );
+        CREATE TABLE IF NOT EXISTS player_profiles (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            club_id TEXT NOT NULL,
+            player_name TEXT NOT NULL,
+            manual_position TEXT,
+            archetype TEXT,
+            notes TEXT,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(club_id, player_name)
+        );
         CREATE TABLE IF NOT EXISTS agenda (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             opponent TEXT NOT NULL,
@@ -1388,6 +1398,96 @@ def get_player_detail(player_name: str):
         h_stats["moms"] = sum(1 for h in history if h.get("mom"))
 
     return {"player": player, "history": history, "history_stats": h_stats}
+
+
+# ============================================================
+# CADASTRO DE JOGADORES - AJUSTES MANUAIS
+# ============================================================
+
+class PlayerProfileUpdate(BaseModel):
+    manual_position: Optional[str] = None
+    archetype: Optional[str] = None
+    notes: Optional[str] = None
+
+
+def _current_club_id_from_cache() -> str:
+    cache = load_cache() or {}
+    club = cache.get("club") or {}
+    return str(club.get("id") or "default")
+
+
+def load_player_profiles(club_id: Optional[str] = None) -> Dict[str, Dict[str, Any]]:
+    club_id = str(club_id or _current_club_id_from_cache())
+    try:
+        conn = sqlite3.connect(DB_FILE)
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute(
+            "SELECT player_name, manual_position, archetype, notes FROM player_profiles WHERE club_id=?",
+            (club_id,),
+        ).fetchall()
+        conn.close()
+        return {
+            r["player_name"]: {
+                "manual_position": r["manual_position"],
+                "archetype": r["archetype"],
+                "notes": r["notes"],
+            }
+            for r in rows
+        }
+    except Exception as e:
+        print(f"[profiles] erro ao carregar perfis: {e}")
+        return {}
+
+
+@app.get("/api/player-profiles")
+def list_player_profiles():
+    """Lista ajustes manuais de posicao/arquetipo do clube sincronizado."""
+    club_id = _current_club_id_from_cache()
+    profiles = load_player_profiles(club_id)
+    cache = load_cache() or {}
+    players = cache.get("players") or []
+    return {"club_id": club_id, "profiles": profiles, "players_count": len(players)}
+
+
+@app.put("/api/player-profiles/{player_name}")
+def update_player_profile(player_name: str, item: PlayerProfileUpdate):
+    """Salva ajuste manual para um jogador sem depender de banco externo."""
+    club_id = _current_club_id_from_cache()
+    manual_position = (item.manual_position or "").strip() or None
+    archetype = (item.archetype or "").strip() or None
+    notes = (item.notes or "").strip() or None
+    try:
+        conn = sqlite3.connect(DB_FILE)
+        if manual_position or archetype or notes:
+            conn.execute(
+                """
+                INSERT INTO player_profiles (club_id, player_name, manual_position, archetype, notes, updated_at)
+                VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                ON CONFLICT(club_id, player_name) DO UPDATE SET
+                    manual_position=excluded.manual_position,
+                    archetype=excluded.archetype,
+                    notes=excluded.notes,
+                    updated_at=CURRENT_TIMESTAMP
+                """,
+                (club_id, player_name, manual_position, archetype, notes),
+            )
+        else:
+            conn.execute(
+                "DELETE FROM player_profiles WHERE club_id=? AND player_name=?",
+                (club_id, player_name),
+            )
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        print(f"[profiles] erro ao salvar perfil de {player_name}: {e}")
+        raise HTTPException(500, f"Erro ao salvar perfil: {e}")
+    return {
+        "club_id": club_id,
+        "player_name": player_name,
+        "manual_position": manual_position,
+        "archetype": archetype,
+        "notes": notes,
+    }
 
 
 # ============================================================
@@ -2809,6 +2909,36 @@ body {
 .btn-mini:hover { border-color: var(--green); color: var(--green); }
 .btn-mini.danger:hover { border-color: var(--red); color: var(--red); }
 
+.profile-list {
+  display: grid;
+  gap: 8px;
+}
+.profile-row {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 12px;
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) 160px 180px minmax(160px, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+}
+.profile-name { font-weight: 800; font-size: 14px; }
+.profile-meta { color: var(--text-2); font-size: 11px; margin-top: 3px; line-height: 1.35; }
+.profile-row select, .profile-row input {
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 9px 10px;
+  font-family: inherit;
+  font-size: 12px;
+}
+@media (max-width: 900px) {
+  .profile-row { grid-template-columns: 1fr; }
+  .profile-row .btn-mini { width: 100%; }
+}
+
 /* RESPONSIVE */
 @media (max-width: 768px) {
   .stats-grid { grid-template-columns: repeat(2, 1fr); }
@@ -3098,7 +3228,7 @@ let DATA = null;
 let CURRENT_TAB = 'visao';
 let CURRENT_PERIOD = 'todos';
 let CURRENT_MATCH_TYPE = 'todos';
-let CURRENT_PLAYER_SCOPE = 'clube';
+let PLAYER_PROFILES = {};
 let COMPARE_A = null;
 let COMPARE_B = null;
 let AGENDA = [];
@@ -3141,28 +3271,33 @@ function setMatchType(t, ev) {
   renderTab();
 }
 
-function setPlayerScope(scope, ev) {
-  CURRENT_PLAYER_SCOPE = scope;
-  document.querySelectorAll('.playerscope').forEach(el => el.classList.remove('active'));
-  if (ev && ev.target) ev.target.classList.add('active');
-  COMPARE_A = null;
-  COMPARE_B = null;
-  renderTab();
-}
-
 function computePlayersForMatches(matches) {
   const byName = {};
   (DATA.players || []).forEach(p => {
-    byName[p.name] = {...p, games: 0, rating_sum: 0, sofi_sum: 0, goals: 0, assists: 0, shots: 0, passes_pct_sum: 0, tackle_pct_sum: 0, mom: 0, reds: 0};
+    byName[p.name] = {
+      ...p,
+      favorite_position: p.position || '?',
+      last_match_position: '',
+      position_counts: {GK:0, DEF:0, MID:0, FWD:0},
+      games: 0, rating_sum: 0, sofi_sum: 0, goals: 0, assists: 0, shots: 0,
+      passes_pct_sum: 0, tackle_pct_sum: 0, mom: 0, reds: 0, saves: 0, clean_sheet: 0
+    };
   });
   (matches || []).forEach(m => {
     (m.players_ratings || []).forEach(pr => {
       if (!byName[pr.name]) {
-        byName[pr.name] = {name: pr.name, position: pr.pos || '?', games: 0, rating_sum: 0, sofi_sum: 0, goals: 0, assists: 0, shots: 0, passes_pct_sum: 0, tackle_pct_sum: 0, mom: 0, reds: 0};
+        byName[pr.name] = {
+          name: pr.name, position: pr.pos || '?', favorite_position: pr.pos || '?', last_match_position: '',
+          position_counts: {GK:0, DEF:0, MID:0, FWD:0},
+          games: 0, rating_sum: 0, sofi_sum: 0, goals: 0, assists: 0, shots: 0,
+          passes_pct_sum: 0, tackle_pct_sum: 0, mom: 0, reds: 0, saves: 0, clean_sheet: 0
+        };
       }
       const p = byName[pr.name];
+      const fam = normalizePlayerFamily(pr.pos);
       p.games += 1;
-      p.position = pr.pos || p.position;
+      p.last_match_position = pr.pos || p.last_match_position;
+      p.position_counts[fam] = (p.position_counts[fam] || 0) + 1;
       p.rating_sum += Number(pr.rating || 0);
       p.sofi_sum += Number(pr.sofi_rating || pr.rating || 0);
       p.goals += Number(pr.goals || 0);
@@ -3172,58 +3307,66 @@ function computePlayersForMatches(matches) {
       p.tackle_pct_sum += Number(pr.tackle_pct || 0);
       p.mom += Number(pr.mom || 0);
       p.reds += Number(pr.red || 0);
+      p.saves += Number(pr.saves || 0);
+      p.clean_sheet += Number(pr.clean_sheet || 0);
     });
   });
   return Object.values(byName)
     .filter(p => p.games > 0)
-    .map(p => ({
-      ...p,
-      rating: +(p.rating_sum / Math.max(p.games, 1)).toFixed(2),
-      sofi_rating: +(p.sofi_sum / Math.max(p.games, 1)).toFixed(2),
-      pass_pct: +(p.passes_pct_sum / Math.max(p.games, 1)).toFixed(1),
-      tackle_pct: +(p.tackle_pct_sum / Math.max(p.games, 1)).toFixed(1),
-      goals_per_game: +(p.goals / Math.max(p.games, 1)).toFixed(2),
-      assists_per_game: +(p.assists / Math.max(p.games, 1)).toFixed(2),
-    }))
+    .map(p => {
+      const intel = inferPlayerPositionIntel(p);
+      return {
+        ...p,
+        position: intel.label,
+        position_family: intel.family,
+        position_source: intel.source,
+        rating: +(p.rating_sum / Math.max(p.games, 1)).toFixed(2),
+        sofi_rating: +(p.sofi_sum / Math.max(p.games, 1)).toFixed(2),
+        pass_pct: +(p.passes_pct_sum / Math.max(p.games, 1)).toFixed(1),
+        tackle_pct: +(p.tackle_pct_sum / Math.max(p.games, 1)).toFixed(1),
+        goals_per_game: +(p.goals / Math.max(p.games, 1)).toFixed(2),
+        assists_per_game: +(p.assists / Math.max(p.games, 1)).toFixed(2),
+      };
+    })
     .sort((a,b) => Number(b.rating || 0) - Number(a.rating || 0));
 }
 
-function computeOtherClubPlayers() {
-  const current = computePlayersForMatches(DATA.matches || []);
-  const byName = {};
-  current.forEach(p => byName[p.name] = p);
-  return (DATA.players || []).map(p => {
-    const club = byName[p.name] || {};
-    const games = Math.max(0, Number(p.games || 0) - Number(club.games || 0));
-    const goals = Math.max(0, Number(p.goals || 0) - Number(club.goals || 0));
-    const assists = Math.max(0, Number(p.assists || 0) - Number(club.assists || 0));
-    const shots = Math.max(0, Number(p.shots || 0) - Number(club.shots || 0));
-    const mom = Math.max(0, Number(p.mom || 0) - Number(club.mom || 0));
-    return {
-      ...p,
-      games,
-      goals,
-      assists,
-      shots,
-      mom,
-      goals_per_game: +(goals / Math.max(games, 1)).toFixed(2),
-      assists_per_game: +(assists / Math.max(games, 1)).toFixed(2),
-      scope_note: 'Estimado: EA geral menos jogos registrados no clube buscado',
-    };
-  }).filter(p => p.games > 0).sort((a,b) => Number(b.rating || 0) - Number(a.rating || 0));
-}
-
 function scopedPlayers() {
-  if (CURRENT_PLAYER_SCOPE === 'geral') return DATA.players || [];
-  if (CURRENT_PLAYER_SCOPE === 'outros') return computeOtherClubPlayers();
   return computePlayersForMatches(filteredMatches());
 }
 
+
+
+async function loadPlayerProfiles() {
+  try {
+    const r = await fetch('/api/player-profiles');
+    const data = await r.json();
+    PLAYER_PROFILES = data.profiles || {};
+  } catch (e) {
+    PLAYER_PROFILES = {};
+    console.warn('Perfis manuais indisponiveis', e);
+  }
+}
+
+async function savePlayerProfile(name, manualPosition, archetype, notes) {
+  const r = await fetch('/api/player-profiles/' + encodeURIComponent(name), {
+    method: 'PUT',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({
+      manual_position: manualPosition || null,
+      archetype: archetype || null,
+      notes: notes || null,
+    })
+  });
+  if (!r.ok) throw new Error('Erro ao salvar cadastro');
+  await loadPlayerProfiles();
+}
 
 async function loadData() {
   try {
     const r = await fetch('/api/dashboard');
     DATA = await r.json();
+    await loadPlayerProfiles();
     await loadAgenda();
     render();
   } catch (e) {
@@ -3262,6 +3405,7 @@ function render() {
       <div class="tab ${CURRENT_TAB==='comparar'?'active':''}" onclick="setTab('comparar')">COMPARAR</div>
       <div class="tab ${CURRENT_TAB==='confrontos'?'active':''}" onclick="setTab('confrontos')">CONFRONTOS</div>
       <div class="tab ${CURRENT_TAB==='time-ideal'?'active':''}" onclick="setTab('time-ideal')">TIME IDEAL</div>
+      <div class="tab ${CURRENT_TAB==='cadastro'?'active':''}" onclick="setTab('cadastro')">CADASTRO</div>
       <div class="tab ${CURRENT_TAB==='agenda'?'active':''}" onclick="setTab('agenda')">AGENDA</div>
     </div>
     
@@ -3279,12 +3423,7 @@ function render() {
       <div class="period matchtype ${CURRENT_MATCH_TYPE==='copa'?'active':''}" onclick="setMatchType('copa', event)">COPA</div>
       <div class="period matchtype ${CURRENT_MATCH_TYPE==='amistoso'?'active':''}" onclick="setMatchType('amistoso', event)">AMISTOSO</div>
     </div>
-    
-    <div class="period-filter player-scope-filter" style="margin-top:-10px;">
-      <div class="period playerscope ${CURRENT_PLAYER_SCOPE==='clube'?'active':''}" onclick="setPlayerScope('clube', event)">NÚMEROS: CLUBE BUSCADO</div>
-      <div class="period playerscope ${CURRENT_PLAYER_SCOPE==='outros'?'active':''}" onclick="setPlayerScope('outros', event)">OUTROS CLUBES</div>
-      <div class="period playerscope ${CURRENT_PLAYER_SCOPE==='geral'?'active':''}" onclick="setPlayerScope('geral', event)">EA GERAL</div>
-    </div>
+
     
     <div class="container">
       <div id="tabContent"></div>
@@ -3310,6 +3449,7 @@ function renderTab() {
   else if (CURRENT_TAB === 'comparar') { tc.innerHTML = renderComparar(); renderCompareBars(); }
   else if (CURRENT_TAB === 'confrontos') tc.innerHTML = renderConfrontos();
   else if (CURRENT_TAB === 'time-ideal') tc.innerHTML = renderTimeIdeal();
+  else if (CURRENT_TAB === 'cadastro') tc.innerHTML = renderCadastroJogadores();
   else if (CURRENT_TAB === 'agenda') tc.innerHTML = renderAgenda();
 }
 
@@ -3525,14 +3665,14 @@ function renderJogadores() {
   if (!players.length) {
     return '<div class="empty-state">Nenhum jogador encontrado neste filtro</div>';
   }
-  const scopeLabel = CURRENT_PLAYER_SCOPE === 'clube' ? (CURRENT_MATCH_TYPE === 'todos' ? 'clube buscado' : `clube buscado · ${CURRENT_MATCH_TYPE}`) : CURRENT_PLAYER_SCOPE === 'outros' ? 'outros clubes' : 'EA geral';
+  const scopeLabel = CURRENT_MATCH_TYPE === 'todos' ? 'clube pesquisado' : 'clube pesquisado · ' + CURRENT_MATCH_TYPE;
   let html = `<div class="section-title">Jogadores · ${scopeLabel}</div><div class="players-grid">`;
   players.forEach(p => {
     html += `
       <div class="player-card" onclick="showPlayerDetail('${p.name.replace(/'/g, "\\'")}')">
         <div class="player-rating-big">${p.rating}</div>
         <div class="player-pos">
-          <span class="player-pos-badge">${p.position} · ${p.games}J${p.scope_note ? " · estimado" : ""}</span>
+          <span class="player-pos-badge">${p.position} · ${p.games}J · ${p.position_source || 'auto'}</span>
         </div>
         <div class="player-name">${p.name}</div>
         <div class="player-stats">
@@ -3694,41 +3834,52 @@ function renderConfrontos() {
 
 function normalizePlayerFamily(pos) {
   pos = String(pos || '').toLowerCase();
-  if (['goalkeeper','gk'].includes(pos)) return 'GK';
-  if (['defender','cb','lb','rb','lwb','rwb'].includes(pos)) return 'DEF';
-  if (['midfielder','cm','cdm','cam','lm','rm'].includes(pos)) return 'MID';
-  if (['forward','st','cf','lw','rw','lf','rf'].includes(pos)) return 'FWD';
+  if (['goalkeeper','gk','gol','goleiro'].includes(pos)) return 'GK';
+  if (['defender','def','cb','zagueiro','zag','lb','rb','lwb','rwb','lateral'].includes(pos)) return 'DEF';
+  if (['midfielder','mid','meia','cm','cdm','cam','lm','rm','volante'].includes(pos)) return 'MID';
+  if (['forward','fwd','atacante','st','cf','lw','rw','lf','rf','ponta'].includes(pos)) return 'FWD';
   return 'MID';
 }
 
+function familyToPositionLabel(family) {
+  return {GK:'GK', DEF:'defender', MID:'midfielder', FWD:'forward'}[family] || 'midfielder';
+}
+
+function profileForPlayer(name) {
+  return PLAYER_PROFILES[name] || PLAYER_PROFILES[String(name || '').trim()] || {};
+}
+
 function inferPlayerPositionIntel(player) {
-  const counts = {GK:0, DEF:0, MID:0, FWD:0};
-  let apps = 0;
-  const name = String(player.name || '').toLowerCase();
-  (DATA.matches || []).forEach(match => {
-    (match.players_ratings || []).forEach(pr => {
-      if (String(pr.name || '').toLowerCase() !== name) return;
-      const fam = normalizePlayerFamily(pr.pos);
-      counts[fam] = (counts[fam] || 0) + 1;
-      apps += 1;
-    });
-  });
-  const registered = normalizePlayerFamily(player.position);
+  const profile = profileForPlayer(player.name);
+  if (profile.manual_position) {
+    const fam = normalizePlayerFamily(profile.manual_position);
+    return {family: fam, label: familyToPositionLabel(fam), source: 'manual', apps: player.games || 0, counts: player.position_counts || {GK:0,DEF:0,MID:0,FWD:0}};
+  }
+
+  const counts = player.position_counts || {GK:0, DEF:0, MID:0, FWD:0};
+  let apps = Number(player.games || player.history_apps || 0);
+  const registered = normalizePlayerFamily(player.favorite_position || player.position);
+  const last = normalizePlayerFamily(player.last_match_position || '');
   let family = registered;
-  let source = 'cadastro';
+  let source = 'posição favorita EA';
+
   if (apps > 0) {
     const sorted = Object.entries(counts).sort((a,b) => b[1] - a[1]);
     const top = sorted[0];
-    const gkShare = counts.GK / Math.max(apps, 1);
-    if (registered === 'GK' || (counts.GK >= 3 && gkShare >= 0.6)) {
+    const topShare = top ? top[1] / Math.max(apps, 1) : 0;
+    const gkShare = (counts.GK || 0) / Math.max(apps, 1);
+    if (registered === 'GK' || ((counts.GK || 0) >= 3 && gkShare >= 0.7)) {
       family = 'GK';
-      source = registered === 'GK' ? 'cadastro-goleiro' : 'historico-goleiro';
-    } else if (top && top[1] > 0 && top[0] !== 'GK') {
+      source = registered === 'GK' ? 'posição favorita EA' : 'histórico como GK';
+    } else if (top && top[1] >= 2 && topShare >= 0.45 && top[0] !== 'GK') {
       family = top[0];
-      source = 'historico';
+      source = 'últimos jogos';
+    } else if (last && last !== 'GK') {
+      family = last;
+      source = 'último jogo';
     }
   }
-  return {family, source, apps, counts};
+  return {family, label: familyToPositionLabel(family), source, apps, counts};
 }
 const FORMATION_SLOTS = {
   '3-5-2': ['GK','LCB','CB','RCB','LM','LCM','CM','RCM','RM','LST','RST'],
@@ -3775,7 +3926,7 @@ function roleScore(p, targetFamily) {
 
 function buildIdealTeamClient(formation) {
   const slots = FORMATION_SLOTS[formation] || FORMATION_SLOTS['3-5-2'];
-  const pool = (DATA.players || []).map(p => { const intel = inferPlayerPositionIntel(p); return {...p, family: intel.family, position_source: intel.source, position_counts: intel.counts, history_apps: intel.apps}; }).sort((a,b) => Number(b.rating || 0) - Number(a.rating || 0));
+  const pool = scopedPlayers().map(p => { const intel = inferPlayerPositionIntel(p); return {...p, family: intel.family, position: intel.label, position_source: intel.source, position_counts: intel.counts, history_apps: intel.apps}; }).sort((a,b) => Number(b.rating || 0) - Number(a.rating || 0));
   const used = new Set();
   const picked = [];
   slots.forEach(slot => {
@@ -3801,6 +3952,66 @@ function buildIdealTeamClient(formation) {
 function setIdealFormation(value) {
   IDEAL_FORMATION = value;
   renderTab();
+}
+
+function renderCadastroJogadores() {
+  const players = computePlayersForMatches(DATA.matches || []);
+  const fallback = (DATA.players || []).map(p => {
+    const base = {...p, favorite_position:p.position, position_counts:{GK:0,DEF:0,MID:0,FWD:0}, games:0};
+    const intel = inferPlayerPositionIntel(base);
+    return {...base, position:intel.label, position_source:intel.source};
+  });
+  const rows = (players.length ? players : fallback);
+  const opts = [
+    ['', 'AUTO'], ['GK','GK - Goleiro'], ['CB','CB - Zagueiro'], ['LB','LB - Lateral Esq.'], ['RB','RB - Lateral Dir.'],
+    ['CDM','CDM - Volante'], ['CM','CM - Meia'], ['CAM','CAM - Meia Ofensivo'], ['LM','LM - Ala/Meia Esq.'], ['RM','RM - Ala/Meia Dir.'],
+    ['LW','LW - Ponta Esq.'], ['RW','RW - Ponta Dir.'], ['ST','ST - Atacante']
+  ];
+  const rowsHtml = rows.map(p => {
+    const profile = profileForPlayer(p.name);
+    const intel = inferPlayerPositionIntel(p);
+    const selectHtml = opts.map(([v,l]) => `<option value="${v}" ${String(profile.manual_position || '') === v ? 'selected' : ''}>${l}</option>`).join('');
+    return `
+      <div class="profile-row">
+        <div>
+          <div class="profile-name">${p.name}</div>
+          <div class="profile-meta">EA favorita: ${p.favorite_position || p.position || '?'} · último: ${p.last_match_position || '-'} · sugerida: ${intel.label} (${intel.source}) · ${p.games || 0}j no clube</div>
+        </div>
+        <select id="prof-pos-${cssSafeId(p.name)}">${selectHtml}</select>
+        <input id="prof-arch-${cssSafeId(p.name)}" placeholder="Arquétipo/playstyle" value="${escapeAttr(profile.archetype || '')}">
+        <input id="prof-notes-${cssSafeId(p.name)}" placeholder="Notas" value="${escapeAttr(profile.notes || '')}">
+        <button class="btn-mini" onclick="saveProfileFromRow('${p.name.replace(/'/g, "\'")}')">Salvar</button>
+      </div>
+    `;
+  }).join('');
+  return `
+    <div class="section-title">Cadastro de Jogadores</div>
+    <div style="color:var(--text-2);font-size:12px;margin-bottom:12px;line-height:1.5;">
+      O script sugere posição pela posição favorita da EA e pelas posições dos últimos jogos. Se errar, ajuste aqui uma vez e o Time Ideal passa a obedecer. As estatísticas continuam sempre só do clube pesquisado.
+    </div>
+    <div class="profile-list">${rowsHtml}</div>
+  `;
+}
+
+function cssSafeId(value) {
+  return String(value || '').replace(/[^a-zA-Z0-9_-]/g, '_');
+}
+
+function escapeAttr(value) {
+  return String(value || '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+async function saveProfileFromRow(name) {
+  const id = cssSafeId(name);
+  const pos = document.getElementById('prof-pos-' + id)?.value || '';
+  const arch = document.getElementById('prof-arch-' + id)?.value || '';
+  const notes = document.getElementById('prof-notes-' + id)?.value || '';
+  try {
+    await savePlayerProfile(name, pos, arch, notes);
+    renderTab();
+  } catch (e) {
+    alert(e.message);
+  }
 }
 
 function renderTimeIdeal() {
