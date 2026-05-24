@@ -523,6 +523,308 @@ def merge_match_lists_for_storage(club_id: str, *groups):
             merged[mid] = {**current, **item, "match_id": mid}
     return sorted(merged.values(), key=lambda x: int(x.get("timestamp", 0) or 0), reverse=True)
 
+
+# ============================================================
+# SUPABASE
+# ============================================================
+
+_SUPABASE_CLIENT = None
+
+
+def _env_flag(name: str, default: str = "0") -> bool:
+    return str(os.getenv(name, default)).strip().lower() in ("1", "true", "yes", "on")
+
+
+def _safe_int(value, default: int = 0) -> int:
+    try:
+        if value is None or value == "":
+            return default
+        return int(float(value))
+    except Exception:
+        return default
+
+
+def _safe_float(value, default: float = 0.0) -> float:
+    try:
+        if value is None or value == "":
+            return default
+        return float(value)
+    except Exception:
+        return default
+
+
+def _now_iso() -> str:
+    return datetime.now().isoformat()
+
+
+def _supabase_chunks(rows, size: int = 500):
+    for i in range(0, len(rows), size):
+        yield rows[i:i + size]
+
+
+def get_supabase():
+    """Retorna cliente Supabase backend-only, ou None se nao estiver configurado."""
+    global _SUPABASE_CLIENT
+    if not _env_flag("USE_SUPABASE"):
+        return None
+    if _SUPABASE_CLIENT is not None:
+        return _SUPABASE_CLIENT
+
+    url = os.getenv("SUPABASE_URL", "").strip()
+    key = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "").strip()
+    if not url or not key:
+        print("[SUPABASE] USE_SUPABASE=1, mas SUPABASE_URL ou SERVICE_ROLE_KEY ausente")
+        return None
+
+    try:
+        from supabase import create_client
+        _SUPABASE_CLIENT = create_client(url, key)
+        print("[SUPABASE] Cliente inicializado")
+        return _SUPABASE_CLIENT
+    except Exception as e:
+        print(f"[SUPABASE] Falha ao inicializar cliente: {type(e).__name__}: {e}")
+        return None
+
+
+def save_club_supabase(club_data: dict):
+    sb = get_supabase()
+    if not sb or not club_data:
+        return False
+    club = club_data.get("club") or {}
+    club_id = str(club.get("id") or "").strip()
+    if not club_id:
+        return False
+    row = {
+        "club_id": club_id,
+        "name": club.get("name") or club_data.get("name") or "Clube",
+        "platform": club.get("platform") or "common-gen5",
+        "data": club_data,
+        "synced_at": club.get("synced_at") or _now_iso(),
+        "updated_at": _now_iso(),
+    }
+    try:
+        sb.table("clubs").upsert(row, on_conflict="club_id").execute()
+        print(f"[SUPABASE] Clube salvo: {club_id}")
+        return True
+    except Exception as e:
+        print(f"[SUPABASE] Aviso ao salvar clube {club_id}: {type(e).__name__}: {e}")
+        return False
+
+
+def save_players_supabase(club_id: str, players: list):
+    sb = get_supabase()
+    if not sb or not club_id or not players:
+        return 0
+    rows = []
+    for p in players or []:
+        if not isinstance(p, dict) or not p.get("name"):
+            continue
+        rows.append({
+            "club_id": str(club_id),
+            "name": str(p.get("name") or ""),
+            "position": p.get("position"),
+            "games": _safe_int(p.get("games")),
+            "rating": _safe_float(p.get("rating")),
+            "goals": _safe_int(p.get("goals")),
+            "assists": _safe_int(p.get("assists")),
+            "shots": _safe_int(p.get("shots")),
+            "passes_made": _safe_int(p.get("passes_made")),
+            "pass_pct": _safe_float(p.get("pass_pct")),
+            "tackles_made": _safe_int(p.get("tackles_made")),
+            "tackle_pct": _safe_float(p.get("tackle_pct")),
+            "mom": _safe_int(p.get("mom")),
+            "goals_per_game": _safe_float(p.get("goals_per_game")),
+            "assists_per_game": _safe_float(p.get("assists_per_game")),
+            "data": p,
+            "updated_at": _now_iso(),
+        })
+    saved = 0
+    try:
+        for chunk in _supabase_chunks(rows):
+            sb.table("players").upsert(chunk, on_conflict="club_id,name").execute()
+            saved += len(chunk)
+        print(f"[SUPABASE] Jogadores salvos: {saved}")
+    except Exception as e:
+        print(f"[SUPABASE] Aviso ao salvar jogadores: {type(e).__name__}: {e}")
+    return saved
+
+
+def save_matches_supabase(club_id: str, matches: list):
+    sb = get_supabase()
+    if not sb or not club_id or not matches:
+        return {"matches": 0, "match_players": 0}
+
+    match_rows = []
+    player_rows = []
+    for idx, m in enumerate(matches or []):
+        if not isinstance(m, dict):
+            continue
+        mid = stable_match_id_for_storage(m, club_id, idx)
+        m_payload = {**m, "match_id": mid}
+        match_rows.append({
+            "match_id": mid,
+            "club_id": str(club_id),
+            "opponent": m.get("opponent"),
+            "score": m.get("score"),
+            "goals_for": _safe_int(m.get("goals_for")),
+            "goals_against": _safe_int(m.get("goals_against")),
+            "result": m.get("result"),
+            "match_type": m.get("match_type"),
+            "match_type_raw": m.get("match_type_raw") or m.get("_origin"),
+            "match_timestamp": _safe_int(m.get("timestamp")),
+            "match_date": m.get("date"),
+            "mom": m.get("mom"),
+            "mom_rating": _safe_float(m.get("mom_rating")),
+            "data": m_payload,
+            "updated_at": _now_iso(),
+        })
+        for pr in m.get("players_ratings") or []:
+            if not isinstance(pr, dict) or not pr.get("name"):
+                continue
+            player_rows.append({
+                "match_id": mid,
+                "club_id": str(club_id),
+                "player_name": str(pr.get("name") or ""),
+                "position": pr.get("pos") or pr.get("position"),
+                "rating": _safe_float(pr.get("rating")),
+                "sofi_rating": _safe_float(pr.get("sofi_rating", pr.get("rating"))),
+                "goals": _safe_int(pr.get("goals")),
+                "assists": _safe_int(pr.get("assists")),
+                "shots": _safe_int(pr.get("shots")),
+                "passes_made": _safe_int(pr.get("passes_made")),
+                "pass_pct": _safe_float(pr.get("pass_pct")),
+                "tackles_made": _safe_int(pr.get("tackles_made")),
+                "tackle_pct": _safe_float(pr.get("tackle_pct")),
+                "saves": _safe_int(pr.get("saves")),
+                "clean_sheet": _safe_int(pr.get("clean_sheet")),
+                "red": _safe_int(pr.get("red")),
+                "mom": _safe_int(pr.get("mom")),
+                "data": pr,
+                "updated_at": _now_iso(),
+            })
+
+    saved_matches = 0
+    saved_players = 0
+    try:
+        for chunk in _supabase_chunks(match_rows):
+            sb.table("matches").upsert(chunk, on_conflict="match_id").execute()
+            saved_matches += len(chunk)
+        for chunk in _supabase_chunks(player_rows):
+            sb.table("match_players").upsert(chunk, on_conflict="match_id,player_name").execute()
+            saved_players += len(chunk)
+        print(f"[SUPABASE] Partidas salvas: {saved_matches}; atuações: {saved_players}")
+    except Exception as e:
+        print(f"[SUPABASE] Aviso ao salvar partidas/atuações: {type(e).__name__}: {e}")
+    return {"matches": saved_matches, "match_players": saved_players}
+
+
+def load_matches_supabase(club_id: str, limit: int = 1000):
+    sb = get_supabase()
+    if not sb or not club_id:
+        return []
+    try:
+        resp = (
+            sb.table("matches")
+            .select("data")
+            .eq("club_id", str(club_id))
+            .order("match_timestamp", desc=True)
+            .limit(int(limit))
+            .execute()
+        )
+        rows = getattr(resp, "data", None) or []
+        out = []
+        for row in rows:
+            data = row.get("data") if isinstance(row, dict) else None
+            if isinstance(data, dict):
+                out.append(data)
+        print(f"[SUPABASE] Histórico carregado: {len(out)} partidas")
+        return out
+    except Exception as e:
+        print(f"[SUPABASE] Aviso ao carregar partidas: {type(e).__name__}: {e}")
+        return []
+
+
+def log_sync_supabase(club_id: str, platform: str, status: str, total_matches: int = 0, new_matches: int = 0, message: str = "", debug: Any = None):
+    sb = get_supabase()
+    if not sb:
+        return False
+    try:
+        sb.table("sync_logs").insert({
+            "club_id": str(club_id) if club_id else None,
+            "platform": platform,
+            "status": status,
+            "total_matches": _safe_int(total_matches),
+            "new_matches": _safe_int(new_matches),
+            "message": message,
+            "debug": debug,
+        }).execute()
+        return True
+    except Exception as e:
+        print(f"[SUPABASE] Aviso ao registrar sync_log: {type(e).__name__}: {e}")
+        return False
+
+
+def load_latest_club_data_supabase(club_id: Optional[str] = None):
+    sb = get_supabase()
+    if not sb:
+        return None
+    try:
+        q = sb.table("clubs").select("data,synced_at,updated_at")
+        if club_id:
+            q = q.eq("club_id", str(club_id))
+        resp = q.order("synced_at", desc=True).limit(1).execute()
+        rows = getattr(resp, "data", None) or []
+        if rows and isinstance(rows[0], dict) and isinstance(rows[0].get("data"), dict):
+            print("[SUPABASE] Dashboard carregado de clubs.data")
+            return rows[0]["data"]
+    except Exception as e:
+        print(f"[SUPABASE] Aviso ao carregar club_data: {type(e).__name__}: {e}")
+    return None
+
+
+def load_player_profiles_supabase(club_id: str) -> Dict[str, Dict[str, Any]]:
+    sb = get_supabase()
+    if not sb or not club_id:
+        return {}
+    try:
+        resp = sb.table("player_profiles").select("player_name,manual_position,archetype,playstyles,notes").eq("club_id", str(club_id)).execute()
+        rows = getattr(resp, "data", None) or []
+        return {
+            r.get("player_name"): {
+                "manual_position": r.get("manual_position"),
+                "archetype": r.get("archetype"),
+                "playstyles": r.get("playstyles") or [],
+                "notes": r.get("notes"),
+            }
+            for r in rows if isinstance(r, dict) and r.get("player_name")
+        }
+    except Exception as e:
+        print(f"[SUPABASE] Aviso ao carregar player_profiles: {type(e).__name__}: {e}")
+        return {}
+
+
+def save_player_profile_supabase(club_id: str, player_name: str, manual_position=None, archetype=None, playstyles=None, notes=None):
+    sb = get_supabase()
+    if not sb or not club_id or not player_name:
+        return False
+    try:
+        if manual_position or archetype or playstyles or notes:
+            sb.table("player_profiles").upsert({
+                "club_id": str(club_id),
+                "player_name": str(player_name),
+                "manual_position": manual_position,
+                "archetype": archetype,
+                "playstyles": playstyles or [],
+                "notes": notes,
+                "updated_at": _now_iso(),
+            }, on_conflict="club_id,player_name").execute()
+        else:
+            sb.table("player_profiles").delete().eq("club_id", str(club_id)).eq("player_name", str(player_name)).execute()
+        return True
+    except Exception as e:
+        print(f"[SUPABASE] Aviso ao salvar player_profile {player_name}: {type(e).__name__}: {e}")
+        return False
+
 def summarize_matches_by_type(matches):
     resumo = {"liga": 0, "copa": 0, "amistoso": 0, "desconhecido": 0}
     for m in matches or []:
@@ -1019,6 +1321,14 @@ def import_history(payload: HistoryImportPayload):
 def get_dashboard():
     """Retorna dados do cache JSON"""
     cache = load_cache()
+    if not cache:
+        cache = load_latest_club_data_supabase()
+        if cache:
+            try:
+                save_cache(cache)
+                save_club_json_history(str((cache.get("club") or {}).get("id") or "default"), cache)
+            except Exception as e:
+                print(f"[SUPABASE] Dashboard carregou, mas fallback local falhou: {e}")
     if cache:
         # Reconstroi time ideal se nao existir ou estiver vazio
         if cache.get("players") and (
@@ -1262,6 +1572,54 @@ async def sync_stream(
                 "matchtype_summary": summarize_matches_by_type(matches),
             }
             
+            try:
+                if _env_flag("USE_SUPABASE"):
+                    yield f"data: {log('Salvando e carregando histórico no Supabase...', 8, 8)}\n\n"
+                    save_club_supabase(club_data)
+                    save_players_supabase(club_id, players)
+                    save_matches_supabase(club_id, matches)
+
+                    supabase_matches = load_matches_supabase(club_id, limit=1000)
+                    if supabase_matches:
+                        matches = merge_match_lists_for_storage(club_id, supabase_matches, matches)
+                        stats = calc_club_stats(overall, info, matches)
+                        opponents = calc_opponent_avg(matches)
+                        ideal_team = build_ideal_team(players, "3-5-2")
+                        if players:
+                            mvp = max(players, key=lambda p: (p.get("mom", 0), p.get("rating", 0)))
+                        club_data["matches"] = matches
+                        club_data["stats"] = stats
+                        club_data["opponents"] = opponents
+                        club_data["ideal_team"] = ideal_team
+                        club_data["mvp"] = mvp
+                        club_data["matchtype_summary"] = summarize_matches_by_type(matches)
+                        yield f"data: {log(f'Histórico Supabase carregado: {len(matches)} partidas totais', 8, 8)}\n\n"
+                        save_club_supabase(club_data)
+
+                    log_sync_supabase(
+                        club_id=club_id,
+                        platform=plat,
+                        status="success",
+                        total_matches=len(matches),
+                        new_matches=len(new_matches),
+                        message="Sincronização concluída com Supabase",
+                        debug=debug_matchtypes,
+                    )
+            except Exception as supabase_err:
+                print(f"[SUPABASE] Aviso: {type(supabase_err).__name__}: {supabase_err}")
+                try:
+                    log_sync_supabase(
+                        club_id=club_id,
+                        platform=plat,
+                        status="partial",
+                        total_matches=len(matches),
+                        new_matches=len(new_matches),
+                        message=f"Supabase falhou, seguindo com cache local: {supabase_err}",
+                        debug=debug_matchtypes,
+                    )
+                except Exception:
+                    pass
+                yield f"data: {log('Supabase falhou; seguindo com cache local/JSON/SQLite', 8, 8)}\n\n"
             # Salva cache JSON principal e histórico por clube
             save_cache(club_data)
             save_club_json_history(club_id, club_data)
@@ -1798,6 +2156,9 @@ def _current_club_id_from_cache() -> str:
 
 def load_player_profiles(club_id: Optional[str] = None) -> Dict[str, Dict[str, Any]]:
     club_id = str(club_id or _current_club_id_from_cache())
+    profiles_sb = load_player_profiles_supabase(club_id)
+    if profiles_sb:
+        return profiles_sb
     try:
         conn = sqlite3.connect(DB_FILE)
         conn.row_factory = sqlite3.Row
@@ -1861,6 +2222,7 @@ def update_player_profile(player_name: str, item: PlayerProfileUpdate):
             )
         conn.commit()
         conn.close()
+        save_player_profile_supabase(club_id, player_name, manual_position, archetype, playstyles, notes)
     except Exception as e:
         print(f"[profiles] erro ao salvar perfil de {player_name}: {e}")
         raise HTTPException(500, f"Erro ao salvar perfil: {e}")
@@ -1889,6 +2251,22 @@ class AgendaItem(BaseModel):
 
 @app.get("/api/agenda")
 def list_agenda():
+    club_id = _current_club_id_from_cache()
+    sb = get_supabase()
+    if sb:
+        try:
+            resp = (
+                sb.table("agenda")
+                .select("id,opponent,match_date,match_time,match_type,location,notes")
+                .or_(f"club_id.is.null,club_id.eq.{club_id}")
+                .order("match_date", desc=False)
+                .order("match_time", desc=False)
+                .execute()
+            )
+            rows = getattr(resp, "data", None) or []
+            return rows
+        except Exception as e:
+            print(f"[SUPABASE] Aviso ao listar agenda: {type(e).__name__}: {e}")
     conn = sqlite3.connect(DB_FILE)
     conn.row_factory = sqlite3.Row
     rows = conn.execute(
@@ -1901,6 +2279,17 @@ def list_agenda():
 
 @app.post("/api/agenda")
 def create_agenda(item: AgendaItem):
+    club_id = _current_club_id_from_cache()
+    sb = get_supabase()
+    payload = {"club_id": club_id, **item.dict()}
+    if sb:
+        try:
+            resp = sb.table("agenda").insert(payload).execute()
+            rows = getattr(resp, "data", None) or []
+            if rows:
+                return rows[0]
+        except Exception as e:
+            print(f"[SUPABASE] Aviso ao criar agenda: {type(e).__name__}: {e}")
     conn = sqlite3.connect(DB_FILE)
     cur = conn.execute(
         "INSERT INTO agenda (opponent, match_date, match_time, match_type, location, notes) "
@@ -1915,6 +2304,17 @@ def create_agenda(item: AgendaItem):
 
 @app.put("/api/agenda/{item_id}")
 def update_agenda(item_id: int, item: AgendaItem):
+    club_id = _current_club_id_from_cache()
+    sb = get_supabase()
+    payload = {"club_id": club_id, **item.dict(), "updated_at": _now_iso()}
+    if sb:
+        try:
+            resp = sb.table("agenda").update(payload).eq("id", item_id).execute()
+            rows = getattr(resp, "data", None) or []
+            if rows:
+                return rows[0]
+        except Exception as e:
+            print(f"[SUPABASE] Aviso ao atualizar agenda: {type(e).__name__}: {e}")
     conn = sqlite3.connect(DB_FILE)
     res = conn.execute(
         "UPDATE agenda SET opponent=?, match_date=?, match_time=?, match_type=?, location=?, notes=? WHERE id=?",
@@ -1930,6 +2330,13 @@ def update_agenda(item_id: int, item: AgendaItem):
 
 @app.delete("/api/agenda/{item_id}")
 def delete_agenda(item_id: int):
+    sb = get_supabase()
+    if sb:
+        try:
+            sb.table("agenda").delete().eq("id", item_id).execute()
+            return {"deleted": item_id}
+        except Exception as e:
+            print(f"[SUPABASE] Aviso ao excluir agenda: {type(e).__name__}: {e}")
     conn = sqlite3.connect(DB_FILE)
     res = conn.execute("DELETE FROM agenda WHERE id=?", (item_id,))
     if res.rowcount == 0:
@@ -1938,7 +2345,6 @@ def delete_agenda(item_id: int):
     conn.commit()
     conn.close()
     return {"deleted": item_id}
-
 
 # ============================================================
 # FRONTEND HTML
@@ -5407,6 +5813,18 @@ if __name__ == "__main__":
     print("="*60 + "\n")
     
     uvicorn.run(app, host="0.0.0.0", port=8000)
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
