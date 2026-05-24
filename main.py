@@ -4900,6 +4900,13 @@ function filteredMatches() {
   return all;
 }
 
+function playerStatMatches() {
+  let all = (DATA && DATA.matches) ? [...DATA.matches] : [];
+  if (CURRENT_MATCH_TYPE !== 'todos') {
+    all = all.filter(m => String(m.match_type || '').toLowerCase() === CURRENT_MATCH_TYPE);
+  }
+  return all;
+}
 function setPeriod(p, ev) {
   CURRENT_PERIOD = p;
   document.querySelectorAll('.period').forEach(el => el.classList.remove('active'));
@@ -4995,7 +5002,7 @@ function computePlayersForMatches(matches) {
 }
 
 function scopedPlayers() {
-  return computePlayersForMatches(filteredMatches());
+  return computePlayersForMatches(playerStatMatches());
 }
 
 
@@ -5550,14 +5557,14 @@ function renderJogadores() {
   if (!players.length) {
     return '<div class="empty-state">Nenhum jogador encontrado neste filtro</div>';
   }
-  const scopeLabel = CURRENT_MATCH_TYPE === 'todos' ? 'clube pesquisado' : 'clube pesquisado · ' + CURRENT_MATCH_TYPE;
+  const scopeLabel = CURRENT_MATCH_TYPE === 'todos' ? 'todos os jogos do clube' : 'jogos de ' + CURRENT_MATCH_TYPE + ' no clube';
   let html = `<div class="section-title">Jogadores · ${scopeLabel}</div><div class="players-grid">`;
   players.forEach(p => {
     html += `
       <div class="player-card" onclick="showPlayerDetail('${p.name.replace(/'/g, "\\'")}')">
         <div class="player-rating-big">${p.rating}</div>
         <div class="player-pos">
-          <span class="player-pos-badge">${p.position} · ${p.games}J no filtro · ${p.position_source || 'auto'}</span>
+          <span class="player-pos-badge">${p.position} · ${p.games}J no clube/tipo · ${p.position_source || 'auto'}</span>
         </div>
         <div class="player-name">${p.name}</div>
         <div class="player-stats">
@@ -5634,7 +5641,7 @@ function renderCompareBars() {
     return `
       <div style="text-align:center;padding:14px 0;">
         <div style="font-size:38px;font-weight:800;color:var(--green);text-shadow:0 0 18px var(--green-glow);">${p.rating}</div>
-        <div style="margin-top:4px;color:var(--text-2);text-transform:uppercase;font-size:10px;letter-spacing:1px;">${p.position} · ${p.games}J</div>
+        <div style="margin-top:4px;color:var(--text-2);text-transform:uppercase;font-size:10px;letter-spacing:1px;">${p.position} · ${p.games}J no clube/tipo</div>
         <div style="font-weight:800;font-size:16px;margin-top:4px;">${p.name}</div>
       </div>
     `;
@@ -6850,6 +6857,7 @@ if __name__ == "__main__":
     print("="*60 + "\n")
     
     uvicorn.run(app, host="0.0.0.0", port=8000)
+
 
 
 
