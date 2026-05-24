@@ -838,7 +838,6 @@ class AuthRegisterPayload(BaseModel):
     nome: str
     usuario: str
     senha: str
-    club_id: str
     clube: str
 
 
@@ -995,6 +994,38 @@ def require_admin(current_user: dict = Depends(get_current_user)):
     return current_user
 
 
+
+def resolve_club_for_auth(clube: str, platform: str = "auto") -> dict:
+    """Resolve nome do clube para club_id usando EA e fallbacks locais/Supabase."""
+    name = str(clube or "").strip()
+    if not name:
+        raise HTTPException(400, "Nome do clube obrigatorio")
+    search = ea_client.search_club(name, platform or "auto")
+    if not search.get("success"):
+        search = fallback_search_from_local(name, platform or "auto") or {"success": False}
+    if not search.get("success"):
+        sb = get_supabase()
+        if sb:
+            try:
+                resp = sb.table("clubs").select("club_id,name,platform").ilike("name", f"%{name}%").limit(1).execute()
+                rows = getattr(resp, "data", None) or []
+                if rows:
+                    row = rows[0]
+                    search = {
+                        "success": True,
+                        "clubId": str(row.get("club_id")),
+                        "name": row.get("name") or name,
+                        "platform": row.get("platform") or "common-gen5",
+                    }
+            except Exception as e:
+                print(f"[AUTH] Aviso ao buscar clube no Supabase: {type(e).__name__}: {e}")
+    if not search.get("success"):
+        raise HTTPException(404, "Clube nao encontrado pelo nome informado")
+    return {
+        "club_id": str(search.get("clubId") or "").strip(),
+        "clube": search.get("name") or name,
+        "platform": search.get("platform") or "common-gen5",
+    }
 def _assert_same_club(current_user: dict, club_id: str):
     user_club = str((current_user or {}).get("club_id") or "")
     if user_club and str(club_id or "") and user_club != str(club_id):
@@ -1377,15 +1408,18 @@ def auth_register(payload: AuthRegisterPayload):
     nome = str(payload.nome or "").strip()
     usuario = str(payload.usuario or "").strip().lower()
     senha = str(payload.senha or "")
-    club_id = str(payload.club_id or "").strip()
-    clube = str(payload.clube or "").strip()
+    clube_informado = str(payload.clube or "").strip()
 
-    if not nome or not usuario or not senha or not club_id or not clube:
-        raise HTTPException(400, "Nome, usuario, senha, club_id e clube sao obrigatorios")
+    if not nome or not usuario or not senha or not clube_informado:
+        raise HTTPException(400, "Nome, usuario, senha e clube sao obrigatorios")
     if len(senha) < 6:
         raise HTTPException(400, "A senha deve ter pelo menos 6 caracteres")
     if _get_app_user_by_usuario(usuario):
         raise HTTPException(409, "Usuario ja existe")
+
+    resolved = resolve_club_for_auth(clube_informado)
+    club_id = resolved["club_id"]
+    clube = resolved["clube"]
     if not club_has_admin(club_id):
         raise HTTPException(403, "Este clube ainda nao possui um administrador cadastrado.")
 
@@ -4741,7 +4775,6 @@ function renderAuth(mode = 'login') {
           <div class="auth-field"><label>Usuário</label><input id="authUsuario" autocomplete="username" required></div>
           <div class="auth-field"><label>Senha</label><input id="authSenha" type="password" autocomplete="${isRegister ? 'new-password' : 'current-password'}" required></div>
           ${isRegister ? `
-            <div class="auth-field"><label>ID do Clube</label><input id="authClubId" placeholder="3549624" required></div>
             <div class="auth-field"><label>Nome do Clube</label><input id="authClube" placeholder="Desagregados SC" required></div>
           ` : ''}
           <div class="auth-actions">
@@ -4782,7 +4815,6 @@ async function submitRegister(ev) {
       nome: document.getElementById('authNome').value.trim(),
       usuario: document.getElementById('authUsuario').value.trim(),
       senha: document.getElementById('authSenha').value,
-      club_id: document.getElementById('authClubId').value.trim(),
       clube: document.getElementById('authClube').value.trim(),
     };
     const r = await fetch('/api/auth/register', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
@@ -6857,6 +6889,8 @@ if __name__ == "__main__":
     print("="*60 + "\n")
     
     uvicorn.run(app, host="0.0.0.0", port=8000)
+
+
 
 
 
