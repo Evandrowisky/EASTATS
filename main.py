@@ -317,49 +317,73 @@ def calc_club_stats(overall_data, club_info_data, matches_list):
 
 
 def fetch_all_match_types(ea_client, club_id, platform, max_count=100):
-    """Testa varios matchTypes da EA, deduplica por matchId e devolve debug detalhado."""
+    """Testa matchTypes e varios maxResultCount, porque a API da EA as vezes devolve menos com 100 do que com 20/50."""
     all_matches_raw = []
     seen = set()
     debug = []
+    request_counts = []
+    for n in (max_count, 100, 50, 20):
+        try:
+            n = int(n)
+        except Exception:
+            continue
+        if n > 0 and n not in request_counts:
+            request_counts.append(n)
 
     for match_type in MATCH_TYPE_CANDIDATES:
         entry = {
             "matchType": match_type,
-            "requested": max_count,
+            "requested": request_counts,
             "ok": False,
             "count": 0,
             "unique_added": 0,
             "duplicates": 0,
+            "attempts": [],
             "error": None,
         }
-        try:
-            raw = ea_client.matches(club_id, match_type, platform, max_count=max_count)
-            if isinstance(raw, list):
-                entry["ok"] = True
-                entry["count"] = len(raw)
-                for idx, m in enumerate(raw):
-                    if not isinstance(m, dict):
-                        continue
-                    match_id = str(m.get("matchId") or "").strip()
-                    if not match_id:
-                        match_id = f"{match_type}:{m.get('timestamp', '')}:{idx}:{json.dumps(m.get('clubs', {}), sort_keys=True)}"
-                    if match_id in seen:
-                        entry["duplicates"] += 1
-                        continue
-                    seen.add(match_id)
-                    enriched = dict(m)
-                    enriched["_origin"] = match_type
-                    all_matches_raw.append(enriched)
-                    entry["unique_added"] += 1
-            else:
-                entry["error"] = f"Retorno inesperado: {type(raw).__name__}"
-        except Exception as e:
-            entry["error"] = f"{type(e).__name__}: {e}"
+        for requested_count in request_counts:
+            attempt = {"requested": requested_count, "ok": False, "count": 0, "unique_added": 0, "duplicates": 0, "error": None}
+            try:
+                raw = ea_client.matches(club_id, match_type, platform, max_count=requested_count)
+                if isinstance(raw, list):
+                    attempt["ok"] = True
+                    entry["ok"] = True
+                    attempt["count"] = len(raw)
+                    entry["count"] += len(raw)
+                    for idx, m in enumerate(raw):
+                        if not isinstance(m, dict):
+                            continue
+                        match_id = str(m.get("matchId") or "").strip()
+                        if not match_id:
+                            match_id = f"{match_type}:{m.get('timestamp', '')}:{idx}:{json.dumps(m.get('clubs', {}), sort_keys=True)}"
+                        if match_id in seen:
+                            attempt["duplicates"] += 1
+                            entry["duplicates"] += 1
+                            continue
+                        seen.add(match_id)
+                        enriched = dict(m)
+                        enriched["_origin"] = match_type
+                        enriched["_requested_count"] = requested_count
+                        all_matches_raw.append(enriched)
+                        attempt["unique_added"] += 1
+                        entry["unique_added"] += 1
+                else:
+                    attempt["error"] = f"Retorno inesperado: {type(raw).__name__}"
+            except Exception as e:
+                attempt["error"] = f"{type(e).__name__}: {e}"
+            entry["attempts"].append(attempt)
 
+        errors = [a["error"] for a in entry["attempts"] if a.get("error")]
+        if errors and not entry["ok"]:
+            entry["error"] = " | ".join(errors[:3])
+
+        attempts_msg = ", ".join(
+            f"{a['requested']}=>{a['count']} (+{a['unique_added']}, dup {a['duplicates']})"
+            for a in entry["attempts"]
+        )
         print(
-            f"[EA FC] matchType={match_type} requested={entry['requested']} ok={entry['ok']} "
-            f"count={entry['count']} unique_added={entry['unique_added']} "
-            f"duplicates={entry['duplicates']} error={entry['error']}"
+            f"[EA FC] matchType={match_type} attempts=[{attempts_msg}] "
+            f"unique_added={entry['unique_added']} duplicates={entry['duplicates']} error={entry['error']}"
         )
         debug.append(entry)
 
@@ -878,10 +902,13 @@ async def sync_stream(
             for d in debug_matchtypes:
                 status = "ok" if d.get("ok") else "falhou"
                 err = f" | erro: {d.get('error')}" if d.get("error") else ""
+                attempts = ", ".join(
+                    f"{a.get('requested')}=>{a.get('count', 0)} (+{a.get('unique_added', 0)})"
+                    for a in d.get("attempts", [])
+                ) or str(d.get("requested", 100))
                 mt_msg = (
-                    f"matchType={d.get('matchType')} | pedido={d.get('requested', 100)} "
-                    f"| EA retornou={d.get('count', 0)} | novos={d.get('unique_added', 0)} "
-                    f"| duplicados={d.get('duplicates', 0)} ({status}){err}"
+                    f"matchType={d.get('matchType')} | tentativas {attempts} "
+                    f"| novos={d.get('unique_added', 0)} | duplicados={d.get('duplicates', 0)} ({status}){err}"
                 )
                 yield f"data: {log(mt_msg, 7, 8)}\n\n"
                 await asyncio.sleep(0.01)
