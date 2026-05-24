@@ -323,7 +323,15 @@ def fetch_all_match_types(ea_client, club_id, platform, max_count=100):
     debug = []
 
     for match_type in MATCH_TYPE_CANDIDATES:
-        entry = {"matchType": match_type, "ok": False, "count": 0, "error": None}
+        entry = {
+            "matchType": match_type,
+            "requested": max_count,
+            "ok": False,
+            "count": 0,
+            "unique_added": 0,
+            "duplicates": 0,
+            "error": None,
+        }
         try:
             raw = ea_client.matches(club_id, match_type, platform, max_count=max_count)
             if isinstance(raw, list):
@@ -336,19 +344,22 @@ def fetch_all_match_types(ea_client, club_id, platform, max_count=100):
                     if not match_id:
                         match_id = f"{match_type}:{m.get('timestamp', '')}:{idx}:{json.dumps(m.get('clubs', {}), sort_keys=True)}"
                     if match_id in seen:
+                        entry["duplicates"] += 1
                         continue
                     seen.add(match_id)
                     enriched = dict(m)
                     enriched["_origin"] = match_type
                     all_matches_raw.append(enriched)
+                    entry["unique_added"] += 1
             else:
                 entry["error"] = f"Retorno inesperado: {type(raw).__name__}"
         except Exception as e:
             entry["error"] = f"{type(e).__name__}: {e}"
 
         print(
-            f"[EA FC] matchType={match_type} ok={entry['ok']} "
-            f"count={entry['count']} error={entry['error']}"
+            f"[EA FC] matchType={match_type} requested={entry['requested']} ok={entry['ok']} "
+            f"count={entry['count']} unique_added={entry['unique_added']} "
+            f"duplicates={entry['duplicates']} error={entry['error']}"
         )
         debug.append(entry)
 
@@ -867,7 +878,11 @@ async def sync_stream(
             for d in debug_matchtypes:
                 status = "ok" if d.get("ok") else "falhou"
                 err = f" | erro: {d.get('error')}" if d.get("error") else ""
-                mt_msg = f"matchType={d.get('matchType')} -> {d.get('count', 0)} partidas ({status}){err}"
+                mt_msg = (
+                    f"matchType={d.get('matchType')} | pedido={d.get('requested', 100)} "
+                    f"| EA retornou={d.get('count', 0)} | novos={d.get('unique_added', 0)} "
+                    f"| duplicados={d.get('duplicates', 0)} ({status}){err}"
+                )
                 yield f"data: {log(mt_msg, 7, 8)}\n\n"
                 await asyncio.sleep(0.01)
 
