@@ -4363,7 +4363,7 @@ const ARCHETYPE_CATALOG = [
   {name:'Chefia', group:'Defesa', desc:'Perfil de liderança defensiva: organiza a linha, ganha duelos e protege a área.'},
   {name:'Líbero', group:'Defesa', desc:'Zagueiro que antecipa, cobre profundidade e ajuda na saída de bola.'},
   {name:'Cão de Guarda', group:'Defesa', desc:'Marcador agressivo para pressão, bote e combate no meio.'},
-  {name:'Muralha', group:'Defesa', desc:'Defensor físico, forte em bloqueios, jogo aéreo e proteção da área.'},
+  {name:'Progressor', group:'Defesa', desc:'Zagueiro moderno que avança com segurança e inicia ataques com passe progressivo.'},
   {name:'Motor', group:'Meio-campo', desc:'Meio-campista de ida e volta, pressão constante e apoio nas duas fases.'},
   {name:'Maestro', group:'Meio-campo', desc:'Criador que controla ritmo, acha passes e organiza a construção.'},
   {name:'Camisa 10', group:'Meio-campo', desc:'Meia ofensivo de criação, último passe e tomada de decisão perto da área.'},
@@ -5330,9 +5330,9 @@ function playstyleIcon(nameOrCode) {
 function archetypeIcon(name) {
   const key = String(name || '').toLowerCase();
   const map = {
-    'chefia':'🛡', 'líbero':'↗', 'libero':'↗', 'cão de guarda':'🐕', 'cao de guarda':'🐕', 'muralha':'🧱',
+    'chefia':'🛡', 'chefão':'🛡', 'chefao':'🛡', 'líbero':'↗', 'libero':'↗', 'progressor':'↗', 'cão de guarda':'🐕', 'cao de guarda':'🐕', 'saqueador':'⚡', 'muralha':'🧤',
     'regista':'🎼', 'motor':'⚙', 'armador':'🧠', 'box-to-box':'🔄', 'ponta veloz':'💨', 'camisa 10':'🔟',
-    'finalizador':'🎯', 'homem alvo':'🗼', 'goleiro linha':'🧤', 'paredão':'🧱', 'ala profundo':'↕'
+    'finalizador':'🎯', 'homem alvo':'🗼', 'goleiro linha':'🧤', 'goleiro líbero':'🧤', 'gl-linha':'🧤', 'paredão':'🧱', 'ala profundo':'↕'
   };
   return map[key] || '◆';
 }
@@ -5538,12 +5538,12 @@ function suggestBuildRecipe(position, text) {
   let recipe = recipes[role] || recipes.equilibrado;
   if (role === 'zagueiro') {
     const wantsChief = has(/chefia|chefe|boss|lider|xerife|comando|capitao|capit[aã]o|organiza/);
-    const wantsAerialWall = has(/a[eé]re|area|aereo|altura|cabe[cç]|for[cç]a|combate|fisic|disputa|duelo|muralha/);
+    const wantsAerialWall = has(/a[eé]re|area|aereo|altura|cabe[cç]|for[cç]a|combate|fisic|disputa|duelo/);
     const wantsBuildUp = has(/sair jogando|sa[ií]da|constru|passe|lan[cç]amento|virada|bola longa/);
     if (wantsChief) {
       recipe = {...recipe, archetype:'Chefia', main:['Antecipação','Interceptação','Bloqueio'], why:'O texto pede zagueiro de comando. Chefia prioriza leitura, organização da linha, interceptação e bloqueio; use físico e cabeceio como sustentação.'};
     } else if (wantsAerialWall) {
-      recipe = {...recipe, archetype:'Muralha', main:['Jogo Aéreo','Antecipação','Brigador'], why:'O texto descreve zagueiro forte para duelos, jogo aéreo, desarme e combate. A base é Muralha: ganhar confronto, proteger a área e usar passe como apoio.'};
+      recipe = {...recipe, archetype:'Chefia', main:['Jogo Aéreo','Antecipação','Brigador'], why:'O texto descreve um zagueiro forte, líder, dominante em duelos e jogo aéreo. A base correta é Chefia/Chefão: comandar a defesa, proteger a área e vencer contato; saída de bola entra como complemento, não como identidade principal.'};
     } else if (wantsBuildUp) {
       recipe = {...recipe, archetype:'Líbero', main:['Antecipação','Passe Pingado','Lançamento Longo'], why:'O texto pede zagueiro que sai jogando. Líbero mantém leitura defensiva, mas investe mais cedo em passe rasteiro forte e bola longa.'};
     }
@@ -6310,6 +6310,7 @@ if __name__ == "__main__":
     print("="*60 + "\n")
     
     uvicorn.run(app, host="0.0.0.0", port=8000)
+
 
 
 
