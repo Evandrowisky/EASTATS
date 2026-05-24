@@ -983,7 +983,28 @@ async def sync_stream(
             print(f"[EA FC] Amistosos encontrados nesta sync: {resumo_sync.get('amistoso', 0)}")
             yield f"data: {log(f'✓ {len(new_matches)} partidas baixadas nesta sync', 7, 8)}\n\n"
             
-            # ACUMULAÇÃO HISTÓRICA: salva todas as partidas no DB (UPSERT)
+            # ACUMULACAO HISTORICA: salva no DB e tambem preserva partidas antigas do cache.
+            previous_cache = load_cache() or {}
+            previous_matches = []
+            previous_club = previous_cache.get("club") or {}
+            if str(previous_club.get("id") or "") == club_id:
+                previous_matches = previous_cache.get("matches") or []
+
+            def merge_match_lists(*groups):
+                merged = {}
+                fallback_i = 0
+                for group in groups:
+                    for item in group or []:
+                        if not isinstance(item, dict):
+                            continue
+                        mid = str(item.get("match_id") or item.get("matchId") or "").strip()
+                        if not mid:
+                            mid = f"fallback:{item.get('timestamp', '')}:{item.get('opponent', '')}:{item.get('score', '')}:{fallback_i}"
+                            fallback_i += 1
+                        current = merged.get(mid, {})
+                        merged[mid] = {**current, **item}
+                return sorted(merged.values(), key=lambda x: int(x.get("timestamp", 0) or 0), reverse=True)
+
             try:
                 conn = sqlite3.connect(DB_FILE)
                 c = conn.cursor()
@@ -1002,26 +1023,26 @@ async def sync_stream(
                         ),
                     )
                 conn.commit()
-                # Carrega TODO o histórico acumulado (mais novas primeiro)
                 c.execute(
                     "SELECT data FROM matches WHERE club_id=? AND data IS NOT NULL ORDER BY timestamp DESC",
                     (club_id,),
                 )
                 rows = c.fetchall()
                 conn.close()
-                matches = []
+                db_matches = []
                 for (raw,) in rows:
                     try:
-                        matches.append(json.loads(raw))
+                        db_matches.append(json.loads(raw))
                     except Exception:
                         pass
-                if not matches:
-                    matches = new_matches
-                yield f"data: {log(f'📚 Histórico acumulado: {len(matches)} partidas totais', 8, 8)}\n\n"
+                matches = merge_match_lists(previous_matches, db_matches, new_matches)
+                if previous_matches and len(matches) > len(new_matches):
+                    yield f"data: {log(f'Cache preservado: {len(previous_matches)} partidas antigas foram consideradas', 8, 8)}\n\n"
+                yield f"data: {log(f'Historico acumulado: {len(matches)} partidas totais', 8, 8)}\n\n"
             except Exception as e:
                 print(f"[DB] Aviso ao acumular partidas: {e}")
-                matches = new_matches
-            
+                matches = merge_match_lists(previous_matches, new_matches)
+                yield f"data: {log(f'Historico via cache: {len(matches)} partidas totais', 8, 8)}\n\n"
             yield f"data: {log('🧮 Calculando estatísticas...', 8, 8)}\n\n"
             stats = calc_club_stats(overall, info, matches)
             opponents = calc_opponent_avg(matches)
