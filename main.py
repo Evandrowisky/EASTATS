@@ -3458,40 +3458,57 @@ let AGENDA_EDIT_ID = null;
 let IDEAL_FORMATION = '3-5-2';
 
 const PLAYSTYLE_CATALOG = [
-  {name:'Power Shot', group:'Finalizacao', desc:'Chutes fortes de media/longa distancia com mais potencia.'},
-  {name:'Dead Ball', group:'Finalizacao', desc:'Faltas, escanteios e bolas paradas com mais curva/precisao.'},
-  {name:'Chip Shot', group:'Finalizacao', desc:'Cavadinhas e finalizacoes por cobertura mais eficientes.'},
-  {name:'Finesse Shot', group:'Finalizacao', desc:'Chutes colocados com curva e precisao.'},
-  {name:'Power Header', group:'Finalizacao', desc:'Cabeceios ofensivos mais fortes e precisos.'},
-  {name:'Incisive Pass', group:'Passe', desc:'Enfiadas e passes que quebram linhas.'},
-  {name:'Pinged Pass', group:'Passe', desc:'Passes rasteiros fortes com velocidade e controle.'},
-  {name:'Long Ball Pass', group:'Passe', desc:'Lancamentos longos mais precisos.'},
-  {name:'Tiki Taka', group:'Passe', desc:'Passes curtos de primeira e combinacoes rapidas.'},
-  {name:'Whipped Pass', group:'Passe', desc:'Cruzamentos com curva, velocidade e perigo.'},
-  {name:'First Touch', group:'Controle', desc:'Primeiro toque orientado e dominio sob pressao.'},
-  {name:'Flair', group:'Controle', desc:'Passes e finalizacoes de estilo com mais eficacia.'},
-  {name:'Press Proven', group:'Controle', desc:'Protege a bola melhor sob pressao.'},
-  {name:'Rapid', group:'Controle', desc:'Corridas em velocidade com a bola.'},
-  {name:'Technical', group:'Controle', desc:'Conducao tecnica e dribles controlados.'},
-  {name:'Trickster', group:'Controle', desc:'Dribles especiais e movimentos de habilidade.'},
-  {name:'Block', group:'Defesa', desc:'Bloqueios defensivos mais eficazes.'},
-  {name:'Bruiser', group:'Defesa', desc:'Duelos fisicos e disputas de corpo mais fortes.'},
-  {name:'Intercept', group:'Defesa', desc:'Interceptacoes e cortes de passe melhores.'},
-  {name:'Jockey', group:'Defesa', desc:'Contencao lateral e marcacao em jockey mais eficiente.'},
-  {name:'Slide Tackle', group:'Defesa', desc:'Carrinhos com maior alcance e precisao.'},
-  {name:'Anticipate', group:'Defesa', desc:'Botes em pe e antecipacoes mais limpos.'},
-  {name:'Acrobatic', group:'Fisico', desc:'Voleios, bicicletas e acoes acrobaticas.'},
-  {name:'Aerial', group:'Fisico', desc:'Disputas aereas ofensivas e defensivas.'},
-  {name:'Trivela', group:'Fisico', desc:'Passes e chutes de tres dedos.'},
-  {name:'Relentless', group:'Fisico', desc:'Folego, recomposicao e pressao por mais tempo.'},
-  {name:'Quick Step', group:'Fisico', desc:'Explosao nos primeiros metros.'},
-  {name:'Long Throw', group:'Fisico', desc:'Laterais longos para area ou profundidade.'},
-  {name:'Far Throw', group:'Goleiro', desc:'Reposicao longa com as maos.'},
-  {name:'Footwork', group:'Goleiro', desc:'Defesas com os pes e ajustes curtos.'},
-  {name:'Cross Claimer', group:'Goleiro', desc:'Saidas em cruzamentos.'},
-  {name:'Rush Out', group:'Goleiro', desc:'Saidas rapidas do gol para abafar.'},
-  {name:'Far Reach', group:'Goleiro', desc:'Alcance em defesas no canto.'},
-  {name:'Quick Reflexes', group:'Goleiro', desc:'Reflexos em chutes proximos.'},
+  {name:'Chute Forte', code:'Power Shot', group:'Finalização', desc:'Chutes fortes de média/longa distância com mais potência.'},
+  {name:'Bola Parada', code:'Dead Ball', group:'Finalização', desc:'Faltas, escanteios e bolas paradas com mais curva e precisão.'},
+  {name:'Cavadinha', code:'Chip Shot', group:'Finalização', desc:'Cavadinhas e finalizações por cobertura mais eficientes.'},
+  {name:'Chute Colocado', code:'Finesse Shot', group:'Finalização', desc:'Chutes colocados com curva e precisão.'},
+  {name:'Cabeceio Forte', code:'Power Header', group:'Finalização', desc:'Cabeceios ofensivos mais fortes e precisos.'},
+  {name:'Passe Incisivo', code:'Incisive Pass', group:'Passe', desc:'Enfiadas e passes que quebram linhas.'},
+  {name:'Passe Pingado', code:'Pinged Pass', group:'Passe', desc:'Passes rasteiros fortes com velocidade e controle.'},
+  {name:'Lançamento Longo', code:'Long Ball Pass', group:'Passe', desc:'Lançamentos longos mais precisos.'},
+  {name:'Tiki-Taka', code:'Tiki Taka', group:'Passe', desc:'Passes curtos de primeira e combinações rápidas.'},
+  {name:'Cruzamento Tenso', code:'Whipped Pass', group:'Passe', desc:'Cruzamentos com curva, velocidade e perigo.'},
+  {name:'Primeiro Toque', code:'First Touch', group:'Controle', desc:'Primeiro toque orientado e domínio sob pressão.'},
+  {name:'Estilo', code:'Flair', group:'Controle', desc:'Passes e finalizações plásticas com mais eficácia.'},
+  {name:'Resistente à Pressão', code:'Press Proven', group:'Controle', desc:'Protege a bola melhor sob pressão.'},
+  {name:'Rápido com Bola', code:'Rapid', group:'Controle', desc:'Corridas em velocidade com a bola.'},
+  {name:'Técnico', code:'Technical', group:'Controle', desc:'Condução técnica e dribles controlados.'},
+  {name:'Driblador', code:'Trickster', group:'Controle', desc:'Dribles especiais e movimentos de habilidade.'},
+  {name:'Bloqueio', code:'Block', group:'Defesa', desc:'Bloqueios defensivos mais eficazes.'},
+  {name:'Brigador', code:'Bruiser', group:'Defesa', desc:'Duelos físicos e disputas de corpo mais fortes.'},
+  {name:'Interceptação', code:'Intercept', group:'Defesa', desc:'Interceptações e cortes de passe melhores.'},
+  {name:'Contenção', code:'Jockey', group:'Defesa', desc:'Contenção lateral e marcação em jockey mais eficiente.'},
+  {name:'Carrinho', code:'Slide Tackle', group:'Defesa', desc:'Carrinhos com maior alcance e precisão.'},
+  {name:'Antecipação', code:'Anticipate', group:'Defesa', desc:'Botes em pé e antecipações mais limpos.'},
+  {name:'Acrobático', code:'Acrobatic', group:'Físico', desc:'Voleios, bicicletas e ações acrobáticas.'},
+  {name:'Jogo Aéreo', code:'Aerial', group:'Físico', desc:'Disputas aéreas ofensivas e defensivas.'},
+  {name:'Trivela', code:'Trivela', group:'Físico', desc:'Passes e chutes de três dedos.'},
+  {name:'Incansável', code:'Relentless', group:'Físico', desc:'Fôlego, recomposição e pressão por mais tempo.'},
+  {name:'Arranque', code:'Quick Step', group:'Físico', desc:'Explosão nos primeiros metros.'},
+  {name:'Arremesso Longo', code:'Long Throw', group:'Físico', desc:'Laterais longos para área ou profundidade.'},
+  {name:'Reposição Longa', code:'Far Throw', group:'Goleiro', desc:'Reposição longa com as mãos.'},
+  {name:'Defesa com os Pés', code:'Footwork', group:'Goleiro', desc:'Defesas com os pés e ajustes curtos.'},
+  {name:'Domínio da Área', code:'Cross Claimer', group:'Goleiro', desc:'Saídas em cruzamentos.'},
+  {name:'Saída Rápida', code:'Rush Out', group:'Goleiro', desc:'Saídas rápidas do gol para abafar.'},
+  {name:'Alcance Longo', code:'Far Reach', group:'Goleiro', desc:'Alcance em defesas no canto.'},
+  {name:'Reflexos Rápidos', code:'Quick Reflexes', group:'Goleiro', desc:'Reflexos em chutes próximos.'},
+];
+
+const ARCHETYPE_CATALOG = [
+  {name:'Chefia', group:'Defesa', desc:'Perfil de liderança defensiva: organiza a linha, ganha duelos e protege a área.'},
+  {name:'Líbero', group:'Defesa', desc:'Zagueiro que antecipa, cobre profundidade e ajuda na saída de bola.'},
+  {name:'Cão de Guarda', group:'Defesa', desc:'Marcador agressivo para pressão, bote e combate no meio.'},
+  {name:'Muralha', group:'Defesa', desc:'Defensor físico, forte em bloqueios, jogo aéreo e proteção da área.'},
+  {name:'Motor', group:'Meio-campo', desc:'Meio-campista de ida e volta, pressão constante e apoio nas duas fases.'},
+  {name:'Maestro', group:'Meio-campo', desc:'Criador que controla ritmo, acha passes e organiza a construção.'},
+  {name:'Camisa 10', group:'Meio-campo', desc:'Meia ofensivo de criação, último passe e tomada de decisão perto da área.'},
+  {name:'Ala Criador', group:'Meio-campo', desc:'Jogador aberto para amplitude, cruzamentos e apoio ofensivo.'},
+  {name:'Ponta Agudo', group:'Ataque', desc:'Atacante de lado com velocidade, drible e ataque ao espaço.'},
+  {name:'Matador', group:'Ataque', desc:'Finalizador central, foco em gols, posicionamento e decisão na área.'},
+  {name:'Falso 9', group:'Ataque', desc:'Atacante que sai da área, conecta jogadas e cria para quem infiltra.'},
+  {name:'Referência', group:'Ataque', desc:'Centroavante físico para pivô, proteção e jogo aéreo.'},
+  {name:'Paredão', group:'Goleiro', desc:'Goleiro de reflexo e defesa de chutes próximos.'},
+  {name:'Goleiro Líbero', group:'Goleiro', desc:'Goleiro que sai do gol, cobre profundidade e inicia jogadas.'},
 ];
 
 function filteredMatches() {
@@ -4427,7 +4444,7 @@ function setIdealFormation(value) {
 }
 
 function playstyleSelectOptions(selected='') {
-  return ['<option value="">PlayStyle</option>'].concat(PLAYSTYLE_CATALOG.map(ps => `<option value="${ps.name}" ${selected === ps.name ? 'selected' : ''}>${ps.name}</option>`)).join('');
+  return ['<option value="">Estilo de jogo</option>'].concat(PLAYSTYLE_CATALOG.map(ps => `<option value="${ps.name}" ${selected === ps.name ? 'selected' : ''}>${ps.name}</option>`)).join('');
 }
 
 function renderCadastroJogadores() {
@@ -4455,7 +4472,7 @@ function renderCadastroJogadores() {
           <div class="profile-meta">EA favorita: ${p.favorite_position || p.position || '?'} - ultimo: ${p.last_match_position || '-'} - sugerida: ${intel.label} (${intel.source}) - ${p.games || 0}j no clube</div>
         </div>
         <select id="prof-pos-${cssSafeId(p.name)}">${selectHtml}</select>
-        <input id="prof-arch-${cssSafeId(p.name)}" placeholder="Arquetipo" value="${escapeAttr(profile.archetype || '')}">
+        <input id="prof-arch-${cssSafeId(p.name)}" placeholder="Arquétipo" value="${escapeAttr(profile.archetype || '')}">
         <select id="prof-ps-1-${cssSafeId(p.name)}">${playstyleSelectOptions(selectedStyles[0] || '')}</select>
         <select id="prof-ps-2-${cssSafeId(p.name)}">${playstyleSelectOptions(selectedStyles[1] || '')}</select>
         <select id="prof-ps-3-${cssSafeId(p.name)}">${playstyleSelectOptions(selectedStyles[2] || '')}</select>
@@ -4499,13 +4516,13 @@ async function saveProfileFromRow(name) {
 function suggestPlaystylesLocal(position, text) {
   const t = (String(position || '') + ' ' + String(text || '')).toLowerCase();
   let picks = [];
-  if (/gk|goleiro/.test(t)) picks = ['Quick Reflexes','Rush Out','Far Reach'];
-  else if (/zague|def|marcar|antecip|desarme|volante/.test(t)) picks = ['Anticipate','Intercept','Aerial'];
-  else if (/lateral|ala|cruz|assistir/.test(t)) picks = ['Whipped Pass','Relentless','Quick Step'];
-  else if (/meia|cam|criador|passe|armar|assist/.test(t)) picks = ['Incisive Pass','Tiki Taka','Press Proven'];
-  else if (/ponta|drible|veloc|1x1/.test(t)) picks = ['Rapid','Technical','Quick Step'];
-  else if (/atac|st|gol|final|chute|artilheiro/.test(t)) picks = ['Finesse Shot','Power Shot','First Touch'];
-  else picks = ['First Touch','Relentless','Tiki Taka'];
+  if (/gk|goleiro/.test(t)) picks = ['Reflexos Rápidos','Saída Rápida','Alcance Longo'];
+  else if (/zague|def|marcar|antecip|desarme|volante/.test(t)) picks = ['Antecipação','Interceptação','Jogo Aéreo'];
+  else if (/lateral|ala|cruz|assistir/.test(t)) picks = ['Cruzamento Tenso','Incansável','Arranque'];
+  else if (/meia|cam|criador|passe|armar|assist/.test(t)) picks = ['Passe Incisivo','Tiki-Taka','Resistente à Pressão'];
+  else if (/ponta|drible|veloc|1x1/.test(t)) picks = ['Rápido com Bola','Técnico','Arranque'];
+  else if (/atac|st|gol|final|chute|artilheiro/.test(t)) picks = ['Chute Colocado','Chute Forte','Primeiro Toque'];
+  else picks = ['Primeiro Toque','Incansável','Tiki-Taka'];
   return picks.map(name => PLAYSTYLE_CATALOG.find(p => p.name === name)).filter(Boolean);
 }
 
@@ -4526,17 +4543,28 @@ function renderPlaystyles() {
       ${list.map(ps => `<div class="player-card" style="cursor:default;"><div class="player-name" style="text-align:left;margin-top:0;">${ps.name}</div><div style="color:var(--text-2);font-size:12px;line-height:1.5;">${ps.desc}</div></div>`).join('')}
     </div>
   `).join('');
+  const archGroups = {};
+  ARCHETYPE_CATALOG.forEach(a => { if (!archGroups[a.group]) archGroups[a.group] = []; archGroups[a.group].push(a); });
+  const archetypes = Object.entries(archGroups).map(([group, list]) => `
+    <div class="section-title">Arquétipos - ${group}</div>
+    <div class="players-grid">
+      ${list.map(a => `<div class="player-card" style="cursor:default;"><div class="player-name" style="text-align:left;margin-top:0;">${a.name}</div><div style="color:var(--text-2);font-size:12px;line-height:1.5;">${a.desc}</div></div>`).join('')}
+    </div>
+  `).join('');
   return `
-    <div class="section-title">Simulador de PlayStyles</div>
+    <div class="section-title">Simulador de Estilos de Jogo</div>
     <div class="agenda-form" style="grid-template-columns:repeat(6,1fr);">
       <select id="sim-pos" style="grid-column:span 2;">
         <option value="ST">Atacante</option><option value="LW">Ponta</option><option value="CAM">Meia criador</option><option value="CM">Meio-campo</option><option value="CDM">Volante</option><option value="CB">Zagueiro</option><option value="LB">Lateral/Ala</option><option value="GK">Goleiro</option>
       </select>
-      <textarea id="sim-text" style="grid-column:span 4;" placeholder="Descreva o que voce espera do jogador: ex. zagueiro rapido para antecipar, atacante que finaliza de longe, meia que acha passe... "></textarea>
-      <div class="full"><button type="button" class="btn-primary" onclick="runPlaystyleSimulator()">Sugerir 3 PlayStyles</button></div>
+      <textarea id="sim-text" style="grid-column:span 4;" placeholder="Descreva o que você espera do jogador: ex. zagueiro rápido para antecipar, atacante que finaliza de longe, meia que acha passe... "></textarea>
+      <div class="full"><button type="button" class="btn-primary" onclick="runPlaystyleSimulator()">Sugerir 3 estilos</button></div>
     </div>
     <div id="sim-result" class="analytics-cards"></div>
-    <div class="section-title">Legenda de PlayStyles Pro Clubs</div>
+    <div class="section-title">Legenda de Arquétipos</div>
+    <div style="color:var(--text-2);font-size:12px;margin-bottom:12px;line-height:1.5;">Arquétipo é o perfil tático/manual do jogador no seu elenco. Ele ajuda a IA, a análise scout e o Time Ideal a entenderem a função real do jogador, mesmo quando a API da EA erra a posição.</div>
+    ${archetypes}
+    <div class="section-title">Legenda de Estilos de Jogo do Pro Clubs</div>
     ${legend}
   `;
 }
