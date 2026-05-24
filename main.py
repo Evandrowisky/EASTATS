@@ -1052,13 +1052,11 @@ def build_estimated_heatmap(player, history):
 
 def build_player_analytics(player_name, cache, match_type="todos"):
     """Gera pacote analitico profissional do jogador a partir do cache local."""
-    if not cache or not cache.get("players"):
+    if not cache:
         raise HTTPException(404, "Sincronize um clube primeiro")
     pname = player_name.strip().lower()
     players = cache.get("players", [])
     player = next((p for p in players if p.get("name", "").lower() == pname), None)
-    if not player:
-        raise HTTPException(404, f"Jogador '{player_name}' nao encontrado")
 
     wanted_match_type = (match_type or "todos").lower()
     history = []
@@ -1145,9 +1143,12 @@ def build_player_analytics(player_name, cache, match_type="todos"):
 
     player_club = next((p for p in club_players if p.get("name", "").lower() == pname), None)
     if player_club:
-        player = {**player, **player_club, "ea_global_games": player.get("games"), "club_games": player_club.get("games", 0)}
-    else:
+        base_player = player or {"name": player_club.get("name", player_name), "position": player_club.get("position", "?"), "rating": player_club.get("rating", 0)}
+        player = {**base_player, **player_club, "ea_global_games": base_player.get("games"), "club_games": player_club.get("games", 0)}
+    elif player:
         player = {**player, "games": 0, "club_games": 0, "ea_global_games": player.get("games")}
+    else:
+        raise HTTPException(404, f"Jogador '{player_name}' sem partidas no clube/filtro atual")
 
     team_rating_avg = _avg([p.get("rating", 0) for p in club_players], 0)
     team_goal_avg = _avg([p.get("goals_per_game", 0) for p in club_players], 0)
@@ -1174,7 +1175,16 @@ def build_player_analytics(player_name, cache, match_type="todos"):
     regularity = _safe_pct(sum(1 for r in ratings if r >= 7), games)
     clutch = moms * 8 + sum((h["goals"] + h["assists"]) * 3 for h in history if h.get("result") == "V")
     risk = reds * 12 + sum(1 for r in ratings if r < 6) * 4
-    analytic_score = min(30, _avg(sofi, 0) * 3) + min(18, offensive_impact / max(games, 1) * 1.5) + min(16, defensive_impact / max(games, 1)) + min(16, consistency / 6.25) + min(12, regularity / 8.3) + min(12, clutch / max(games, 1) * 2) - min(12, risk / max(games, 1))
+    # Nota analitica calibrada para leitura humana: a base principal e a nota media EA/Sofi.
+    # Impactos ofensivos/defensivos, regularidade e risco ajustam a nota, mas nao destroem um bom rating.
+    base_rating_score = ((_avg(ratings, 0) + _avg(sofi, 0)) / 2) * 10
+    impact_bonus = min(8, offensive_impact / max(games, 1) * 0.9) + min(8, defensive_impact / max(games, 1) * 0.65)
+    consistency_bonus = (consistency - 70) * 0.08
+    regularity_bonus = (regularity - 50) * 0.08
+    clutch_bonus = min(5, clutch / max(games, 1) * 0.8)
+    risk_penalty = min(10, risk / max(games, 1) * 1.2)
+    sample_penalty = 4 if games and games < 5 else 0
+    analytic_score = base_rating_score + impact_bonus + consistency_bonus + regularity_bonus + clutch_bonus - risk_penalty - sample_penalty
     analytic_score = round(max(0, min(100, analytic_score)), 1)
 
     radar = {
@@ -3937,12 +3947,21 @@ function profileForPlayer(name) {
 
 function inferPlayerPositionIntel(player) {
   const profile = profileForPlayer(player.name);
+  const counts = player.position_counts || {GK:0, DEF:0, MID:0, FWD:0};
   if (profile.manual_position) {
     const fam = normalizePlayerFamily(profile.manual_position);
-    return {family: fam, label: familyToPositionLabel(fam), source: 'manual', apps: player.games || 0, counts: player.position_counts || {GK:0,DEF:0,MID:0,FWD:0}};
+    const totalApps = Number(player.games || player.history_apps || 0);
+    const gkApps = Number(counts.GK || 0);
+    const outfieldApps = Number(counts.DEF || 0) + Number(counts.MID || 0) + Number(counts.FWD || 0);
+    // Protecao anti-erro: nao deixa um atacante virar GK por cadastro/localStorage antigo
+    // se ele nunca jogou como goleiro no historico do clube.
+    if (fam === 'GK' && totalApps > 0 && gkApps === 0 && outfieldApps > 0) {
+      console.warn('Cadastro manual GK ignorado por ausencia de jogos como goleiro:', player.name);
+    } else {
+      return {family: fam, label: familyToPositionLabel(fam), source: 'manual', apps: totalApps, counts};
+    }
   }
 
-  const counts = player.position_counts || {GK:0, DEF:0, MID:0, FWD:0};
   let apps = Number(player.games || player.history_apps || 0);
   const registered = normalizePlayerFamily(player.favorite_position || player.position);
   const last = normalizePlayerFamily(player.last_match_position || '');
@@ -4397,14 +4416,15 @@ function renderPlayerDetailHTML(data) {
   const trend = data.trend || {};
   const safeName = p.name.replace(/'/g, "\\'");
   const radar = adv.radar || {};
+  const analyzedGames = Number(data.games_with_history ?? h.length ?? 0) || h.length || 0;
 
   return `
     <div class="player-detail">
       <div class="analytics-hero">
         <div>
           <h2>${p.name} <span class="pos-tag">${p.position}</span></h2>
-          <div style="color:var(--text-2);font-size:13px;">${data.games_with_history || 0} jogos no clube neste filtro · ranking ${rank.rating_rank_label || '-'} · tendência ${trend.status || '-'}</div>
-          <div class="analytics-note" style="margin-top:8px;">${(data.scout_report || '').split('\\n').slice(0, 2).join(' ')}</div>
+          <div style="color:var(--text-2);font-size:13px;">${analyzedGames} partidas analisadas neste filtro · ranking ${rank.rating_rank_label || '-'} · tendência ${trend.status || '-'}</div>
+          <div class="analytics-note" style="margin-top:8px;">${plainScoutSummary(data.scout_report || '').slice(0, 360)}</div>
         </div>
         <div class="analytics-score"><div class="num">${adv.analytic_score || 0}</div><div class="lab">Analítica</div></div>
       </div>
