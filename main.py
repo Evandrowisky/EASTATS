@@ -4013,6 +4013,21 @@ body {
 @media (max-width: 640px) { .style-icon { width:40px; height:40px; min-width:40px; font-size:20px; } }
 
 
+
+/* BUILD ATTRIBUTES */
+.attr-build-table-wrap { grid-column:1/-1; overflow-x:auto; border:1px solid var(--border); border-radius:12px; background:rgba(255,255,255,0.02); }
+.attr-build-table { width:100%; min-width:760px; border-collapse:collapse; font-size:12px; }
+.attr-build-table th { text-align:left; color:var(--text-2); font-size:10px; letter-spacing:1.5px; text-transform:uppercase; padding:10px; border-bottom:1px solid var(--border); }
+.attr-build-table td { padding:10px; border-bottom:1px solid rgba(255,255,255,0.04); vertical-align:top; }
+.attr-build-table tr:last-child td { border-bottom:none; }
+.attr-target { color:var(--green); font-size:18px; font-weight:900; }
+.attr-priority { display:inline-block; padding:3px 8px; border-radius:999px; background:var(--green-dim); color:var(--green); border:1px solid rgba(0,255,115,.25); font-size:10px; font-weight:900; letter-spacing:1px; }
+.attr-phase-grid { grid-column:1/-1; display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:10px; }
+.attr-phase { background:rgba(255,255,255,0.025); border:1px solid var(--border); border-radius:12px; padding:13px; }
+.attr-phase-title { color:var(--green); font-size:12px; font-weight:900; letter-spacing:1.5px; text-transform:uppercase; margin-bottom:8px; }
+.attr-phase p { color:var(--text-2); font-size:12px; line-height:1.5; }
+.build-explain { grid-column:1/-1; background:rgba(0,255,115,0.04); border:1px solid var(--green-dim); border-radius:12px; padding:14px; color:var(--text-2); font-size:13px; line-height:1.6; }
+.build-explain strong { color:var(--green); }
 /* BUILD SIMULATOR */
 .build-result-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(280px, 1fr)); gap:12px; width:100%; }
 .build-result-grid .section-title { grid-column:1/-1; margin-top:18px; }
@@ -5415,17 +5430,16 @@ function uniqueStyleNames(names) {
 function suggestBuildRecipe(position, text) {
   const inputText = String(text || '').trim();
   const t = inputText.toLowerCase();
-  const selectedPosition = String(position || '');
+  const has = (re) => re.test(t);
   const wants = {
-    gk: /\b(gk|goleiro)\b|reflex|sair do gol|defesa com os pés|defesa com os pes|reposi/.test(t),
-    cb: /zague|defensor|defesa|marcar|antecip|desarme|xerife|chefia|cobertura/.test(t),
-    fullback: /lateral|ala|cruz|corredor|linha de fundo|apoio/.test(t),
-    cdm: /volante|cdm|cão|cao|protege|marca|roubar|intercept/.test(t),
-    creator: /cam|meia|criador|armador|passe|assist|maestro|10|achar passe/.test(t),
-    winger: /ponta|drible|veloc|1x1|aberto|profundidade/.test(t),
-    striker: /atac|st|gol|final|chute|artilheiro|matador|pivô|pivo|referencia/.test(t),
+    gk: has(/\b(gk|goleiro)\b|reflex|sair do gol|defesa com os pés|defesa com os pes|reposi|mãos|maos/),
+    cb: has(/zague|defensor|defesa|marcar|antecip|desarme|xerife|chefia|chefe|cobertura|a[eé]re|cabe[cç]|combate/),
+    fullback: has(/lateral|ala|cruz|corredor|linha de fundo|apoio|amplitude/),
+    cdm: has(/volante|cdm|cão|cao|protege|marca|roubar|intercept|recupera/),
+    creator: has(/cam|meia|criador|armador|passe|assist|maestro|10|achar passe|vis[aã]o/),
+    winger: has(/ponta|drible|veloc|1x1|aberto|profundidade|arranque/),
+    striker: has(/atac|st|gol|final|chute|artilheiro|matador|pivô|pivo|referencia|referência/),
   };
-
   let role = 'equilibrado';
   if (inputText) {
     if (wants.cb) role = 'zagueiro';
@@ -5436,96 +5450,102 @@ function suggestBuildRecipe(position, text) {
     else if (wants.striker) role = 'atacante';
     else if (wants.gk) role = 'goleiro';
   }
-  if (role === 'equilibrado') {
-    if (selectedPosition === 'GK') role = 'goleiro';
-    else if (selectedPosition === 'CB') role = 'zagueiro';
-    else if (selectedPosition === 'CDM') role = 'volante';
-    else if (selectedPosition === 'LB' || selectedPosition === 'RB') role = 'lateral';
-    else if (selectedPosition === 'CAM' || selectedPosition === 'CM') role = 'criador';
-    else if (selectedPosition === 'LW' || selectedPosition === 'RW') role = 'ponta';
-    else if (selectedPosition === 'ST') role = 'atacante';
-  }
 
+  const commonExplain = 'Os números abaixo são metas práticas de atributo, não custo exato de PA. No FC 26, cada Arquétipo tem mínimos/máximos próprios, atributos-chave mais baratos e custo crescente conforme o atributo sobe. Por isso a regra é: primeiro atingir os atributos que liberam/fortalecem a função, depois completar conforto e luxo.';
   const recipes = {
     goleiro: {
-      archetype: /linha|sair|pé|pe|reposi/.test(t) ? 'Goleiro Líbero' : 'Paredão',
+      archetype: has(/linha|sair|pé|pe|reposi/) ? 'Goleiro Líbero' : 'Paredão',
       main: ['Defesa com os Pés','Alcance Longo','Saída Rápida'],
       silver: ['Pegador de Cruzamento','Reposição Longa','Incansável','Primeiro Toque','Passe Pingado','Lançamento Longo','Resistente à Pressão','Jogo Aéreo'],
-      why: 'A prioridade é evitar gols primeiro, mas sem virar um goleiro passivo. Os principais aumentam reação, cobertura e saída; os complementares ajudam reposição, controle e segurança em bola aérea.'
+      why: 'Goleiro precisa primeiro defender. Se o texto pede saída, a build vira mais líbero; se não, prioriza reflexo e segurança.',
+      attributes: [
+        ['Goleiro','Reflexos','92-95','1','Base para defesas rápidas e 1x1.'], ['Goleiro','Alcance/Posicionamento','90-94','1','Ajuda em chutes colocados e bolas cruzadas.'], ['Goleiro','Jogo com os pés','80-86','2','Para repor curto e iniciar jogadas.'], ['Físico','Reação','88-92','2','Melhora resposta em bola viva.'], ['Passe','Passe curto','75-82','3','Só o bastante para não entregar saída.']
+      ],
+      phases: ['Primeiro suba atributos de defesa de goleiro até 90+.', 'Depois invista em reação e reposição.', 'Só gaste em passe/controle se o time realmente usa saída curta.']
     },
     zagueiro: {
       archetype: 'Chefia',
       main: ['Antecipação','Interceptação','Bloqueio'],
       silver: ['Jogo Aéreo','Contenção','Brigador','Carrinho','Incansável','Passe Pingado','Lançamento Longo','Resistente à Pressão'],
-      why: 'Para zagueiro útil, o mais importante é cortar jogada antes do chute. Os três principais melhoram bote, leitura de passe e bloqueio; os oito de apoio dão físico, saída simples e fôlego.'
+      why: 'Zagueiro competitivo precisa parar jogada antes do chute, ganhar duelo físico e ainda sair simples quando recuperar a bola.',
+      attributes: [
+        ['Defesa','Interceptação','90-94','1','Corta passe antes de virar chance clara.'], ['Defesa','Cabeceio','90-94','1','Ganha bola aérea defensiva e vira ameaça no escanteio.'], ['Defesa','Noção defensiva','90-94','1','Mantém posicionamento e leitura da linha.'], ['Defesa','Dividida em pé','88-92','1','Desarme principal; não deixe baixo.'], ['Físico','Força','90-95','1','Sustenta contato e disputa corporal.'], ['Físico','Impulsão','88-93','2','Combina com cabeceio para dominar bolas altas.'], ['Físico','Combatividade','88-92','2','Ajuda pressão, choque e recuperação.'], ['Ritmo','Aceleração/Pique','86-90','2','Suficiente para cobrir profundidade sem torrar tudo.'], ['Passe','Passe curto','78-84','3','Saída simples após recuperar.'], ['Passe','Lançamento','80-86','3','Virada e bola longa quando houver tempo.'], ['Controle','Agilidade/Reação','84-90','3','Virar o corpo e responder rápido sem virar build de meia.']
+      ],
+      phases: ['Feche primeiro Defesa + Força: interceptação, cabeceio, noção defensiva, dividida em pé e força.', 'Depois busque impulsão, combatividade e ritmo até uma faixa segura.', 'Por último, coloque passe curto/lançamento para sair jogando sem sacrificar a identidade defensiva.']
     },
     volante: {
-      archetype: /box|chegar|ida|volta|motor/.test(t) ? 'Motor' : 'Cão de Guarda',
+      archetype: has(/box|chegar|ida|volta|motor/) ? 'Motor' : 'Cão de Guarda',
       main: ['Interceptação','Antecipação','Incansável'],
       silver: ['Passe Pingado','Tiki-Taka','Resistente à Pressão','Contenção','Brigador','Lançamento Longo','Primeiro Toque','Bloqueio'],
-      why: 'Volante bom precisa recuperar e entregar limpo. Os principais aumentam roubo e presença; os complementares melhoram passe curto, proteção sob pressão e distribuição.'
+      why: 'Volante bom recupera, protege a zaga e entrega limpo. Não adianta roubar se perde a bola no passe seguinte.',
+      attributes: [
+        ['Defesa','Interceptação','88-92','1','Corta passe por dentro.'], ['Defesa','Dividida em pé','86-90','1','Bote seguro.'], ['Passe','Passe curto','84-90','1','Saída limpa sob pressão.'], ['Passe','Visão','82-88','2','Acha passe vertical.'], ['Físico','Fôlego','88-94','1','Mantém pressão o jogo todo.'], ['Físico','Combatividade','86-92','2','Ganha segunda bola.'], ['Controle','Reação','84-90','2','Decide rápido após recuperar.'], ['Ritmo','Aceleração','82-88','3','Para cobrir lados curtos.']
+      ],
+      phases: ['Primeiro defesa, passe curto e fôlego.', 'Depois visão/reação para acelerar transição.', 'Finalize com ritmo e físico extra.']
     },
     lateral: {
       archetype: 'Ala Criador',
       main: ['Cruzamento Tenso','Incansável','Arranque'],
       silver: ['Rápido com Bola','Passe Pingado','Tiki-Taka','Interceptação','Contenção','Primeiro Toque','Lançamento Longo','Jogo Aéreo'],
-      why: 'Lateral/ala precisa repetir corrida e gerar jogada pelo lado. Os principais dão cruzamento, fôlego e explosão; os complementares equilibram defesa, passe e condução.'
+      why: 'Lateral precisa repetir corredor: defender, correr, cruzar e voltar. A build deve evitar ficar boa só atacando.',
+      attributes: [
+        ['Ritmo','Aceleração/Pique','88-92','1','Corredor inteiro.'], ['Físico','Fôlego','90-95','1','Repetição de sprint.'], ['Passe','Cruzamento','84-90','1','Entrega pelo lado.'], ['Defesa','Dividida em pé','82-88','2','Não ser avenida.'], ['Defesa','Interceptação','82-88','2','Cortar passe lateral.'], ['Controle','Condução','82-88','2','Avançar sem perder bola.'], ['Passe','Passe curto','80-86','3','Tabela por fora.']
+      ],
+      phases: ['Priorize ritmo, fôlego e cruzamento.', 'Depois suba defesa básica.', 'Finalize com condução e passe curto.']
     },
     criador: {
-      archetype: /ritmo|controle|maestro|cm|meio/.test(t) ? 'Maestro' : 'Camisa 10',
+      archetype: has(/ritmo|controle|maestro|cm|meio/) ? 'Maestro' : 'Camisa 10',
       main: ['Passe Incisivo','Tiki-Taka','Resistente à Pressão'],
       silver: ['Primeiro Toque','Lançamento Longo','Passe Pingado','Técnico','Incansável','Trivela','Chute Colocado','Cruzamento Tenso'],
-      why: 'Criador precisa receber pressionado e transformar posse em chance. Os principais melhoram passe entre linhas, tabela e proteção; os complementares dão repertório para variar jogadas.'
+      why: 'Criador precisa receber pressionado, virar o corpo e transformar posse em chance clara.',
+      attributes: [
+        ['Passe','Visão','88-94','1','Passe que quebra linha.'], ['Passe','Passe curto','88-94','1','Tabela e posse segura.'], ['Passe','Lançamento','84-90','2','Inversão e bola longa.'], ['Controle','Controle de bola','86-92','1','Receber sob pressão.'], ['Controle','Reação','86-92','2','Decidir rápido.'], ['Controle','Agilidade/Equilíbrio','84-90','2','Girar e proteger.'], ['Finalização','Chute de longe','75-84','3','Punir espaço na entrada da área.']
+      ],
+      phases: ['Primeiro visão, passe curto e controle.', 'Depois reação/agilidade para jogar pressionado.', 'Finalize com lançamento e chute de longe se sobrar PA.']
     },
     ponta: {
       archetype: 'Ponta Agudo',
       main: ['Rápido com Bola','Técnico','Arranque'],
       silver: ['Primeiro Toque','Chute Colocado','Cruzamento Tenso','Passe Incisivo','Trivela','Incansável','Driblador','Resistente à Pressão'],
-      why: 'Ponta útil precisa vencer 1x1 e decidir depois. Os principais favorecem aceleração e condução; os complementares ajudam passe final, cruzamento e finalização.'
+      why: 'Ponta útil vence 1x1 e decide depois: cruzar, tocar ou finalizar.',
+      attributes: [
+        ['Ritmo','Aceleração/Pique','90-95','1','Separar do marcador.'], ['Controle','Condução','88-94','1','Carregar em velocidade.'], ['Controle','Agilidade/Equilíbrio','88-94','1','Corte seco e mudança de direção.'], ['Passe','Cruzamento','82-88','2','Bola final pelo lado.'], ['Finalização','Finalização','80-88','2','Atacar diagonal.'], ['Passe','Passe curto','78-84','3','Tabela curta.'], ['Físico','Fôlego','84-90','3','Repetir corrida.']
+      ],
+      phases: ['Primeiro ritmo e condução.', 'Depois finalização/cruzamento conforme seu lado.', 'Finalize com passe curto e fôlego.']
     },
     atacante: {
-      archetype: /pivo|refer|alto|cabe/.test(t) ? 'Referência' : /criar|falso|sair da area|sair da área/.test(t) ? 'Falso 9' : 'Matador',
+      archetype: has(/pivo|refer|alto|cabe/) ? 'Referência' : has(/criar|falso|sair da area|sair da área/) ? 'Falso 9' : 'Matador',
       main: ['Chute Colocado','Chute Forte','Primeiro Toque'],
       silver: ['Cabeceio Forte','Trivela','Passe Incisivo','Rápido com Bola','Técnico','Resistente à Pressão','Acrobático','Incansável'],
-      why: 'Atacante precisa transformar poucas chances em gol. Os principais cobrem finalização colocada, chute forte e domínio; os complementares ampliam jogo aéreo, mobilidade, pivô e criação.'
+      why: 'Atacante precisa transformar poucas chances em gol e dominar rápido dentro da área.',
+      attributes: [
+        ['Finalização','Finalização','90-95','1','Chance clara precisa virar gol.'], ['Finalização','Posicionamento','88-94','1','Atacar espaço certo.'], ['Finalização','Força do chute','86-92','1','Finalizar com potência.'], ['Controle','Primeiro toque/controle','84-90','2','Dominar e bater rápido.'], ['Ritmo','Aceleração/Pique','86-92','2','Atacar profundidade.'], ['Físico','Força','78-88','3','Segurar zagueiro se fizer pivô.'], ['Passe','Passe curto','75-82','3','Parede e tabela.']
+      ],
+      phases: ['Primeiro finalização, posicionamento e força do chute.', 'Depois primeiro toque e ritmo.', 'Só então coloque passe/físico conforme seu estilo.']
     },
     equilibrado: {
       archetype: 'Motor',
       main: ['Primeiro Toque','Incansável','Tiki-Taka'],
       silver: ['Passe Pingado','Resistente à Pressão','Interceptação','Arranque','Técnico','Passe Incisivo','Lançamento Longo','Chute Colocado'],
-      why: 'Quando a função ainda está aberta, a melhor base é um jogador seguro e útil em várias fases. Essa combinação dá passe, fôlego, controle e participação sem especializar demais.'
+      why: 'Quando a descrição está aberta, a build segura é um jogador completo, útil e sem desperdício pesado em atributo de luxo.',
+      attributes: [
+        ['Controle','Reação','84-90','1','Base universal para responder rápido.'], ['Passe','Passe curto','84-90','1','Não quebrar jogada simples.'], ['Físico','Fôlego','86-92','1','Participar o jogo todo.'], ['Ritmo','Aceleração','84-90','2','Chegar antes no lance.'], ['Defesa','Interceptação','78-86','2','Ajudar sem bola.'], ['Controle','Controle de bola','82-88','2','Receber sob pressão.']
+      ],
+      phases: ['Monte uma base segura: reação, passe curto e fôlego.', 'Depois ajuste ritmo/controle.', 'Por fim especialize conforme a função que o time mais precisa.']
     }
   };
 
   let recipe = recipes[role] || recipes.equilibrado;
   if (role === 'zagueiro') {
-    const wantsAerialWall = /a[eé]re|area|aereo|altura|cabe[cç]|for[cç]a|combate|fisic|disputa|duelo|muralha/.test(t);
-    const wantsBuildUp = /sair jogando|sa[ií]da|constru|passe|lan[cç]amento|virada|bola longa/.test(t);
-    const wantsChief = /chefia|lider|xerife|comando|capitao|capit[aã]o|organiza/.test(t);
-    if (wantsAerialWall) {
-      recipe = {
-        ...recipe,
-        archetype: 'Muralha',
-        main: ['Jogo Aéreo','Antecipação','Brigador'],
-        silver: ['Bloqueio','Interceptação','Contenção','Carrinho','Incansável','Passe Pingado','Lançamento Longo','Resistente à Pressão'],
-        why: 'O texto descreve um zagueiro forte para duelos, jogo aéreo nas duas áreas, desarme e combate físico. Por isso a base é Muralha: primeiro ganhar confronto e proteger a área; os estilos de passe entram como apoio para sair jogando sem perder a identidade defensiva.'
-      };
+    const wantsChief = has(/chefia|chefe|boss|lider|xerife|comando|capitao|capit[aã]o|organiza/);
+    const wantsAerialWall = has(/a[eé]re|area|aereo|altura|cabe[cç]|for[cç]a|combate|fisic|disputa|duelo|muralha/);
+    const wantsBuildUp = has(/sair jogando|sa[ií]da|constru|passe|lan[cç]amento|virada|bola longa/);
+    if (wantsChief) {
+      recipe = {...recipe, archetype:'Chefia', main:['Antecipação','Interceptação','Bloqueio'], why:'O texto pede zagueiro de comando. Chefia prioriza leitura, organização da linha, interceptação e bloqueio; use físico e cabeceio como sustentação.'};
+    } else if (wantsAerialWall) {
+      recipe = {...recipe, archetype:'Muralha', main:['Jogo Aéreo','Antecipação','Brigador'], why:'O texto descreve zagueiro forte para duelos, jogo aéreo, desarme e combate. A base é Muralha: ganhar confronto, proteger a área e usar passe como apoio.'};
     } else if (wantsBuildUp) {
-      recipe = {
-        ...recipe,
-        archetype: 'Líbero',
-        main: ['Antecipação','Passe Pingado','Lançamento Longo'],
-        silver: ['Jogo Aéreo','Bloqueio','Interceptação','Contenção','Brigador','Carrinho','Incansável','Resistente à Pressão'],
-        why: 'O texto pede um zagueiro que participa da saída. Por isso a base é Líbero: manter leitura defensiva, mas ganhar passe rasteiro forte e bola longa para iniciar ataques com segurança.'
-      };
-    } else if (wantsChief) {
-      recipe = {
-        ...recipe,
-        archetype: 'Chefia',
-        main: ['Antecipação','Interceptação','Bloqueio'],
-        silver: ['Jogo Aéreo','Contenção','Brigador','Carrinho','Incansável','Passe Pingado','Lançamento Longo','Resistente à Pressão'],
-        why: 'O texto aponta para um zagueiro de comando. Chefia prioriza leitura, organização da linha, interceptação e bloqueio antes de qualquer luxo com a bola.'
-      };
+      recipe = {...recipe, archetype:'Líbero', main:['Antecipação','Passe Pingado','Lançamento Longo'], why:'O texto pede zagueiro que sai jogando. Líbero mantém leitura defensiva, mas investe mais cedo em passe rasteiro forte e bola longa.'};
     }
   }
   const mainNames = uniqueStyleNames(recipe.main).slice(0, 3);
@@ -5537,26 +5557,35 @@ function suggestBuildRecipe(position, text) {
     main: mainNames.map(findPlaystyle),
     silver: silverNames.map(findPlaystyle),
     why: recipe.why,
-    practical: 'Use os 3 principais como identidade do jogador. Os 8 complementares/prata fecham as fraquezas e deixam o boneco mais confiável em partida competitiva.'
+    attributes: recipe.attributes.map(([group,name,target,priority,reason]) => ({group,name,target,priority,reason})),
+    phases: recipe.phases,
+    explanation: commonExplain,
+    practical: 'Preencha de cima para baixo. Não tente colocar tudo em 95: depois de 88-90 o custo sobe muito. Pare nas faixas alvo, garanta os PlayStyles necessários e use o resto para corrigir fraquezas reais da função.'
   };
 }
-
 function suggestPlaystylesLocal(position, text) {
   return suggestBuildRecipe(position, text).main;
 }
 
 function runPlaystyleSimulator() {
-  const pos = document.getElementById('sim-pos')?.value || '';
   const txt = document.getElementById('sim-text')?.value || '';
-  const build = suggestBuildRecipe(pos, txt);
+  const build = suggestBuildRecipe('', txt);
   const mainHtml = build.main.map((p, i) => `<div class="build-card primary">
-    <div class="style-card-head">${styleIconHtml(playstyleIcon(p.name))}<div><div class="style-card-title">${i+1}. ${p.name}</div><div class="style-card-code">Principal · ${p.code || ''} · ${p.group}</div></div></div>
+    <div class="style-card-head">${styleIconHtml(playstyleIcon(p.name))}<div><div class="style-card-title">${i+1}. ${p.name}</div><div class="style-card-code">Principal/ouro · ${p.code || ''} · ${p.group}</div></div></div>
     <div class="build-card-desc">${p.desc}</div>
   </div>`).join('');
   const silverHtml = build.silver.map((p, i) => `<div class="build-card">
     <div class="style-card-head">${styleIconHtml(playstyleIcon(p.name), true)}<div><div class="style-card-title">${i+1}. ${p.name}</div><div class="style-card-code">Complementar/prata · ${p.code || ''} · ${p.group}</div></div></div>
     <div class="build-card-desc">${p.desc}</div>
   </div>`).join('');
+  const attrHtml = (build.attributes || []).map(a => `<tr>
+    <td><span class="scout-pill">${a.group}</span></td>
+    <td><strong>${a.name}</strong></td>
+    <td><span class="attr-target">${a.target}</span></td>
+    <td><span class="attr-priority">P${a.priority}</span></td>
+    <td>${a.reason}</td>
+  </tr>`).join('');
+  const phasesHtml = (build.phases || []).map((p, i) => `<div class="attr-phase"><div class="attr-phase-title">Etapa ${i+1}</div><p>${p}</p></div>`).join('');
   document.getElementById('sim-result').innerHTML = `
     <div class="section-title" style="grid-column:1/-1;margin-top:8px;">Arquétipo recomendado</div>
     <div class="build-card primary" style="grid-column:1/-1;">
@@ -5564,11 +5593,16 @@ function runPlaystyleSimulator() {
       <div style="color:var(--text-2);font-size:13px;line-height:1.55;">${build.archetype.desc}</div>
       <div class="build-why">Por que: ${build.why}</div>
     </div>
-    <div class="section-title" style="grid-column:1/-1;">3 PlayStyles principais</div>
+    <div class="section-title" style="grid-column:1/-1;">3 PlayStyles principais/ouro</div>
     ${mainHtml}
     <div class="section-title" style="grid-column:1/-1;">8 PlayStyles complementares/prata</div>
     ${silverHtml}
-    <div class="build-card" style="grid-column:1/-1;"><div class="style-card-title">Como montar o jogador</div><div class="build-note" style="margin-top:8px;">${build.practical}</div></div>
+    <div class="section-title" style="grid-column:1/-1;">Qualidades alvo</div>
+    <div class="build-explain"><strong>Como ler:</strong> ${build.explanation}</div>
+    <div class="attr-build-table-wrap"><table class="attr-build-table"><thead><tr><th>Grupo</th><th>Qualidade</th><th>Meta</th><th>Prioridade</th><th>Por que investir</th></tr></thead><tbody>${attrHtml}</tbody></table></div>
+    <div class="section-title" style="grid-column:1/-1;">Ordem para gastar os pontos</div>
+    <div class="attr-phase-grid">${phasesHtml}</div>
+    <div class="build-card" style="grid-column:1/-1;"><div class="style-card-title">Como montar sem desperdiçar PA</div><div class="build-note" style="margin-top:8px;">${build.practical}</div></div>
   `;
 }
 function renderPlaystyles() {
@@ -5597,15 +5631,12 @@ function renderPlaystyles() {
     </div>
   `).join('');
   return `
-    <div class="section-title">Simulador de Arquétipo e Estilos</div>
+    <div class="section-title">Simulador de Arquétipo, Estilos e Qualidades</div>
+    <div style="color:var(--text-2);font-size:12px;margin-bottom:12px;line-height:1.55;">Escreva do jeito que você falaria para um colega: posição, função, pontos fortes desejados e o que o jogador precisa fazer em campo. Exemplo: "zagueiro Chefia forte no jogo aéreo, bom desarme, saída simples e força para combate".</div>
     <div class="agenda-form" style="grid-template-columns:repeat(6,1fr);">
-      <select id="sim-pos" style="grid-column:span 2;">
-        <option value="ST">Atacante</option><option value="LW">Ponta</option><option value="CAM">Meia criador</option><option value="CM">Meio-campo</option><option value="CDM">Volante</option><option value="CB">Zagueiro</option><option value="LB">Lateral/Ala</option><option value="GK">Goleiro</option>
-      </select>
-      <textarea id="sim-text" style="grid-column:span 4;" placeholder="Descreva o que você espera do jogador: ex. zagueiro rápido para antecipar, atacante que finaliza de longe, meia que acha passe... "></textarea>
+      <textarea id="sim-text" style="grid-column:span 6;min-height:92px;" placeholder="Descreva o jogador que você quer montar: zagueiro Chefia forte no jogo aéreo e desarme; volante que rouba e passa simples; atacante matador rápido; meia que cria e protege a bola..."></textarea>
       <div class="full"><button type="button" class="btn-primary" onclick="runPlaystyleSimulator()">Sugerir build completo</button></div>
-    </div>
-    <div id="sim-result" class="build-result-grid"></div>
+    </div><div id="sim-result" class="build-result-grid"></div>
     <div class="section-title">Legenda de Arquétipos</div>
     <div style="color:var(--text-2);font-size:12px;margin-bottom:12px;line-height:1.5;">Arquétipo é o perfil tático/manual do jogador no seu elenco. Ele ajuda a IA, a análise scout e o Time Ideal a entenderem a função real do jogador, mesmo quando a API da EA erra a posição.</div>
     ${archetypes}
@@ -6279,6 +6310,9 @@ if __name__ == "__main__":
     print("="*60 + "\n")
     
     uvicorn.run(app, host="0.0.0.0", port=8000)
+
+
+
 
 
 
