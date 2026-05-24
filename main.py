@@ -36,9 +36,11 @@ APP_NAME = "Scout Clubs Pro"
 if os.getenv("VERCEL") == "1":
     DB_FILE = "/tmp/scout_clubs.db"
     JSON_CACHE = "/tmp/dados_clube.json"
+    CLUB_JSON_DIR = "/tmp/dados_clubes"
 else:
     DB_FILE = "scout_clubs.db"
     JSON_CACHE = "dados_clube.json"
+    CLUB_JSON_DIR = "dados_clubes"
 
 try:
     from dotenv import load_dotenv
@@ -284,6 +286,39 @@ def load_cache() -> Optional[dict]:
 
 
 
+
+
+def _safe_json_name(value: str) -> str:
+    clean = "".join(ch if ch.isalnum() or ch in ("-", "_") else "_" for ch in str(value or "club"))
+    return clean.strip("_") or "club"
+
+
+def club_json_path(club_id: str) -> Path:
+    folder = Path(CLUB_JSON_DIR)
+    folder.mkdir(parents=True, exist_ok=True)
+    return folder / f"{_safe_json_name(club_id)}.json"
+
+
+def load_club_json_history(club_id: str) -> Optional[dict]:
+    try:
+        path = club_json_path(club_id)
+        if not path.exists():
+            return None
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception as e:
+        print(f"[CLUB JSON] Aviso ao ler historico do clube {club_id}: {e}")
+        return None
+
+
+def save_club_json_history(club_id: str, data: dict):
+    try:
+        path = club_json_path(club_id)
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2, default=str)
+        print(f"[CLUB JSON] Historico do clube salvo em {path}")
+    except Exception as e:
+        print(f"[CLUB JSON] Aviso ao salvar historico do clube {club_id}: {e}")
 
 def _norm_club_name(value: str) -> str:
     return " ".join(str(value or "").strip().lower().split())
@@ -912,12 +947,16 @@ def import_history(payload: HistoryImportPayload):
     incoming_matches = [m for m in (payload.matches or []) if isinstance(m, dict)]
     incoming_players = [p for p in (payload.players or []) if isinstance(p, dict)]
     cache = load_cache() or {}
+    club_json = load_club_json_history(club_id) or {}
     cache_club = cache.get("club") or {}
+    json_club = club_json.get("club") or {}
     cache_matches = cache.get("matches") or [] if str(cache_club.get("id") or "") == club_id else []
+    json_matches = club_json.get("matches") or [] if str(json_club.get("id") or club_id) == club_id else []
     cache_players = cache.get("players") or [] if str(cache_club.get("id") or "") == club_id else []
+    json_players = club_json.get("players") or [] if str(json_club.get("id") or club_id) == club_id else []
 
-    merged_matches = merge_match_lists_for_storage(club_id, cache_matches, incoming_matches)
-    players = incoming_players or cache_players
+    merged_matches = merge_match_lists_for_storage(club_id, json_matches, cache_matches, incoming_matches)
+    players = incoming_players or cache_players or json_players
 
     imported_to_db = 0
     try:
@@ -964,6 +1003,7 @@ def import_history(payload: HistoryImportPayload):
                 cache["ideal_team"] = build_ideal_team(players, "3-5-2")
                 cache["mvp"] = max(players, key=lambda p: (p.get("mom", 0), p.get("rating", 0)))
             save_cache(cache)
+            save_club_json_history(club_id, cache)
         except Exception as e:
             print(f"[IMPORT] Aviso ao atualizar cache importado: {e}")
 
@@ -973,7 +1013,9 @@ def import_history(payload: HistoryImportPayload):
         "received": len(incoming_matches),
         "total_matches": len(merged_matches),
         "db_imported": imported_to_db,
-    }@app.get("/api/dashboard")
+    }
+
+@app.get("/api/dashboard")
 def get_dashboard():
     """Retorna dados do cache JSON"""
     cache = load_cache()
@@ -1120,12 +1162,18 @@ async def sync_stream(
             
             # ACUMULACAO HISTORICA: salva no DB e tambem preserva partidas antigas do cache.
             previous_cache = load_cache() or {}
+            club_json_cache = load_club_json_history(club_id) or {}
             previous_matches = []
             previous_players = []
             previous_club = previous_cache.get("club") or {}
+            club_json_club = club_json_cache.get("club") or {}
             if str(previous_club.get("id") or "") == club_id:
                 previous_matches = previous_cache.get("matches") or []
                 previous_players = previous_cache.get("players") or []
+            if str(club_json_club.get("id") or club_id) == club_id:
+                previous_matches = merge_match_lists_for_storage(club_id, club_json_cache.get("matches") or [], previous_matches)
+                if not previous_players:
+                    previous_players = club_json_cache.get("players") or []
 
             if not players and previous_players:
                 players = previous_players
@@ -1214,8 +1262,9 @@ async def sync_stream(
                 "matchtype_summary": summarize_matches_by_type(matches),
             }
             
-            # Salva cache
+            # Salva cache JSON principal e histórico por clube
             save_cache(club_data)
+            save_club_json_history(club_id, club_data)
             
             # Salva no DB (best-effort, nao falha a sync se DB der erro)
             try:
@@ -5358,6 +5407,11 @@ if __name__ == "__main__":
     print("="*60 + "\n")
     
     uvicorn.run(app, host="0.0.0.0", port=8000)
+
+
+
+
+
 
 
 
