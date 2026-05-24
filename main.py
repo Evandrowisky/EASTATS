@@ -14,13 +14,13 @@ import json
 import sqlite3
 import asyncio
 import time
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional, Dict, List, Any
 from contextlib import asynccontextmanager
 from statistics import mean, pstdev
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Depends, Header
 from pydantic import BaseModel
 from typing import Optional
 from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
@@ -50,6 +50,8 @@ except ImportError:
 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+JWT_ALGORITHM = "HS256"
+JWT_EXPIRE_DAYS = int(os.getenv("JWT_EXPIRE_DAYS", "7") or "7")
 
 MATCH_TYPE_CANDIDATES = [
     "leagueMatch",
@@ -825,6 +827,179 @@ def save_player_profile_supabase(club_id: str, player_name: str, manual_position
         print(f"[SUPABASE] Aviso ao salvar player_profile {player_name}: {type(e).__name__}: {e}")
         return False
 
+# ============================================================
+# AUTENTICACAO / APP USERS
+# ============================================================
+
+_pwd_context = None
+
+
+class AuthRegisterPayload(BaseModel):
+    nome: str
+    usuario: str
+    senha: str
+    club_id: str
+    clube: str
+
+
+class AuthLoginPayload(BaseModel):
+    usuario: str
+    senha: str
+
+
+def _get_pwd_context():
+    global _pwd_context
+    if _pwd_context is None:
+        try:
+            from passlib.context import CryptContext
+            _pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+        except Exception as e:
+            print(f"[AUTH] passlib/bcrypt indisponivel: {type(e).__name__}: {e}")
+            raise HTTPException(500, "Dependencia de autenticacao ausente: passlib[bcrypt]")
+    return _pwd_context
+
+
+def hash_password(senha: str) -> str:
+    return _get_pwd_context().hash(str(senha or ""))
+
+
+def verify_password(senha: str, password_hash: str) -> bool:
+    try:
+        return _get_pwd_context().verify(str(senha or ""), str(password_hash or ""))
+    except Exception:
+        return False
+
+
+def _jwt_secret() -> str:
+    secret = os.getenv("JWT_SECRET_KEY", "").strip()
+    if not secret:
+        print("[AUTH] JWT_SECRET_KEY ausente")
+        raise HTTPException(500, "JWT_SECRET_KEY nao configurada no servidor")
+    return secret
+
+
+def create_access_token(data: dict):
+    try:
+        from jose import jwt
+    except Exception as e:
+        print(f"[AUTH] python-jose indisponivel: {type(e).__name__}: {e}")
+        raise HTTPException(500, "Dependencia de autenticacao ausente: python-jose[cryptography]")
+    payload = dict(data or {})
+    expire = datetime.now(timezone.utc) + timedelta(days=JWT_EXPIRE_DAYS)
+    payload.update({"exp": expire})
+    return jwt.encode(payload, _jwt_secret(), algorithm=JWT_ALGORITHM)
+
+
+def decode_access_token(token: str):
+    try:
+        from jose import JWTError, jwt
+        return jwt.decode(str(token or ""), _jwt_secret(), algorithms=[JWT_ALGORITHM])
+    except Exception as e:
+        print(f"[AUTH] Token invalido: {type(e).__name__}: {e}")
+        raise HTTPException(401, "Token invalido ou expirado")
+
+
+def _public_user(row: dict) -> dict:
+    if not isinstance(row, dict):
+        return {}
+    return {
+        "id": str(row.get("id") or ""),
+        "nome": row.get("nome") or "",
+        "usuario": row.get("usuario") or "",
+        "club_id": str(row.get("club_id") or ""),
+        "clube": row.get("clube") or "",
+        "cargo": row.get("cargo") or "jogador",
+        "status": row.get("status") or "ativo",
+        "is_active": bool(row.get("is_active", True)),
+    }
+
+
+def _get_app_user_by_usuario(usuario: str):
+    sb = get_supabase()
+    if not sb:
+        raise HTTPException(503, "Supabase nao configurado para autenticacao")
+    try:
+        resp = sb.table("app_users").select("*").eq("usuario", str(usuario or "").strip().lower()).limit(1).execute()
+        rows = getattr(resp, "data", None) or []
+        return rows[0] if rows else None
+    except Exception as e:
+        print(f"[AUTH] Erro buscando usuario: {type(e).__name__}: {e}")
+        raise HTTPException(500, "Erro ao consultar usuario")
+
+
+def _get_app_user_by_id(user_id: str):
+    sb = get_supabase()
+    if not sb:
+        raise HTTPException(503, "Supabase nao configurado para autenticacao")
+    try:
+        resp = sb.table("app_users").select("*").eq("id", str(user_id or "")).limit(1).execute()
+        rows = getattr(resp, "data", None) or []
+        return rows[0] if rows else None
+    except Exception as e:
+        print(f"[AUTH] Erro buscando usuario por id: {type(e).__name__}: {e}")
+        raise HTTPException(500, "Erro ao consultar usuario")
+
+
+def club_has_admin(club_id: str) -> bool:
+    sb = get_supabase()
+    if not sb or not club_id:
+        return False
+    try:
+        resp = (
+            sb.table("app_users")
+            .select("id")
+            .eq("club_id", str(club_id))
+            .eq("cargo", "admin")
+            .eq("status", "ativo")
+            .eq("is_active", True)
+            .limit(1)
+            .execute()
+        )
+        rows = getattr(resp, "data", None) or []
+        return bool(rows)
+    except Exception as e:
+        print(f"[AUTH] Aviso ao verificar admin do clube {club_id}: {type(e).__name__}: {e}")
+        return False
+
+
+def _extract_token(authorization: Optional[str] = None, access_token: Optional[str] = None) -> str:
+    if authorization and authorization.lower().startswith("bearer "):
+        return authorization.split(" ", 1)[1].strip()
+    if access_token:
+        return str(access_token).strip()
+    raise HTTPException(401, "Token de acesso ausente")
+
+
+def get_current_user(authorization: Optional[str] = Header(None), access_token: Optional[str] = Query(None)):
+    token = _extract_token(authorization, access_token)
+    payload = decode_access_token(token)
+    user_id = payload.get("sub")
+    if not user_id:
+        raise HTTPException(401, "Token sem usuario")
+    row = _get_app_user_by_id(str(user_id))
+    if not row:
+        raise HTTPException(401, "Usuario nao encontrado")
+    if not bool(row.get("is_active", True)):
+        raise HTTPException(403, "Conta inativa")
+    status_value = row.get("status") or "ativo"
+    if status_value == "bloqueado":
+        raise HTTPException(403, "Conta bloqueada")
+    if status_value == "pendente":
+        raise HTTPException(403, "Conta pendente de liberacao")
+    return _public_user(row)
+
+
+def require_admin(current_user: dict = Depends(get_current_user)):
+    if (current_user or {}).get("cargo") != "admin":
+        raise HTTPException(403, "Apenas administradores podem executar esta acao")
+    return current_user
+
+
+def _assert_same_club(current_user: dict, club_id: str):
+    user_club = str((current_user or {}).get("club_id") or "")
+    if user_club and str(club_id or "") and user_club != str(club_id):
+        raise HTTPException(403, "Usuario nao pertence a este clube")
+    return True
 def summarize_matches_by_type(matches):
     resumo = {"liga": 0, "copa": 0, "amistoso": 0, "desconhecido": 0}
     for m in matches or []:
@@ -1192,6 +1367,88 @@ def health():
     return {"status": "ok", "app": APP_NAME}
 
 
+
+@app.post("/api/auth/register")
+def auth_register(payload: AuthRegisterPayload):
+    sb = get_supabase()
+    if not sb:
+        raise HTTPException(503, "Supabase nao configurado para autenticacao")
+
+    nome = str(payload.nome or "").strip()
+    usuario = str(payload.usuario or "").strip().lower()
+    senha = str(payload.senha or "")
+    club_id = str(payload.club_id or "").strip()
+    clube = str(payload.clube or "").strip()
+
+    if not nome or not usuario or not senha or not club_id or not clube:
+        raise HTTPException(400, "Nome, usuario, senha, club_id e clube sao obrigatorios")
+    if len(senha) < 6:
+        raise HTTPException(400, "A senha deve ter pelo menos 6 caracteres")
+    if _get_app_user_by_usuario(usuario):
+        raise HTTPException(409, "Usuario ja existe")
+    if not club_has_admin(club_id):
+        raise HTTPException(403, "Este clube ainda nao possui um administrador cadastrado.")
+
+    row = {
+        "club_id": club_id,
+        "clube": clube,
+        "nome": nome,
+        "usuario": usuario,
+        "password_hash": hash_password(senha),
+        "cargo": "jogador",
+        "status": "ativo",
+        "is_active": True,
+        "updated_at": _now_iso(),
+    }
+    try:
+        resp = sb.table("app_users").insert(row).execute()
+        rows = getattr(resp, "data", None) or []
+        user = _public_user(rows[0] if rows else {**row, "id": ""})
+        return {"success": True, "user": user}
+    except Exception as e:
+        print(f"[AUTH] Erro criando usuario: {type(e).__name__}: {e}")
+        raise HTTPException(500, "Erro ao criar usuario")
+
+
+@app.post("/api/auth/login")
+def auth_login(payload: AuthLoginPayload):
+    usuario = str(payload.usuario or "").strip().lower()
+    senha = str(payload.senha or "")
+    if not usuario or not senha:
+        raise HTTPException(400, "Usuario e senha sao obrigatorios")
+
+    row = _get_app_user_by_usuario(usuario)
+    if not row or not verify_password(senha, row.get("password_hash")):
+        raise HTTPException(401, "Usuario ou senha invalidos")
+    if not bool(row.get("is_active", True)):
+        raise HTTPException(403, "Conta inativa")
+    status_value = row.get("status") or "ativo"
+    if status_value == "bloqueado":
+        raise HTTPException(403, "Conta bloqueada")
+    if status_value == "pendente":
+        raise HTTPException(403, "Conta pendente de liberacao")
+
+    user = _public_user(row)
+    token = create_access_token({
+        "sub": user["id"],
+        "usuario": user["usuario"],
+        "nome": user["nome"],
+        "club_id": user["club_id"],
+        "clube": user["clube"],
+        "cargo": user["cargo"],
+    })
+    return {"success": True, "access_token": token, "token_type": "bearer", "user": user}
+
+
+@app.get("/api/auth/me")
+def auth_me(current_user: dict = Depends(get_current_user)):
+    return {"success": True, "user": current_user}
+
+
+@app.post("/api/auth/logout")
+def auth_logout():
+    return {"success": True}
+
 @app.get("/api/test-search")
 def test_search(
     club_name: str = Query("DESAGREGADOS SC"),
@@ -1239,7 +1496,7 @@ class HistoryImportPayload(BaseModel):
 
 
 @app.post("/api/import-history")
-def import_history(payload: HistoryImportPayload):
+def import_history(payload: HistoryImportPayload, current_user: dict = Depends(require_admin)):
     """Reidrata o cache/SQLite com o histórico salvo no navegador antes da sync."""
     club = payload.club or {}
     club_id = str(club.get("id") or club.get("clubId") or "").strip()
@@ -1318,7 +1575,7 @@ def import_history(payload: HistoryImportPayload):
     }
 
 @app.get("/api/dashboard")
-def get_dashboard():
+def get_dashboard(current_user: dict = Depends(get_current_user)):
     """Retorna dados do cache JSON"""
     cache = load_cache()
     if not cache:
@@ -1347,7 +1604,7 @@ def get_dashboard():
 
 
 @app.get("/api/ideal-team")
-def get_ideal_team(formation: str = Query("3-5-2")):
+def get_ideal_team(formation: str = Query("3-5-2"), current_user: dict = Depends(get_current_user)):
     """Retorna o melhor 11 recalculado para a formacao escolhida."""
     cache = load_cache()
     if not cache or not cache.get("players"):
@@ -1391,9 +1648,13 @@ def test_matchtypes(
 @app.get("/api/sync-stream")
 async def sync_stream(
     club_name: str = Query("DESAGREGADOS SC"),
-    platform: str = Query("auto")
+    platform: str = Query("auto"),
+    access_token: str = Query("")
 ):
     """Sincronização com progresso em tempo real (SSE)"""
+    current_user = get_current_user(authorization=None, access_token=access_token)
+    if current_user.get("cargo") != "admin":
+        raise HTTPException(403, "Apenas administradores podem sincronizar o clube")
     initial_platform = platform
     
     async def event_generator():
@@ -1429,6 +1690,7 @@ async def sync_stream(
                     return
             
             club_id = str(search["clubId"])
+            _assert_same_club(current_user, club_id)
             club_name_real = search["name"]
             plat = search.get("platform", plat) or "common-gen5"
             yield f"data: {log(f'✓ Clube: {club_name_real} (ID: {club_id}, plat: {plat})', 3, 8)}\n\n"
@@ -2084,7 +2346,7 @@ def get_player_analytics(player_name: str, match_type: str = Query("todos")):
 
 
 @app.get("/api/player/{player_name}")
-def get_player_detail(player_name: str):
+def get_player_detail(player_name: str, current_user: dict = Depends(get_current_user)):
     """Retorna jogador + ultimas 100 partidas dele com nota sofisticada"""
     cache = load_cache()
     if not cache or not cache.get("players"):
@@ -2182,9 +2444,9 @@ def load_player_profiles(club_id: Optional[str] = None) -> Dict[str, Dict[str, A
 
 
 @app.get("/api/player-profiles")
-def list_player_profiles():
+def list_player_profiles(current_user: dict = Depends(get_current_user)):
     """Lista ajustes manuais de posicao/arquetipo do clube sincronizado."""
-    club_id = _current_club_id_from_cache()
+    club_id = str((current_user or {}).get("club_id") or _current_club_id_from_cache())
     profiles = load_player_profiles(club_id)
     cache = load_cache() or {}
     players = cache.get("players") or []
@@ -2192,9 +2454,9 @@ def list_player_profiles():
 
 
 @app.put("/api/player-profiles/{player_name}")
-def update_player_profile(player_name: str, item: PlayerProfileUpdate):
+def update_player_profile(player_name: str, item: PlayerProfileUpdate, current_user: dict = Depends(require_admin)):
     """Salva ajuste manual para um jogador sem depender de banco externo."""
-    club_id = _current_club_id_from_cache()
+    club_id = str((current_user or {}).get("club_id") or _current_club_id_from_cache())
     manual_position = (item.manual_position or "").strip() or None
     archetype = (item.archetype or "").strip() or None
     playstyles = [str(x).strip() for x in (item.playstyles or []) if str(x).strip()][:3]
@@ -2432,7 +2694,7 @@ def build_opponent_scout(club_name: str, platform: str = "auto"):
 
 
 @app.post("/api/opponents/scout")
-def scout_opponents(req: OpponentScoutRequest):
+def scout_opponents(req: OpponentScoutRequest, current_user: dict = Depends(require_admin)):
     names = []
     seen = set()
     for raw in req.names or []:
@@ -2464,7 +2726,7 @@ class AgendaItem(BaseModel):
 
 
 @app.get("/api/agenda")
-def list_agenda():
+def list_agenda(current_user: dict = Depends(require_admin)):
     club_id = _current_club_id_from_cache()
     sb = get_supabase()
     if sb:
@@ -2492,7 +2754,7 @@ def list_agenda():
 
 
 @app.post("/api/agenda")
-def create_agenda(item: AgendaItem):
+def create_agenda(item: AgendaItem, current_user: dict = Depends(require_admin)):
     club_id = _current_club_id_from_cache()
     sb = get_supabase()
     payload = {"club_id": club_id, **item.dict()}
@@ -2517,7 +2779,7 @@ def create_agenda(item: AgendaItem):
 
 
 @app.put("/api/agenda/{item_id}")
-def update_agenda(item_id: int, item: AgendaItem):
+def update_agenda(item_id: int, item: AgendaItem, current_user: dict = Depends(require_admin)):
     club_id = _current_club_id_from_cache()
     sb = get_supabase()
     payload = {"club_id": club_id, **item.dict(), "updated_at": _now_iso()}
@@ -2543,7 +2805,7 @@ def update_agenda(item_id: int, item: AgendaItem):
 
 
 @app.delete("/api/agenda/{item_id}")
-def delete_agenda(item_id: int):
+def delete_agenda(item_id: int, current_user: dict = Depends(require_admin)):
     sb = get_supabase()
     if sb:
         try:
@@ -3876,6 +4138,101 @@ body {
 .scout-box p { color:var(--text-2); font-size:12px; line-height:1.55; }
 @media (max-width: 900px) { .opponent-form { grid-template-columns:1fr 1fr; } .scout-cols { grid-template-columns:1fr; } }
 @media (max-width: 560px) { .opponent-form { grid-template-columns:1fr; } .opponent-head { align-items:center; } .opponent-grade { min-width:64px; height:64px; } }
+
+/* AUTH */
+.auth-shell {
+  max-width: 520px;
+  margin: 70px auto;
+  padding: 0 20px;
+}
+.auth-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 24px;
+  box-shadow: 0 0 35px rgba(0,255,115,0.12);
+}
+.auth-card h1 {
+  font-size: 22px;
+  margin-bottom: 6px;
+  color: var(--green);
+}
+.auth-card p {
+  color: var(--text-2);
+  font-size: 13px;
+  margin-bottom: 18px;
+}
+.auth-field {
+  display: grid;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+.auth-field label {
+  color: var(--text-2);
+  font-size: 10px;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  font-weight: 700;
+}
+.auth-field input {
+  background: #000;
+  color: var(--text);
+  border: 1px solid var(--border-2);
+  border-radius: 8px;
+  padding: 12px;
+  font-family: inherit;
+  font-size: 14px;
+}
+.auth-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 14px;
+}
+.auth-link {
+  background: transparent;
+  border: 0;
+  color: var(--green);
+  cursor: pointer;
+  font-weight: 700;
+  letter-spacing: 1px;
+}
+.auth-error {
+  display: none;
+  margin-top: 12px;
+  padding: 10px 12px;
+  border: 1px solid rgba(255,51,68,0.35);
+  background: rgba(255,51,68,0.08);
+  color: var(--red);
+  border-radius: 8px;
+  font-size: 13px;
+}
+.auth-user-box {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-2);
+  font-size: 12px;
+}
+.auth-user-pill {
+  border: 1px solid var(--border-2);
+  background: var(--bg-3);
+  border-radius: 8px;
+  padding: 8px 10px;
+  color: var(--text);
+}
+.auth-role {
+  color: var(--green);
+  text-transform: uppercase;
+  font-weight: 800;
+  letter-spacing: 1px;
+}
+@media (max-width: 768px) {
+  .auth-shell { margin: 36px auto; }
+  .auth-card { padding: 18px; }
+  .auth-user-box { width: 100%; justify-content: flex-end; }
+}
 /* AGENDA */
 .agenda-form {
   background: var(--bg-card);
@@ -4286,7 +4643,8 @@ html, body { max-width: 100%; }
       <input id="clubInput" type="text" placeholder="Nome do clube" value="DESAGREGADOS SC"
         style="background:var(--bg-3);border:1px solid var(--border-2);color:var(--text);padding:8px 12px;border-radius:8px;font-size:13px;outline:none;width:180px;font-family:inherit;"
         onkeydown="if(event.key==='Enter') startSync()">
-      <button class="btn-sync" onclick="startSync()">↻ Sincronizar</button>
+      <button id="syncButton" class="btn-sync" onclick="startSync()">↻ Sincronizar</button>
+      <div id="authBox" class="auth-user-box"></div>
     </div>
   </div>
 </div>
@@ -4321,6 +4679,151 @@ let AGENDA = [];
 let OPPONENT_SCOUTS = [];
 let AGENDA_EDIT_ID = null;
 let IDEAL_FORMATION = '3-5-2';
+let AUTH_TOKEN = localStorage.getItem('scout_auth_token') || '';
+let AUTH_USER = (() => {
+  try { return JSON.parse(localStorage.getItem('scout_auth_user') || 'null'); }
+  catch (e) { return null; }
+})();
+
+function isLoggedIn() { return !!AUTH_TOKEN && !!AUTH_USER; }
+function isAdmin() { return !!AUTH_USER && AUTH_USER.cargo === 'admin'; }
+
+function authHeaders(extra = {}) {
+  const headers = {...extra};
+  if (AUTH_TOKEN) headers['Authorization'] = 'Bearer ' + AUTH_TOKEN;
+  return headers;
+}
+
+async function authFetch(url, opts = {}) {
+  const options = {...opts};
+  options.headers = authHeaders(options.headers || {});
+  const r = await fetch(url, options);
+  if (r.status === 401 || r.status === 403) {
+    if (r.status === 401) logout(false);
+  }
+  return r;
+}
+
+function updateAuthHeader() {
+  const box = document.getElementById('authBox');
+  const syncBtn = document.getElementById('syncButton');
+  const clubInput = document.getElementById('clubInput');
+  if (syncBtn) syncBtn.style.display = isAdmin() ? 'flex' : 'none';
+  if (clubInput) clubInput.style.display = isLoggedIn() ? 'block' : 'none';
+  if (!box) return;
+  if (!isLoggedIn()) {
+    box.innerHTML = '';
+    return;
+  }
+  box.innerHTML = `<div class="auth-user-pill">${AUTH_USER.nome || AUTH_USER.usuario} · <span class="auth-role">${AUTH_USER.cargo}</span></div><button class="btn-mini" onclick="logout()">Sair</button>`;
+}
+
+function showAuthError(msg) {
+  const el = document.getElementById('authError');
+  if (!el) return;
+  el.textContent = msg || 'Erro de autenticação';
+  el.style.display = 'block';
+}
+
+function renderAuth(mode = 'login') {
+  updateAuthHeader();
+  const c = document.getElementById('content');
+  if (!c) return;
+  const isRegister = mode === 'register';
+  if (!isAdmin() && ['cadastro','adversarios','agenda'].includes(CURRENT_TAB)) CURRENT_TAB = 'visao';
+  c.innerHTML = `
+    <div class="auth-shell">
+      <div class="auth-card">
+        <h1>${isRegister ? 'Criar Conta' : 'Entrar no Scout Clubs'}</h1>
+        <p>${isRegister ? 'Novos usuários entram como jogador. O clube precisa ter um admin ativo cadastrado no Supabase.' : 'Use seu usuário e senha para acessar o scout do seu clube.'}</p>
+        <form onsubmit="${isRegister ? 'submitRegister(event)' : 'submitLogin(event)'}">
+          ${isRegister ? `<div class="auth-field"><label>Nome</label><input id="authNome" autocomplete="name" required></div>` : ''}
+          <div class="auth-field"><label>Usuário</label><input id="authUsuario" autocomplete="username" required></div>
+          <div class="auth-field"><label>Senha</label><input id="authSenha" type="password" autocomplete="${isRegister ? 'new-password' : 'current-password'}" required></div>
+          ${isRegister ? `
+            <div class="auth-field"><label>ID do Clube</label><input id="authClubId" placeholder="3549624" required></div>
+            <div class="auth-field"><label>Nome do Clube</label><input id="authClube" placeholder="Desagregados SC" required></div>
+          ` : ''}
+          <div class="auth-actions">
+            <button class="btn-primary" type="submit">${isRegister ? 'Criar Conta' : 'Entrar'}</button>
+            <button class="auth-link" type="button" onclick="renderAuth('${isRegister ? 'login' : 'register'}')">${isRegister ? 'Já tenho conta' : 'Criar conta'}</button>
+          </div>
+          <div id="authError" class="auth-error"></div>
+        </form>
+      </div>
+    </div>`;
+}
+
+async function submitLogin(ev) {
+  ev.preventDefault();
+  try {
+    const body = {
+      usuario: document.getElementById('authUsuario').value.trim(),
+      senha: document.getElementById('authSenha').value,
+    };
+    const r = await fetch('/api/auth/login', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(data.detail || data.message || 'Login inválido');
+    AUTH_TOKEN = data.access_token;
+    AUTH_USER = data.user;
+    localStorage.setItem('scout_auth_token', AUTH_TOKEN);
+    localStorage.setItem('scout_auth_user', JSON.stringify(AUTH_USER));
+    updateAuthHeader();
+    await loadData();
+  } catch (e) {
+    showAuthError(e.message);
+  }
+}
+
+async function submitRegister(ev) {
+  ev.preventDefault();
+  try {
+    const body = {
+      nome: document.getElementById('authNome').value.trim(),
+      usuario: document.getElementById('authUsuario').value.trim(),
+      senha: document.getElementById('authSenha').value,
+      club_id: document.getElementById('authClubId').value.trim(),
+      clube: document.getElementById('authClube').value.trim(),
+    };
+    const r = await fetch('/api/auth/register', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(data.detail || data.message || 'Erro ao criar conta');
+    renderAuth('login');
+    setTimeout(() => showAuthError('Conta criada como jogador. Faça login.'), 50);
+  } catch (e) {
+    showAuthError(e.message);
+  }
+}
+
+function logout(render = true) {
+  AUTH_TOKEN = '';
+  AUTH_USER = null;
+  DATA = null;
+  localStorage.removeItem('scout_auth_token');
+  localStorage.removeItem('scout_auth_user');
+  updateAuthHeader();
+  if (render) renderAuth('login');
+}
+
+async function initAuth() {
+  updateAuthHeader();
+  if (!AUTH_TOKEN) {
+    renderAuth('login');
+    return;
+  }
+  try {
+    const r = await authFetch('/api/auth/me');
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(data.detail || 'Sessão expirada');
+    AUTH_USER = data.user;
+    localStorage.setItem('scout_auth_user', JSON.stringify(AUTH_USER));
+    updateAuthHeader();
+    await loadData();
+  } catch (e) {
+    logout(false);
+    renderAuth('login');
+  }
+}
 
 const PLAYSTYLE_CATALOG = [
   {name:'Chute Forte', code:'Power Shot', group:'Finalização', desc:'Chutes fortes de média/longa distância com mais potência.'},
@@ -4401,6 +4904,11 @@ function setPeriod(p, ev) {
   CURRENT_PERIOD = p;
   document.querySelectorAll('.period').forEach(el => el.classList.remove('active'));
   if (ev && ev.target) ev.target.classList.add('active');
+  if (!isAdmin()) {
+    document.querySelectorAll('.tab').forEach(el => {
+      if (['CADASTRO','ADVERSÁRIOS','AGENDA'].includes((el.textContent || '').trim())) el.remove();
+    });
+  }
   renderTab();
 }
 
@@ -4409,6 +4917,11 @@ function setMatchType(t, ev) {
   CURRENT_MATCH_TYPE = t;
   document.querySelectorAll('.matchtype').forEach(el => el.classList.remove('active'));
   if (ev && ev.target) ev.target.classList.add('active');
+  if (!isAdmin()) {
+    document.querySelectorAll('.tab').forEach(el => {
+      if (['CADASTRO','ADVERSÁRIOS','AGENDA'].includes((el.textContent || '').trim())) el.remove();
+    });
+  }
   renderTab();
 }
 
@@ -4576,7 +5089,7 @@ async function loadPlayerProfiles() {
   const localProfiles = loadLocalPlayerProfiles();
   const dashboardProfiles = (DATA && DATA.player_profiles) ? DATA.player_profiles : {};
   try {
-    const r = await fetch('/api/player-profiles');
+    const r = await authFetch('/api/player-profiles');
     const data = await r.json();
     // Ordem importa: o ajuste manual salvo no navegador e na sessão atual vence o cache/API da EA após sincronizar.
     PLAYER_PROFILES = {...dashboardProfiles, ...(data.profiles || {}), ...localProfiles, ...(PLAYER_PROFILES || {})};
@@ -4597,7 +5110,7 @@ async function savePlayerProfile(name, manualPosition, archetype, notes, playsty
     if (DATA && DATA.player_profiles) delete DATA.player_profiles[name];
   }
   saveLocalPlayerProfiles();
-  const r = await fetch('/api/player-profiles/' + encodeURIComponent(name), {
+  const r = await authFetch('/api/player-profiles/' + encodeURIComponent(name), {
     method: 'PUT',
     headers: {'Content-Type': 'application/json'},
     body: JSON.stringify({
@@ -4612,8 +5125,11 @@ async function savePlayerProfile(name, manualPosition, archetype, notes, playsty
 }
 
 async function loadData() {
+  if (!isLoggedIn()) { renderAuth('login'); return; }
+  updateAuthHeader();
   try {
-    const r = await fetch('/api/dashboard');
+    const r = await authFetch('/api/dashboard');
+    if (!r.ok) throw new Error('Falha ao carregar dashboard');
     DATA = await r.json();
     protectDataMatchHistory();
     await loadPlayerProfiles();
@@ -4628,7 +5144,8 @@ function render() {
   const c = document.getElementById('content');
   
   if (!DATA || !DATA.club) {
-    c.innerHTML = `
+    if (!isAdmin() && ['cadastro','adversarios','agenda'].includes(CURRENT_TAB)) CURRENT_TAB = 'visao';
+  c.innerHTML = `
       <div class="empty-state">
         <div class="empty-icon">⚽</div>
         <div class="empty-title">Nenhum clube sincronizado</div>
@@ -4638,6 +5155,7 @@ function render() {
     return;
   }
   
+  if (!isAdmin() && ['cadastro','adversarios','agenda'].includes(CURRENT_TAB)) CURRENT_TAB = 'visao';
   c.innerHTML = `
     <div class="club-card">
       <div class="club-info">
@@ -4682,6 +5200,11 @@ function render() {
     </div>
   `;
   
+  if (!isAdmin()) {
+    document.querySelectorAll('.tab').forEach(el => {
+      if (['CADASTRO','ADVERSÁRIOS','AGENDA'].includes((el.textContent || '').trim())) el.remove();
+    });
+  }
   renderTab();
 }
 
@@ -4689,6 +5212,11 @@ function setTab(t) {
   CURRENT_TAB = t;
   document.querySelectorAll('.tab').forEach(el => el.classList.remove('active'));
   event.target.classList.add('active');
+  if (!isAdmin()) {
+    document.querySelectorAll('.tab').forEach(el => {
+      if (['CADASTRO','ADVERSÁRIOS','AGENDA'].includes((el.textContent || '').trim())) el.remove();
+    });
+  }
   renderTab();
 }
 
@@ -4704,6 +5232,7 @@ function renderTab() {
   else if (CURRENT_TAB === 'cadastro') tc.innerHTML = renderCadastroJogadores();
   else if (CURRENT_TAB === 'playstyles') tc.innerHTML = renderPlaystyles();
   else if (CURRENT_TAB === 'adversarios') tc.innerHTML = renderAdversarios();
+  else if (['cadastro','adversarios','agenda'].includes(CURRENT_TAB) && !isAdmin()) { CURRENT_TAB = 'visao'; tc.innerHTML = renderVisao(); }
   else if (CURRENT_TAB === 'agenda') tc.innerHTML = renderAgenda();
 }
 
@@ -5307,6 +5836,11 @@ function buildIdealTeamClient(formation) {
 
 function setIdealFormation(value) {
   IDEAL_FORMATION = value;
+  if (!isAdmin()) {
+    document.querySelectorAll('.tab').forEach(el => {
+      if (['CADASTRO','ADVERSÁRIOS','AGENDA'].includes((el.textContent || '').trim())) el.remove();
+    });
+  }
   renderTab();
 }
 
@@ -5758,7 +6292,7 @@ async function scoutOpponents() {
   if (status) status.textContent = 'Buscando clubes na EA e montando scouting...';
   if (btn) { btn.disabled = true; btn.textContent = 'Analisando...'; }
   try {
-    const r = await fetch('/api/opponents/scout', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({names, platform: 'auto'}) });
+    const r = await authFetch('/api/opponents/scout', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({names, platform: 'auto'}) });
     if (!r.ok) throw new Error('Erro ao analisar adversários');
     const data = await r.json();
     OPPONENT_SCOUTS = data.opponents || [];
@@ -5824,8 +6358,9 @@ function renderAgendaList() {
 }
 
 async function loadAgenda() {
+  if (!isAdmin()) { AGENDA = []; return; }
   try {
-    const r = await fetch('/api/agenda');
+    const r = await authFetch('/api/agenda');
     AGENDA = await r.json();
   } catch (e) {
     AGENDA = [];
@@ -5850,6 +6385,11 @@ function editAgenda(id) {
 
 function cancelAgendaEdit() {
   AGENDA_EDIT_ID = null;
+  if (!isAdmin()) {
+    document.querySelectorAll('.tab').forEach(el => {
+      if (['CADASTRO','ADVERSÁRIOS','AGENDA'].includes((el.textContent || '').trim())) el.remove();
+    });
+  }
   renderTab();
 }
 
@@ -5867,7 +6407,7 @@ async function saveAgenda(ev) {
   try {
     const url = AGENDA_EDIT_ID ? `/api/agenda/${AGENDA_EDIT_ID}` : '/api/agenda';
     const method = AGENDA_EDIT_ID ? 'PUT' : 'POST';
-    const r = await fetch(url, {
+    const r = await authFetch(url, {
       method,
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify(body)
@@ -5884,7 +6424,7 @@ async function saveAgenda(ev) {
 async function deleteAgenda(id) {
   if (!confirm('Excluir este agendamento?')) return;
   try {
-    await fetch('/api/agenda/' + id, {method: 'DELETE'});
+    await authFetch('/api/agenda/' + id, {method: 'DELETE'});
     await loadAgenda();
     renderTab();
   } catch (e) {
@@ -5944,7 +6484,7 @@ async function analyzePlayer(name) {
   document.getElementById('modal').classList.add('active');
   
   try {
-    const r = await fetch(`/api/ai/player?player_name=${encodeURIComponent(name)}&match_type=${encodeURIComponent(CURRENT_MATCH_TYPE)}`, { method: 'POST' });
+    const r = await authFetch(`/api/ai/player?player_name=${encodeURIComponent(name)}&match_type=${encodeURIComponent(CURRENT_MATCH_TYPE)}`, { method: 'POST' });
     const data = await r.json();
     document.getElementById('modalContent').innerHTML = renderMarkdown(data.analysis);
   } catch (e) {
@@ -5957,7 +6497,7 @@ async function showPlayerDetail(name) {
   mc.innerHTML = '<div class="loading"><div class="spinner"></div> Carregando analytics...</div>';
   document.getElementById('modal').classList.add('active');
   try {
-    const r = await fetch('/api/player/' + encodeURIComponent(name) + '/analytics?match_type=' + encodeURIComponent(CURRENT_MATCH_TYPE));
+    const r = await authFetch('/api/player/' + encodeURIComponent(name) + '/analytics?match_type=' + encodeURIComponent(CURRENT_MATCH_TYPE));
     if (!r.ok) throw new Error('Não encontrado ou sem dados suficientes');
     const data = await r.json();
     mc.innerHTML = renderPlayerDetailHTML(data);
@@ -6214,7 +6754,7 @@ async function importLocalHistoryToServer() {
     const localMatches = loadLocalMatchHistory(DATA.club);
     const merged = mergeMatchHistoryForClub(DATA.club, localMatches, DATA.matches || []);
     if (!merged.length) return;
-    await fetch('/api/import-history', {
+    await authFetch('/api/import-history', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({club: DATA.club, matches: merged, players: DATA.players || []})
@@ -6224,6 +6764,7 @@ async function importLocalHistoryToServer() {
   }
 }
 async function startSync() {
+  if (!isAdmin()) { alert('Apenas administradores podem sincronizar o clube.'); return; }
   const progress = document.getElementById('syncProgress');
   const log = document.getElementById('syncLog');
   const fill = document.getElementById('syncFill');
@@ -6236,7 +6777,7 @@ async function startSync() {
   if (DATA && DATA.club && DATA.matches) saveLocalMatchHistory(DATA.club, DATA.matches);
   await importLocalHistoryToServer();
   const clubName = (document.getElementById('clubInput')?.value || 'DESAGREGADOS SC').trim();
-  const evt = new EventSource('/api/sync-stream?club_name=' + encodeURIComponent(clubName));
+  const evt = new EventSource('/api/sync-stream?club_name=' + encodeURIComponent(clubName) + '&access_token=' + encodeURIComponent(AUTH_TOKEN));
   
   evt.onmessage = (e) => {
     try {
@@ -6288,7 +6829,7 @@ document.addEventListener('keydown', e => {
   if (e.key === 'Escape') closeModal();
 });
 
-loadData();
+initAuth();
 </script>
 </body>
 </html>"""
@@ -6310,6 +6851,33 @@ if __name__ == "__main__":
     print("="*60 + "\n")
     
     uvicorn.run(app, host="0.0.0.0", port=8000)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
