@@ -1016,10 +1016,18 @@ async def sync_stream(
             # ACUMULACAO HISTORICA: salva no DB e tambem preserva partidas antigas do cache.
             previous_cache = load_cache() or {}
             previous_matches = []
+            previous_players = []
             previous_club = previous_cache.get("club") or {}
             if str(previous_club.get("id") or "") == club_id:
                 previous_matches = previous_cache.get("matches") or []
+                previous_players = previous_cache.get("players") or []
 
+            if not players and previous_players:
+                players = previous_players
+                yield f"data: {log(f'EA nao retornou jogadores agora; mantendo {len(previous_players)} jogadores do cache', 8, 8)}\n\n"
+
+            if not new_matches and previous_matches:
+                yield f"data: {log('EA nao retornou partidas novas; mantendo historico antigo sem apagar nada', 8, 8)}\n\n"
             def merge_match_lists(*groups):
                 merged = {}
                 fallback_i = 0
@@ -5229,5 +5237,6 @@ if __name__ == "__main__":
     print("="*60 + "\n")
     
     uvicorn.run(app, host="0.0.0.0", port=8000)
+
 
 
