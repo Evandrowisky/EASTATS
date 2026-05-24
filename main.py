@@ -3008,6 +3008,51 @@ html, body { max-width: 100%; }
   .player-rating-label { font-size: 9px; }
 }
 
+
+/* FORMATION VISUAL POLISH */
+.formation-wrapper {
+  overflow: visible;
+}
+.field {
+  height: 780px;
+  max-width: 640px;
+  aspect-ratio: 7 / 10;
+}
+.player-on-field {
+  width: 126px;
+  z-index: 3;
+}
+.player-jersey {
+  width: 54px;
+  height: 58px;
+  font-size: 24px;
+}
+.player-circle-name {
+  min-width: 104px;
+  max-width: 124px;
+  font-size: 9px;
+  padding: 3px 8px;
+}
+.player-rating-label {
+  font-size: 10px;
+  line-height: 1.05;
+}
+.player-role-label {
+  font-size: 8px;
+  line-height: 1.05;
+}
+@media (max-width: 760px) {
+  .field {
+    height: 680px;
+    max-width: 100%;
+  }
+  .player-on-field { width: 94px; }
+  .player-jersey { width: 42px; height: 46px; font-size: 19px; }
+  .player-circle-name { min-width: 78px; max-width: 94px; font-size: 8px; padding: 2px 5px; }
+  .player-rating-label { font-size: 8px; }
+  .player-role-label { font-size: 7px; }
+}
+
 </style>
 </head>
 <body>
@@ -3674,10 +3719,11 @@ function inferPlayerPositionIntel(player) {
   if (apps > 0) {
     const sorted = Object.entries(counts).sort((a,b) => b[1] - a[1]);
     const top = sorted[0];
-    if (counts.GK >= 2 || counts.GK / Math.max(apps, 1) >= 0.25) {
+    const gkShare = counts.GK / Math.max(apps, 1);
+    if (registered === 'GK' || (counts.GK >= 3 && gkShare >= 0.6)) {
       family = 'GK';
-      source = 'historico-goleiro';
-    } else if (top && top[1] > 0) {
+      source = registered === 'GK' ? 'cadastro-goleiro' : 'historico-goleiro';
+    } else if (top && top[1] > 0 && top[0] !== 'GK') {
       family = top[0];
       source = 'historico';
     }
@@ -3695,9 +3741,9 @@ const FORMATION_SLOTS = {
 };
 
 const ROLE_COORDS = {
-  GK:[50,92], LB:[18,76], LWB:[14,68], LCB:[35,78], CB:[50,80], RCB:[65,78], RB:[82,76], RWB:[86,68],
-  CDM:[50,64], LDM:[40,64], RDM:[60,64], LCM:[36,52], CM:[50,50], RCM:[64,52], LM:[18,48], RM:[82,48],
-  LAM:[34,34], CAM:[50,34], RAM:[66,34], LW:[24,22], RW:[76,22], ST:[50,16], LST:[42,16], RST:[58,16],
+  GK:[50,94], LB:[16,78], LWB:[12,66], LCB:[32,82], CB:[50,84], RCB:[68,82], RB:[84,78], RWB:[88,66],
+  CDM:[50,66], LDM:[38,66], RDM:[62,66], LCM:[34,54], CM:[50,51], RCM:[66,54], LM:[14,48], RM:[86,48],
+  LAM:[32,35], CAM:[50,33], RAM:[68,35], LW:[20,22], RW:[80,22], ST:[50,15], LST:[39,15], RST:[61,15],
 };
 
 const ROLE_DESC = {
