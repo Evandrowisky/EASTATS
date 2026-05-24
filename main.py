@@ -176,7 +176,7 @@ class EAFCClient:
         params = {"clubId": club_id, "platform": platform}
         return self._get(url, params)
     
-    def matches(self, club_id: str, match_type: str = "leagueMatch", platform: str = "common-gen5", max_count: int = 50):
+    def matches(self, club_id: str, match_type: str = "leagueMatch", platform: str = "common-gen5", max_count: int = 100):
         url = f"{self.BASE_URL}/clubs/matches"
         params = {
             "clubIds": club_id,
@@ -316,7 +316,7 @@ def calc_club_stats(overall_data, club_info_data, matches_list):
     return stats
 
 
-def fetch_all_match_types(ea_client, club_id, platform, max_count=50):
+def fetch_all_match_types(ea_client, club_id, platform, max_count=100):
     """Testa varios matchTypes da EA, deduplica por matchId e devolve debug detalhado."""
     all_matches_raw = []
     seen = set()
@@ -787,7 +787,7 @@ def get_ideal_team(formation: str = Query("3-5-2")):
 def test_matchtypes(
     club_name: str = Query("DESAGREGADOS SC"),
     platform: str = Query("auto"),
-    max_count: int = Query(50, ge=1, le=100)
+    max_count: int = Query(100, ge=1, le=100)
 ):
     """Diagnostico: busca o clube e testa todos os matchTypes conhecidos/candidatos."""
     search = ea_client.search_club(club_name, platform)
@@ -863,7 +863,7 @@ async def sync_stream(
             yield f"data: {log(f'✓ {len(players)} jogadores carregados', 5, 8)}\n\n"
             
             yield f"data: {log('Baixando partidas e testando matchTypes da EA...', 6, 8)}\n\n"
-            all_matches_raw, debug_matchtypes = fetch_all_match_types(ea_client, club_id, plat, max_count=50)
+            all_matches_raw, debug_matchtypes = fetch_all_match_types(ea_client, club_id, plat, max_count=100)
             for d in debug_matchtypes:
                 status = "ok" if d.get("ok") else "falhou"
                 err = f" | erro: {d.get('error')}" if d.get("error") else ""
@@ -1200,8 +1200,8 @@ def build_player_analytics(player_name, cache, match_type="todos"):
         "player": player,
         "games_with_history": games,
         "scope": {"club_id": (cache.get("club") or {}).get("id"), "match_type": wanted_match_type, "label": "clube atual"},
-        "history": history[:20],
-        "series": list(reversed(history[:20])),
+        "history": history[:100],
+        "series": list(reversed(history[:100])),
         "averages": {
             "rating": _avg(ratings, player.get("rating", 0)), "sofi_rating": _avg(sofi, player.get("rating", 0)),
             "goals_per_game": round(goals / max(games, 1), 2), "assists_per_game": round(assists / max(games, 1), 2),
@@ -1414,7 +1414,7 @@ def get_player_analytics(player_name: str, match_type: str = Query("todos")):
 
 @app.get("/api/player/{player_name}")
 def get_player_detail(player_name: str):
-    """Retorna jogador + ultimas 20 partidas dele com nota sofisticada"""
+    """Retorna jogador + ultimas 100 partidas dele com nota sofisticada"""
     cache = load_cache()
     if not cache or not cache.get("players"):
         raise HTTPException(404, "Sincronize um clube primeiro")
@@ -1450,9 +1450,9 @@ def get_player_detail(player_name: str):
                 })
                 break
 
-    # Ordena por data desc e pega 20
+    # Ordena por data desc e pega 100
     history.sort(key=lambda x: x.get("timestamp", 0), reverse=True)
-    history = history[:20]
+    history = history[:100]
 
     # Estatisticas agregadas do historico
     h_stats = {"games": len(history), "goals": 0, "assists": 0, "avg_rating": 0, "avg_sofi": 0, "moms": 0}
