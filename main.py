@@ -720,7 +720,7 @@ def save_matches_supabase(club_id: str, matches: list):
     return {"matches": saved_matches, "match_players": saved_players}
 
 
-def load_matches_supabase(club_id: str, limit: int = 1000):
+def load_matches_supabase(club_id: str, limit: int = 5000):
     sb = get_supabase()
     if not sb or not club_id:
         return []
@@ -1649,18 +1649,30 @@ def import_history(payload: HistoryImportPayload, current_user: dict = Depends(r
 
 @app.get("/api/dashboard")
 def get_dashboard(current_user: dict = Depends(get_current_user)):
-    """Retorna dados do cache JSON"""
+    """Retorna dados do dashboard do clube do usuário e recarrega histórico completo de partidas."""
+    user_club_id = str((current_user or {}).get("club_id") or "").strip()
     cache = load_cache()
+    if cache and user_club_id and str((cache.get("club") or {}).get("id") or "") != user_club_id:
+        cache = None
     if not cache:
-        cache = load_latest_club_data_supabase()
+        cache = load_latest_club_data_supabase(user_club_id) if user_club_id else load_latest_club_data_supabase()
         if cache:
             try:
                 save_cache(cache)
-                save_club_json_history(str((cache.get("club") or {}).get("id") or "default"), cache)
+                save_club_json_history(str((cache.get("club") or {}).get("id") or user_club_id or "default"), cache)
             except Exception as e:
                 print(f"[SUPABASE] Dashboard carregou, mas fallback local falhou: {e}")
     if cache:
-        # Reconstroi time ideal se nao existir ou estiver vazio
+        club_id = user_club_id or str((cache.get("club") or {}).get("id") or "")
+        try:
+            supabase_matches = load_matches_supabase(club_id, limit=5000) if club_id else []
+            if supabase_matches:
+                cache_matches = cache.get("matches") or []
+                cache["matches"] = merge_match_lists_for_storage(club_id, supabase_matches, cache_matches)
+                cache["matchtype_summary"] = summarize_matches_by_type(cache["matches"])
+                print(f"[DASHBOARD] Historico de partidas recarregado do Supabase: {len(cache['matches'])}")
+        except Exception as e:
+            print(f"[DASHBOARD] Aviso ao recarregar historico Supabase: {type(e).__name__}: {e}")
         if cache.get("players") and (
             not cache.get("ideal_team")
             or not cache["ideal_team"].get("players")
@@ -1668,13 +1680,12 @@ def get_dashboard(current_user: dict = Depends(get_current_user)):
             cache["ideal_team"] = build_ideal_team(cache["players"], "3-5-2")
             save_cache(cache)
         try:
-            cache["player_profiles"] = load_player_profiles(str((cache.get("club") or {}).get("id") or "default"))
+            cache["player_profiles"] = load_player_profiles(club_id or "default")
         except Exception as e:
             print(f"[profiles] dashboard sem perfis: {e}")
             cache.setdefault("player_profiles", {})
         return cache
-    return {"club": None, "stats": None, "players": [], "matches": [], "opponents": [], "ideal_team": None}
-
+    return {"club": None, "stats": None, "players": [], "matches": [], "opponents": [], "ideal_team": None, "player_profiles": {}}
 
 @app.get("/api/ideal-team")
 def get_ideal_team(formation: str = Query("3-5-2"), current_user: dict = Depends(get_current_user)):
@@ -1914,7 +1925,7 @@ async def sync_stream(
                     save_players_supabase(club_id, players)
                     save_matches_supabase(club_id, matches)
 
-                    supabase_matches = load_matches_supabase(club_id, limit=1000)
+                    supabase_matches = load_matches_supabase(club_id, limit=5000)
                     if supabase_matches:
                         matches = merge_match_lists_for_storage(club_id, supabase_matches, matches)
                         stats = calc_club_stats(overall, info, matches)
@@ -2206,8 +2217,8 @@ def build_player_analytics(player_name, cache, match_type="todos"):
         "player": player,
         "games_with_history": games,
         "scope": {"club_id": (cache.get("club") or {}).get("id"), "match_type": wanted_match_type, "label": "clube atual"},
-        "history": history[:100],
-        "series": list(reversed(history[:100])),
+        "history": history,
+        "series": list(reversed(history)),
         "averages": {
             "rating": _avg(ratings, player.get("rating", 0)), "sofi_rating": _avg(sofi, player.get("rating", 0)),
             "goals_per_game": round(goals / max(games, 1), 2), "assists_per_game": round(assists / max(games, 1), 2),
@@ -2458,7 +2469,7 @@ def get_player_detail(player_name: str, current_user: dict = Depends(get_current
 
     # Ordena por data desc e pega 100
     history.sort(key=lambda x: x.get("timestamp", 0), reverse=True)
-    history = history[:100]
+    # Sem corte: usa todas as partidas salvas do jogador no clube/filtro
 
     # Estatisticas agregadas do historico
     h_stats = {"games": len(history), "goals": 0, "assists": 0, "avg_rating": 0, "avg_sofi": 0, "moms": 0}
@@ -6705,7 +6716,7 @@ function renderPlayerDetailHTML(data) {
       <div class="section-title">Relatório Scout Offline</div>
       <div class="analytics-note">${renderMarkdown(data.scout_report || '')}</div>
 
-      <div class="section-title" style="margin-top:18px;">Últimas ${h.length} Partidas</div>
+      <div class="section-title" style="margin-top:18px;">Todas as ${h.length} partidas salvas no clube/tipo</div>
       ${h.length === 0 ? '<div style="color:var(--text-2);padding:20px;text-align:center;">Nenhuma partida com participação registrada.</div>' : `
       <table class="history-table">
         <thead><tr><th>Data</th><th>Tipo</th><th>Adversário</th><th>Resultado</th><th>Pos</th><th>Sofi</th><th>EA</th><th>G</th><th>A</th><th>Chu</th><th>Pass%</th><th>Des%</th><th>Des</th><th>Def</th><th>SG</th><th>Verm</th><th>MOM</th></tr></thead>
@@ -6928,6 +6939,10 @@ if __name__ == "__main__":
     print("="*60 + "\n")
     
     uvicorn.run(app, host="0.0.0.0", port=8000)
+
+
+
+
 
 
 
