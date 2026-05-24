@@ -1420,8 +1420,6 @@ def auth_register(payload: AuthRegisterPayload):
     resolved = resolve_club_for_auth(clube_informado)
     club_id = resolved["club_id"]
     clube = resolved["clube"]
-    if not club_has_admin(club_id):
-        raise HTTPException(403, "Este clube ainda nao possui um administrador cadastrado.")
 
     row = {
         "club_id": club_id,
@@ -1463,6 +1461,8 @@ def auth_login(payload: AuthLoginPayload):
         raise HTTPException(403, "Conta pendente de liberacao")
 
     user = _public_user(row)
+    if user.get("cargo") != "admin" and not club_has_admin(user.get("club_id")):
+        raise HTTPException(403, "Este clube ainda nao possui um administrador cadastrado.")
     token = create_access_token({
         "sub": user["id"],
         "usuario": user["usuario"],
@@ -4674,7 +4674,7 @@ html, body { max-width: 100%; }
       </div>
     </div>
     <div style="display:flex;gap:8px;align-items:center;">
-      <input id="clubInput" type="text" placeholder="Nome do clube" value="DESAGREGADOS SC"
+      <input id="clubInput" type="text" placeholder="Nome do clube" value=""
         style="background:var(--bg-3);border:1px solid var(--border-2);color:var(--text);padding:8px 12px;border-radius:8px;font-size:13px;outline:none;width:180px;font-family:inherit;"
         onkeydown="if(event.key==='Enter') startSync()">
       <button id="syncButton" class="btn-sync" onclick="startSync()">↻ Sincronizar</button>
@@ -4769,13 +4769,13 @@ function renderAuth(mode = 'login') {
     <div class="auth-shell">
       <div class="auth-card">
         <h1>${isRegister ? 'Criar Conta' : 'Entrar no Scout Clubs'}</h1>
-        <p>${isRegister ? 'Novos usuários entram como jogador. O clube precisa ter um admin ativo cadastrado no Supabase.' : 'Use seu usuário e senha para acessar o scout do seu clube.'}</p>
+        <p>${isRegister ? 'Crie sua conta como jogador. O acesso ao sistema fica liberado quando o clube tiver um admin ativo.' : 'Use seu usuário e senha para acessar o scout do seu clube.'}</p>
         <form onsubmit="${isRegister ? 'submitRegister(event)' : 'submitLogin(event)'}">
           ${isRegister ? `<div class="auth-field"><label>Nome</label><input id="authNome" autocomplete="name" required></div>` : ''}
           <div class="auth-field"><label>Usuário</label><input id="authUsuario" autocomplete="username" required></div>
           <div class="auth-field"><label>Senha</label><input id="authSenha" type="password" autocomplete="${isRegister ? 'new-password' : 'current-password'}" required></div>
           ${isRegister ? `
-            <div class="auth-field"><label>Nome do Clube</label><input id="authClube" placeholder="Desagregados SC" required></div>
+            <div class="auth-field"><label>Nome do Clube</label><input id="authClube" placeholder="Nome do clube" required></div>
           ` : ''}
           <div class="auth-actions">
             <button class="btn-primary" type="submit">${isRegister ? 'Criar Conta' : 'Entrar'}</button>
@@ -4821,7 +4821,7 @@ async function submitRegister(ev) {
     const data = await r.json().catch(() => ({}));
     if (!r.ok) throw new Error(data.detail || data.message || 'Erro ao criar conta');
     renderAuth('login');
-    setTimeout(() => showAuthError('Conta criada como jogador. Faça login.'), 50);
+    setTimeout(() => showAuthError('Conta criada como jogador. Se ainda não houver admin ativo, o login ficará bloqueado até a liberação.'), 50);
   } catch (e) {
     showAuthError(e.message);
   }
@@ -6889,6 +6889,9 @@ if __name__ == "__main__":
     print("="*60 + "\n")
     
     uvicorn.run(app, host="0.0.0.0", port=8000)
+
+
+
 
 
 
