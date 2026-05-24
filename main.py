@@ -2454,7 +2454,7 @@ def list_player_profiles(current_user: dict = Depends(get_current_user)):
 
 
 @app.put("/api/player-profiles/{player_name}")
-def update_player_profile(player_name: str, item: PlayerProfileUpdate, current_user: dict = Depends(require_admin)):
+def update_player_profile(player_name: str, item: PlayerProfileUpdate, current_user: dict = Depends(get_current_user)):
     """Salva ajuste manual para um jogador sem depender de banco externo."""
     club_id = str((current_user or {}).get("club_id") or _current_club_id_from_cache())
     manual_position = (item.manual_position or "").strip() or None
@@ -2726,7 +2726,7 @@ class AgendaItem(BaseModel):
 
 
 @app.get("/api/agenda")
-def list_agenda(current_user: dict = Depends(require_admin)):
+def list_agenda(current_user: dict = Depends(get_current_user)):
     club_id = _current_club_id_from_cache()
     sb = get_supabase()
     if sb:
@@ -2754,7 +2754,7 @@ def list_agenda(current_user: dict = Depends(require_admin)):
 
 
 @app.post("/api/agenda")
-def create_agenda(item: AgendaItem, current_user: dict = Depends(require_admin)):
+def create_agenda(item: AgendaItem, current_user: dict = Depends(get_current_user)):
     club_id = _current_club_id_from_cache()
     sb = get_supabase()
     payload = {"club_id": club_id, **item.dict()}
@@ -2779,13 +2779,13 @@ def create_agenda(item: AgendaItem, current_user: dict = Depends(require_admin))
 
 
 @app.put("/api/agenda/{item_id}")
-def update_agenda(item_id: int, item: AgendaItem, current_user: dict = Depends(require_admin)):
+def update_agenda(item_id: int, item: AgendaItem, current_user: dict = Depends(get_current_user)):
     club_id = _current_club_id_from_cache()
     sb = get_supabase()
     payload = {"club_id": club_id, **item.dict(), "updated_at": _now_iso()}
     if sb:
         try:
-            resp = sb.table("agenda").update(payload).eq("id", item_id).execute()
+            resp = sb.table("agenda").update(payload).eq("id", item_id).eq("club_id", club_id).execute()
             rows = getattr(resp, "data", None) or []
             if rows:
                 return rows[0]
@@ -2805,11 +2805,11 @@ def update_agenda(item_id: int, item: AgendaItem, current_user: dict = Depends(r
 
 
 @app.delete("/api/agenda/{item_id}")
-def delete_agenda(item_id: int, current_user: dict = Depends(require_admin)):
+def delete_agenda(item_id: int, current_user: dict = Depends(get_current_user)):
     sb = get_supabase()
     if sb:
         try:
-            sb.table("agenda").delete().eq("id", item_id).execute()
+            sb.table("agenda").delete().eq("id", item_id).eq("club_id", club_id).execute()
             return {"deleted": item_id}
         except Exception as e:
             print(f"[SUPABASE] Aviso ao excluir agenda: {type(e).__name__}: {e}")
@@ -4730,7 +4730,7 @@ function renderAuth(mode = 'login') {
   const c = document.getElementById('content');
   if (!c) return;
   const isRegister = mode === 'register';
-  if (!isAdmin() && ['cadastro','adversarios','agenda'].includes(CURRENT_TAB)) CURRENT_TAB = 'visao';
+  if (!isAdmin() && ['jogadores','comparar','confrontos','adversarios'].includes(CURRENT_TAB)) CURRENT_TAB = 'visao';
   c.innerHTML = `
     <div class="auth-shell">
       <div class="auth-card">
@@ -4906,7 +4906,7 @@ function setPeriod(p, ev) {
   if (ev && ev.target) ev.target.classList.add('active');
   if (!isAdmin()) {
     document.querySelectorAll('.tab').forEach(el => {
-      if (['CADASTRO','ADVERSÁRIOS','AGENDA'].includes((el.textContent || '').trim())) el.remove();
+      if (['JOGADORES','COMPARAR','CONFRONTOS','ADVERSÁRIOS'].includes((el.textContent || '').trim())) el.remove();
     });
   }
   renderTab();
@@ -4919,7 +4919,7 @@ function setMatchType(t, ev) {
   if (ev && ev.target) ev.target.classList.add('active');
   if (!isAdmin()) {
     document.querySelectorAll('.tab').forEach(el => {
-      if (['CADASTRO','ADVERSÁRIOS','AGENDA'].includes((el.textContent || '').trim())) el.remove();
+      if (['JOGADORES','COMPARAR','CONFRONTOS','ADVERSÁRIOS'].includes((el.textContent || '').trim())) el.remove();
     });
   }
   renderTab();
@@ -5144,7 +5144,7 @@ function render() {
   const c = document.getElementById('content');
   
   if (!DATA || !DATA.club) {
-    if (!isAdmin() && ['cadastro','adversarios','agenda'].includes(CURRENT_TAB)) CURRENT_TAB = 'visao';
+    if (!isAdmin() && ['jogadores','comparar','confrontos','adversarios'].includes(CURRENT_TAB)) CURRENT_TAB = 'visao';
   c.innerHTML = `
       <div class="empty-state">
         <div class="empty-icon">⚽</div>
@@ -5155,7 +5155,7 @@ function render() {
     return;
   }
   
-  if (!isAdmin() && ['cadastro','adversarios','agenda'].includes(CURRENT_TAB)) CURRENT_TAB = 'visao';
+  if (!isAdmin() && ['jogadores','comparar','confrontos','adversarios'].includes(CURRENT_TAB)) CURRENT_TAB = 'visao';
   c.innerHTML = `
     <div class="club-card">
       <div class="club-info">
@@ -5202,7 +5202,7 @@ function render() {
   
   if (!isAdmin()) {
     document.querySelectorAll('.tab').forEach(el => {
-      if (['CADASTRO','ADVERSÁRIOS','AGENDA'].includes((el.textContent || '').trim())) el.remove();
+      if (['JOGADORES','COMPARAR','CONFRONTOS','ADVERSÁRIOS'].includes((el.textContent || '').trim())) el.remove();
     });
   }
   renderTab();
@@ -5214,7 +5214,7 @@ function setTab(t) {
   event.target.classList.add('active');
   if (!isAdmin()) {
     document.querySelectorAll('.tab').forEach(el => {
-      if (['CADASTRO','ADVERSÁRIOS','AGENDA'].includes((el.textContent || '').trim())) el.remove();
+      if (['JOGADORES','COMPARAR','CONFRONTOS','ADVERSÁRIOS'].includes((el.textContent || '').trim())) el.remove();
     });
   }
   renderTab();
@@ -5232,7 +5232,7 @@ function renderTab() {
   else if (CURRENT_TAB === 'cadastro') tc.innerHTML = renderCadastroJogadores();
   else if (CURRENT_TAB === 'playstyles') tc.innerHTML = renderPlaystyles();
   else if (CURRENT_TAB === 'adversarios') tc.innerHTML = renderAdversarios();
-  else if (['cadastro','adversarios','agenda'].includes(CURRENT_TAB) && !isAdmin()) { CURRENT_TAB = 'visao'; tc.innerHTML = renderVisao(); }
+  else if (['jogadores','comparar','confrontos','adversarios'].includes(CURRENT_TAB) && !isAdmin()) { CURRENT_TAB = 'visao'; tc.innerHTML = renderVisao(); }
   else if (CURRENT_TAB === 'agenda') tc.innerHTML = renderAgenda();
 }
 
@@ -5838,7 +5838,7 @@ function setIdealFormation(value) {
   IDEAL_FORMATION = value;
   if (!isAdmin()) {
     document.querySelectorAll('.tab').forEach(el => {
-      if (['CADASTRO','ADVERSÁRIOS','AGENDA'].includes((el.textContent || '').trim())) el.remove();
+      if (['JOGADORES','COMPARAR','CONFRONTOS','ADVERSÁRIOS'].includes((el.textContent || '').trim())) el.remove();
     });
   }
   renderTab();
@@ -6358,7 +6358,6 @@ function renderAgendaList() {
 }
 
 async function loadAgenda() {
-  if (!isAdmin()) { AGENDA = []; return; }
   try {
     const r = await authFetch('/api/agenda');
     AGENDA = await r.json();
@@ -6387,7 +6386,7 @@ function cancelAgendaEdit() {
   AGENDA_EDIT_ID = null;
   if (!isAdmin()) {
     document.querySelectorAll('.tab').forEach(el => {
-      if (['CADASTRO','ADVERSÁRIOS','AGENDA'].includes((el.textContent || '').trim())) el.remove();
+      if (['JOGADORES','COMPARAR','CONFRONTOS','ADVERSÁRIOS'].includes((el.textContent || '').trim())) el.remove();
     });
   }
   renderTab();
@@ -6851,6 +6850,7 @@ if __name__ == "__main__":
     print("="*60 + "\n")
     
     uvicorn.run(app, host="0.0.0.0", port=8000)
+
 
 
 
