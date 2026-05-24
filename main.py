@@ -462,6 +462,32 @@ def fetch_all_match_types(ea_client, club_id, platform, max_count=100):
     return all_matches_raw, debug
 
 
+
+def stable_match_id_for_storage(match: dict, club_id: str, index: int = 0) -> str:
+    mid = str((match or {}).get("match_id") or (match or {}).get("matchId") or "").strip()
+    if mid and mid.lower() not in ("none", "null", "undefined", "0"):
+        return mid
+    return (
+        f"fallback:{club_id}:{(match or {}).get('timestamp', '')}:"
+        f"{(match or {}).get('opponent', '')}:{(match or {}).get('score', '')}:"
+        f"{(match or {}).get('match_type', '')}:{index}"
+    )
+
+
+def merge_match_lists_for_storage(club_id: str, *groups):
+    merged = {}
+    fallback_i = 0
+    for group in groups:
+        for item in group or []:
+            if not isinstance(item, dict):
+                continue
+            mid = stable_match_id_for_storage(item, club_id, fallback_i)
+            if mid.startswith("fallback:"):
+                fallback_i += 1
+            current = merged.get(mid, {})
+            merged[mid] = {**current, **item, "match_id": mid}
+    return sorted(merged.values(), key=lambda x: int(x.get("timestamp", 0) or 0), reverse=True)
+
 def summarize_matches_by_type(matches):
     resumo = {"liga": 0, "copa": 0, "amistoso": 0, "desconhecido": 0}
     for m in matches or []:
@@ -868,7 +894,86 @@ def test_search(
     return results
 
 
-@app.get("/api/dashboard")
+
+class HistoryImportPayload(BaseModel):
+    club: Dict[str, Any]
+    matches: List[Dict[str, Any]] = []
+    players: Optional[List[Dict[str, Any]]] = None
+
+
+@app.post("/api/import-history")
+def import_history(payload: HistoryImportPayload):
+    """Reidrata o cache/SQLite com o histórico salvo no navegador antes da sync."""
+    club = payload.club or {}
+    club_id = str(club.get("id") or club.get("clubId") or "").strip()
+    if not club_id:
+        raise HTTPException(400, "club.id obrigatorio")
+
+    incoming_matches = [m for m in (payload.matches or []) if isinstance(m, dict)]
+    incoming_players = [p for p in (payload.players or []) if isinstance(p, dict)]
+    cache = load_cache() or {}
+    cache_club = cache.get("club") or {}
+    cache_matches = cache.get("matches") or [] if str(cache_club.get("id") or "") == club_id else []
+    cache_players = cache.get("players") or [] if str(cache_club.get("id") or "") == club_id else []
+
+    merged_matches = merge_match_lists_for_storage(club_id, cache_matches, incoming_matches)
+    players = incoming_players or cache_players
+
+    imported_to_db = 0
+    try:
+        conn = sqlite3.connect(DB_FILE)
+        c = conn.cursor()
+        for m in merged_matches:
+            mid = stable_match_id_for_storage(m, club_id)
+            c.execute(
+                "INSERT OR REPLACE INTO matches (match_id, club_id, opponent, score, result, match_type, timestamp, data) VALUES (?,?,?,?,?,?,?,?)",
+                (
+                    mid,
+                    club_id,
+                    m.get("opponent", ""),
+                    m.get("score", ""),
+                    m.get("result", ""),
+                    m.get("match_type", ""),
+                    int(m.get("timestamp", 0) or 0),
+                    json.dumps({**m, "match_id": mid}, ensure_ascii=False, default=str),
+                ),
+            )
+            imported_to_db += 1
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        print(f"[IMPORT] Aviso ao importar historico local para SQLite: {e}")
+
+    if not cache or str(cache_club.get("id") or "") == club_id:
+        cache = {
+            **cache,
+            "club": {
+                "id": club_id,
+                "name": club.get("name") or cache_club.get("name") or "Clube",
+                "platform": club.get("platform") or cache_club.get("platform") or "common-gen5",
+                "synced_at": cache_club.get("synced_at") or datetime.now().isoformat(),
+            },
+            "players": players,
+            "matches": merged_matches,
+            "matchtype_summary": summarize_matches_by_type(merged_matches),
+        }
+        try:
+            cache["stats"] = calc_club_stats([], {}, merged_matches)
+            cache["opponents"] = calc_opponent_avg(merged_matches)
+            if players:
+                cache["ideal_team"] = build_ideal_team(players, "3-5-2")
+                cache["mvp"] = max(players, key=lambda p: (p.get("mom", 0), p.get("rating", 0)))
+            save_cache(cache)
+        except Exception as e:
+            print(f"[IMPORT] Aviso ao atualizar cache importado: {e}")
+
+    return {
+        "success": True,
+        "club_id": club_id,
+        "received": len(incoming_matches),
+        "total_matches": len(merged_matches),
+        "db_imported": imported_to_db,
+    }@app.get("/api/dashboard")
 def get_dashboard():
     """Retorna dados do cache JSON"""
     cache = load_cache()
@@ -5151,6 +5256,21 @@ function closeModal() {
   document.getElementById('modal').classList.remove('active');
 }
 
+async function importLocalHistoryToServer() {
+  try {
+    if (!DATA || !DATA.club) return;
+    const localMatches = loadLocalMatchHistory(DATA.club);
+    const merged = mergeMatchHistoryForClub(DATA.club, localMatches, DATA.matches || []);
+    if (!merged.length) return;
+    await fetch('/api/import-history', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({club: DATA.club, matches: merged, players: DATA.players || []})
+    });
+  } catch (e) {
+    console.warn('Nao conseguiu importar historico local antes da sync', e);
+  }
+}
 async function startSync() {
   const progress = document.getElementById('syncProgress');
   const log = document.getElementById('syncLog');
@@ -5162,6 +5282,7 @@ async function startSync() {
   fill.style.width = '0%';
   
   if (DATA && DATA.club && DATA.matches) saveLocalMatchHistory(DATA.club, DATA.matches);
+  await importLocalHistoryToServer();
   const clubName = (document.getElementById('clubInput')?.value || 'DESAGREGADOS SC').trim();
   const evt = new EventSource('/api/sync-stream?club_name=' + encodeURIComponent(clubName));
   
@@ -5237,6 +5358,10 @@ if __name__ == "__main__":
     print("="*60 + "\n")
     
     uvicorn.run(app, host="0.0.0.0", port=8000)
+
+
+
+
 
 
 
