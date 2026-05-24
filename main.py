@@ -4048,8 +4048,12 @@ function buildIdealTeamClient(formation) {
     pool.forEach(p => {
       if (used.has(p.name)) return;
       if (slot === 'GK' && p.family !== 'GK') return;
-      if (slot !== 'GK' && !wanted.includes(p.family)) return;
-      const fitBonus = p.family === wanted[0] ? 18 : 9;
+      let fitBonus = 0;
+      if (p.family === wanted[0]) fitBonus = 18;
+      else if (wanted.includes(p.family)) fitBonus = 9;
+      else fitBonus = -18;
+      // GK continua protegido. Nas outras posições, se faltar natural/adaptado,
+      // completa o XI com o melhor jogador restante em vez de deixar buraco no campo.
       const score = roleScore(p, wanted[0]) + fitBonus;
       if (score > bestScore) { bestScore = score; best = p; }
     });
@@ -4191,7 +4195,7 @@ function renderTimeIdeal() {
       ${listHtml}
     </div>
 
-    ${team.missing_slots.length ? `<div style="color:var(--yellow);font-size:12px;margin-bottom:14px;">Atenção: não encontrei jogador compatível para ${team.missing_slots.join(', ')} neste filtro/cadastro.</div>` : ''}
+    ${team.missing_slots.length ? `<div style="color:var(--yellow);font-size:12px;margin-bottom:14px;">Atenção: faltou jogador para ${team.missing_slots.join(', ')}. Se houver menos de 11 no filtro, mude para TODOS ou ajuste o cadastro.</div>` : ''}
 
     <div class="section-title">Análise Tática</div>
     <button class="btn-primary" onclick="analyzeTeam()">Gerar Análise com IA</button>
@@ -4514,14 +4518,52 @@ function renderPlayerCharts(data) {
   const radarEl = document.getElementById('radarChart');
   if (radarEl) { const radarChart = new Chart(radarEl, {type:'radar', data:{labels:Object.keys(radar), datasets:[{data:Object.values(radar), borderColor:green, backgroundColor:'rgba(0,255,115,0.22)', pointBackgroundColor:green}]}, options:{responsive:false, maintainAspectRatio:false, animation:false, scales:{r:{min:0,max:100, ticks:{display:false}, grid:{color:grid}, angleLines:{color:grid}, pointLabels:{color:ticks}}}, plugins:{legend:{display:false}}}}); window.PLAYER_CHARTS.push(radarChart); }
 }
+function generateTeamAnalysisClient(team) {
+  const nl = String.fromCharCode(10);
+  const players = team.players || [];
+  const lines = players.map(p => `- **${p.role}** - ${p.name} (EA ${p.rating}, ${p.position}, encaixe ${p.fit})`).join(nl);
+  const byRole = {GK:0, DEF:0, MID:0, FWD:0};
+  players.forEach(p => { byRole[p.family] = (byRole[p.family] || 0) + 1; });
+  const avg = players.length ? (players.reduce((sum,p) => sum + Number(p.rating || 0), 0) / players.length).toFixed(2) : '-';
+  const improvised = players.filter(p => p.fit === 'improvisado');
+  const adapted = players.filter(p => p.fit === 'adaptado');
+  const missing = team.missing_slots || [];
+  return [
+    `## Time Ideal - Formação ${team.formation}`,
+    '',
+    '### Escalação',
+    lines || '- Nenhum jogador disponível no filtro atual.',
+    '',
+    '### Leitura do elenco',
+    `A escalação acima usa exatamente o time que está no campinho agora, com estatísticas somente do clube/filtro atual e respeitando posições manuais salvas no Cadastro. Média EA do XI: **${avg}**.`,
+    '',
+    '### Distribuição',
+    `- Goleiros: ${byRole.GK || 0}`,
+    `- Defensores: ${byRole.DEF || 0}`,
+    `- Meio-campistas: ${byRole.MID || 0}`,
+    `- Atacantes: ${byRole.FWD || 0}`,
+    '',
+    '### Pontos fortes',
+    '- Escolha baseada em nota média, encaixe por função e desempenho no clube pesquisado.',
+    '- Jogadores naturais foram priorizados nas posições mais sensíveis, especialmente GK e zaga.',
+    '- Ajustes manuais têm prioridade sobre a posição favorita da EA.',
+    '',
+    '### Alertas',
+    missing.length ? '- Faltou jogador compatível para: ' + missing.join(', ') : '- Nenhuma posição ficou sem jogador compatível.',
+    adapted.length ? '- Adaptados: ' + adapted.map(p => `${p.name} em ${p.role}`).join(', ') : '- Sem adaptações relevantes.',
+    improvised.length ? '- Improvisados: ' + improvised.map(p => `${p.name} em ${p.role}`).join(', ') : '- Sem improvisos críticos.',
+    '',
+    '### Recomendação prática',
+    'Use essa formação se quiser preservar encaixe e nota média. Se algum jogador aparecer fora da função real, corrija na aba **Cadastro**; essa correção passa a valer no campinho e nesta análise.'
+  ].join(nl);
+}
+
 async function analyzeTeam() {
   document.getElementById('modalContent').innerHTML = '<div class="loading"><div class="spinner"></div> Gerando análise do time ideal...</div>';
   document.getElementById('modal').classList.add('active');
-  
   try {
-    const r = await fetch('/api/ai/team?formation=' + encodeURIComponent(IDEAL_FORMATION));
-    const data = await r.json();
-    document.getElementById('modalContent').innerHTML = renderMarkdown(data.analysis);
+    const team = buildIdealTeamClient(IDEAL_FORMATION);
+    document.getElementById('modalContent').innerHTML = renderMarkdown(generateTeamAnalysisClient(team));
   } catch (e) {
     document.getElementById('modalContent').innerHTML = `<p style="color:var(--red);">Erro: ${e.message}</p>`;
   }
