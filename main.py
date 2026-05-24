@@ -2813,7 +2813,7 @@ body {
 .analytics-score .lab { font-size: 9px; letter-spacing: 1px; text-transform: uppercase; color: var(--text-2); }
 .analytics-cards {
   display: grid;
-  grid-template-columns: repeat(7, minmax(82px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(108px, 1fr));
   gap: 8px;
   margin: 16px 0;
 }
@@ -4558,11 +4558,29 @@ function renderPlayerDetailHTML(data) {
       <div class="analytics-cards">
         <div class="analytics-card"><div class="v">${avg.rating || '-'}</div><div class="l">Média EA</div></div>
         <div class="analytics-card"><div class="v">${avg.sofi_rating || '-'}</div><div class="l">Média Sofi</div></div>
+        <div class="analytics-card"><div class="v">${adv.analytic_score || 0}</div><div class="l">Final</div></div>
         <div class="analytics-card"><div class="v">${totals.goals || 0}</div><div class="l">Gols</div></div>
         <div class="analytics-card"><div class="v">${totals.assists || 0}</div><div class="l">Assist</div></div>
+        <div class="analytics-card"><div class="v">${(totals.goals || 0) + (totals.assists || 0)}</div><div class="l">G+A</div></div>
+        <div class="analytics-card"><div class="v">${avg.goals_per_game || 0}</div><div class="l">G/J</div></div>
+        <div class="analytics-card"><div class="v">${avg.assists_per_game || 0}</div><div class="l">A/J</div></div>
+        <div class="analytics-card"><div class="v">${totals.shots || 0}</div><div class="l">Chutes</div></div>
+        <div class="analytics-card"><div class="v">${avg.shots_per_game || 0}</div><div class="l">Chu/J</div></div>
+        <div class="analytics-card"><div class="v">${avg.passes_pct || 0}%</div><div class="l">Pass%</div></div>
+        <div class="analytics-card"><div class="v">${totals.tackles || 0}</div><div class="l">Desarmes</div></div>
+        <div class="analytics-card"><div class="v">${avg.tackle_pct || 0}%</div><div class="l">Des%</div></div>
+        <div class="analytics-card"><div class="v">${avg.tackles_per_game || 0}</div><div class="l">Des/J</div></div>
+        <div class="analytics-card"><div class="v">${totals.saves || 0}</div><div class="l">Defesas</div></div>
+        <div class="analytics-card"><div class="v">${avg.saves_per_game || 0}</div><div class="l">Def/J</div></div>
+        <div class="analytics-card"><div class="v">${totals.clean_sheets || 0}</div><div class="l">SG</div></div>
         <div class="analytics-card"><div class="v">${totals.moms || 0}</div><div class="l">MOMs</div></div>
         <div class="analytics-card"><div class="v">${adv.regularity || 0}%</div><div class="l">Regularidade</div></div>
-        <div class="analytics-card"><div class="v">${adv.analytic_score || 0}</div><div class="l">Final</div></div>
+        <div class="analytics-card"><div class="v">${adv.consistency || 0}</div><div class="l">Consist.</div></div>
+        <div class="analytics-card"><div class="v">${adv.offensive_impact || 0}</div><div class="l">Impacto Of.</div></div>
+        <div class="analytics-card"><div class="v">${adv.defensive_impact || 0}</div><div class="l">Impacto Def.</div></div>
+        <div class="analytics-card"><div class="v">${adv.clutch_score || 0}</div><div class="l">Clutch</div></div>
+        <div class="analytics-card"><div class="v">${adv.risk || 0}</div><div class="l">Risco</div></div>
+        <div class="analytics-card"><div class="v">${totals.red_cards || 0}</div><div class="l">Vermelhos</div></div>
       </div>
 
       <div class="analytics-grid">
@@ -4592,12 +4610,12 @@ function renderPlayerDetailHTML(data) {
       <div class="section-title" style="margin-top:18px;">Últimas ${h.length} Partidas</div>
       ${h.length === 0 ? '<div style="color:var(--text-2);padding:20px;text-align:center;">Nenhuma partida com participação registrada.</div>' : `
       <table class="history-table">
-        <thead><tr><th>Data</th><th>Tipo</th><th>Adversário</th><th>Resultado</th><th>Pos</th><th>Sofi</th><th>EA</th><th>G</th><th>A</th><th>Chu</th><th>P%</th><th>D%</th><th>MOM</th></tr></thead>
+        <thead><tr><th>Data</th><th>Tipo</th><th>Adversário</th><th>Resultado</th><th>Pos</th><th>Sofi</th><th>EA</th><th>G</th><th>A</th><th>Chu</th><th>Pass%</th><th>Des%</th><th>Des</th><th>Def</th><th>SG</th><th>Verm</th><th>MOM</th></tr></thead>
         <tbody>
           ${h.map(x => `<tr>
             <td>${x.date}</td><td><span class="tag ${x.match_type}">${x.match_type}</span></td><td>${x.opponent}</td>
             <td><span class="tag ${x.result.toLowerCase()}">${x.result} ${x.score}</span></td><td>${x.position}</td>
-            <td><span class="sofi">${x.sofi_rating}</span></td><td>${x.rating}</td><td>${x.goals}</td><td>${x.assists}</td><td>${x.shots}</td><td>${x.pass_pct}%</td><td>${x.tackle_pct}%</td><td>${x.mom ? '⭐' : ''}</td>
+            <td><span class="sofi">${x.sofi_rating}</span></td><td>${x.rating}</td><td>${x.goals}</td><td>${x.assists}</td><td>${x.shots}</td><td>${x.pass_pct}%</td><td>${x.tackle_pct}%</td><td>${x.tackles_made || 0}</td><td>${x.saves || 0}</td><td>${x.clean_sheet || 0}</td><td>${x.red || 0}</td><td>${x.mom ? '⭐' : ''}</td>
           </tr>`).join('')}
         </tbody>
       </table>`}
