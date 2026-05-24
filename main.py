@@ -3493,7 +3493,7 @@ function render() {
         <div class="club-shield">🛡️</div>
         <div>
           <div class="club-name">${DATA.club.name}</div>
-          <div class="club-meta">${DATA.players?.length || 0} jogadores · ${DATA.matches?.length || 0} partidas</div>
+          <div class="club-meta">${computePlayersForMatches(DATA.matches || []).length} jogadores com partidas no clube · ${DATA.matches?.length || 0} partidas</div>
         </div>
       </div>
     </div>
@@ -3569,10 +3569,27 @@ function computeStatsFor(matches) {
   return out;
 }
 
+function calcOpponentAvgClient(matches) {
+  const byOpp = {};
+  (matches || []).forEach(m => {
+    const opp = m.opponent || 'Adversário';
+    if (!byOpp[opp]) byOpp[opp] = {games:0, gf:0, ga:0};
+    byOpp[opp].games += 1;
+    byOpp[opp].gf += Number(m.goals_for || 0);
+    byOpp[opp].ga += Number(m.goals_against || 0);
+  });
+  return Object.entries(byOpp).map(([opponent, d]) => ({
+    opponent,
+    games: d.games,
+    avg_gf: +(d.gf / Math.max(d.games, 1)).toFixed(1),
+    avg_ga: +(d.ga / Math.max(d.games, 1)).toFixed(1),
+  })).sort((a,b) => b.avg_gf - a.avg_gf).slice(0, 10);
+}
+
 function renderVisao() {
   const matches = filteredMatches();
-  const useFiltered = CURRENT_PERIOD !== 'todos' || CURRENT_MATCH_TYPE !== 'todos';
-  const s = useFiltered ? computeStatsFor(matches) : (DATA.stats || {});
+  const playersInClub = computePlayersForMatches(matches);
+  const s = computeStatsFor(matches);
   const wr = s.win_rate || 0;
   const passPct = 80; // calc from data if available
   const tackPct = 21;
@@ -3634,59 +3651,45 @@ function renderVisao() {
     </div>
   `;
   
-  // MVP
-  if (DATA.mvp) {
-    const m = DATA.mvp;
+  // MVP calculado somente pelas partidas do clube/filtro atual
+  const m = playersInClub.length ? [...playersInClub].sort((a,b) => {
+    const scoreA = Number(a.mom || 0) * 25 + Number(a.rating || 0) * 10 + Number(a.goals || 0) * 1.5 + Number(a.assists || 0);
+    const scoreB = Number(b.mom || 0) * 25 + Number(b.rating || 0) * 10 + Number(b.goals || 0) * 1.5 + Number(b.assists || 0);
+    return scoreB - scoreA;
+  })[0] : null;
+  if (m) {
     html += `
-      <div class="section-title">🏆 MVP da Semana</div>
+      <div class="section-title">🏆 MVP do Clube no Filtro</div>
       <div class="mvp-card">
         <div class="mvp-badge">M.V.P.</div>
         <div class="mvp-rating">${m.rating}</div>
         <div class="mvp-info">
           <div class="mvp-name">${m.name}</div>
-          <div class="mvp-meta">${m.position} · ${m.games} jogos</div>
+          <div class="mvp-meta">${m.position} · ${m.games} jogos no clube/filtro</div>
           <div class="mvp-stats">
-            <div class="mvp-stat">
-              <div class="mvp-stat-value">${m.goals}</div>
-              <div class="mvp-stat-label">Gols</div>
-            </div>
-            <div class="mvp-stat">
-              <div class="mvp-stat-value">${m.assists}</div>
-              <div class="mvp-stat-label">Assist</div>
-            </div>
-            <div class="mvp-stat">
-              <div class="mvp-stat-value">${m.mom}</div>
-              <div class="mvp-stat-label">MOM</div>
-            </div>
-            <div class="mvp-stat">
-              <div class="mvp-stat-value">${m.pass_pct}%</div>
-              <div class="mvp-stat-label">Pass%</div>
-            </div>
+            <div class="mvp-stat"><div class="mvp-stat-value">${m.goals}</div><div class="mvp-stat-label">Gols</div></div>
+            <div class="mvp-stat"><div class="mvp-stat-value">${m.assists}</div><div class="mvp-stat-label">Assist</div></div>
+            <div class="mvp-stat"><div class="mvp-stat-value">${m.mom}</div><div class="mvp-stat-label">MOM</div></div>
+            <div class="mvp-stat"><div class="mvp-stat-value">${m.pass_pct}%</div><div class="mvp-stat-label">Pass%</div></div>
           </div>
         </div>
       </div>
     `;
   }
   
-  // Média de gols por adversário
-  if (DATA.opponents && DATA.opponents.length) {
+  const opponentsForFilter = calcOpponentAvgClient(matches);
+  if (opponentsForFilter.length) {
     html += `
       <div class="section-title">📊 Média de Gols por Adversário</div>
       <div class="opponents-list">
     `;
-    DATA.opponents.forEach(o => {
+    opponentsForFilter.forEach(o => {
       html += `
         <div class="opp-row">
           <div class="opp-name">${o.opponent}<span class="opp-name-small">${o.games}j</span></div>
           <div class="opp-stats">
-            <div class="opp-stat">
-              <span class="opp-stat-val green">${o.avg_gf}</span>
-              <span class="opp-stat-label">PRO</span>
-            </div>
-            <div class="opp-stat">
-              <span class="opp-stat-val red">${o.avg_ga}</span>
-              <span class="opp-stat-label">SOF</span>
-            </div>
+            <div class="opp-stat"><span class="opp-stat-val green">${o.avg_gf}</span><span class="opp-stat-label">PRO</span></div>
+            <div class="opp-stat"><span class="opp-stat-val red">${o.avg_ga}</span><span class="opp-stat-label">SOF</span></div>
           </div>
         </div>
       `;
@@ -4126,8 +4129,8 @@ async function saveProfileFromRow(name) {
 }
 
 function renderTimeIdeal() {
-  if (!DATA.players || !DATA.players.length) {
-    return '<div class="empty-state">Sincronize jogadores para montar o time ideal</div>';
+  if (!scopedPlayers().length) {
+    return '<div class="empty-state">Nenhum jogador com partidas neste clube/filtro para montar o time ideal</div>';
   }
 
   const team = buildIdealTeamClient(IDEAL_FORMATION);
