@@ -2236,6 +2236,220 @@ def update_player_profile(player_name: str, item: PlayerProfileUpdate):
     }
 
 
+
+# ============================================================
+# ADVERSARIOS - SCOUT PRE-JOGO
+# ============================================================
+
+class OpponentScoutRequest(BaseModel):
+    names: List[str]
+    platform: str = "auto"
+
+
+def _num(value, default=0.0):
+    try:
+        if value is None or value == "":
+            return default
+        return float(value)
+    except Exception:
+        return default
+
+
+def _int_num(value, default=0):
+    try:
+        if value is None or value == "":
+            return default
+        return int(float(value))
+    except Exception:
+        return default
+
+
+def _light_fetch_opponent_matches(club_id: str, platform: str):
+    """Busca leve para scouting de adversario, sem afetar o historico do clube principal."""
+    raw = []
+    debug = []
+    seen = set()
+    for mt in ("leagueMatch", "playoffMatch", "friendlyMatch"):
+        try:
+            data = ea_client.matches(club_id, mt, platform, max_count=20)
+            count = len(data) if isinstance(data, list) else 0
+            debug.append({"matchType": mt, "count": count, "ok": isinstance(data, list)})
+            if isinstance(data, list):
+                for item in data:
+                    if not isinstance(item, dict):
+                        continue
+                    key = stable_match_id_for_storage(item, club_id)
+                    if key in seen:
+                        continue
+                    seen.add(key)
+                    item["_origin"] = mt
+                    raw.append(item)
+        except Exception as e:
+            debug.append({"matchType": mt, "count": 0, "ok": False, "error": f"{type(e).__name__}: {e}"})
+            print(f"[ADVERSARIOS] Erro ao buscar {mt} de {club_id}: {type(e).__name__}: {e}")
+    return raw, debug
+
+
+def _infer_opponent_style(stats: dict, players: list, matches: list):
+    gf = _num(stats.get("goals_per_match"), 0)
+    ga = round(_num(stats.get("goals_against"), 0) / max(_int_num(stats.get("matches_played"), 0), 1), 2)
+    wr = _num(stats.get("win_rate"), 0)
+    clean = _int_num(stats.get("clean_sheets"), 0)
+    top_goals = sum(_int_num(p.get("goals"), 0) for p in (players or [])[:5])
+    top_assists = sum(_int_num(p.get("assists"), 0) for p in (players or [])[:5])
+    if gf >= 3.2 and top_goals >= top_assists:
+        style = "Ofensivo direto"
+    elif top_assists > top_goals and gf >= 2.2:
+        style = "Criação e passe"
+    elif clean >= max(2, len(matches) // 4) and ga <= 1.5:
+        style = "Bloco sólido"
+    elif gf >= 2.5 and ga >= 2.5:
+        style = "Trocação aberta"
+    elif wr >= 60:
+        style = "Competitivo equilibrado"
+    else:
+        style = "Irregular / reativo"
+    return style, ga
+
+
+def _opponent_grade(stats: dict, players: list, goals_against_avg: float):
+    wr = _num(stats.get("win_rate"), 0)
+    gf = _num(stats.get("goals_per_match"), 0)
+    gd = _num(stats.get("goal_diff"), 0) / max(_int_num(stats.get("matches_played"), 0), 1)
+    avg_rating = 0
+    if players:
+        avg_rating = sum(_num(p.get("rating"), 0) for p in players[:8]) / max(len(players[:8]), 1)
+    grade = (wr * 0.38) + (min(gf, 5) * 10) + (max(min(gd, 4), -4) * 5) + (avg_rating * 5) - (goals_against_avg * 4)
+    grade = max(0, min(100, round(grade, 1)))
+    if grade >= 82:
+        rank = "S"
+    elif grade >= 70:
+        rank = "A"
+    elif grade >= 58:
+        rank = "B"
+    elif grade >= 45:
+        rank = "C"
+    else:
+        rank = "D"
+    return grade, rank
+
+
+def _build_opponent_strategy(stats: dict, players: list, style: str, ga_avg: float):
+    strengths = []
+    weaknesses = []
+    strategy = []
+    gf = _num(stats.get("goals_per_match"), 0)
+    wr = _num(stats.get("win_rate"), 0)
+    clean = _int_num(stats.get("clean_sheets"), 0)
+    if wr >= 60:
+        strengths.append("bom aproveitamento recente")
+    if gf >= 3:
+        strengths.append("alto volume de gols")
+    if clean >= 2:
+        strengths.append("consegue jogos sem sofrer gol")
+    if players:
+        p = players[0]
+        strengths.append(f"jogador destaque: {p.get('name')} ({p.get('rating')})")
+    if not strengths:
+        strengths.append("time ainda sem padrão forte detectado nos dados recentes")
+    if ga_avg >= 2.5:
+        weaknesses.append("cede muitas chances e sofre muitos gols")
+    if gf < 1.5:
+        weaknesses.append("baixo poder ofensivo recente")
+    if wr < 40:
+        weaknesses.append("oscilação de resultados")
+    if not weaknesses:
+        weaknesses.append("não há fraqueza gritante nos dados recentes")
+    if style in ("Ofensivo direto", "Trocação aberta"):
+        strategy.append("evitar perder bola no meio e atacar o espaço nas costas")
+        strategy.append("baixar a exposição dos zagueiros nos primeiros minutos")
+    elif style == "Bloco sólido":
+        strategy.append("circular a bola com paciência e buscar inversões rápidas")
+        strategy.append("forçar finalizações de média distância e rebotes")
+    elif style == "Criação e passe":
+        strategy.append("pressionar o armador e cortar linhas de passe por dentro")
+        strategy.append("não deixar o meia receber de frente")
+    else:
+        strategy.append("começar pressionando para testar a saída de bola")
+        strategy.append("manter posse e atrair erro antes de acelerar")
+    return strengths, weaknesses, "; ".join(strategy) + "."
+
+
+def build_opponent_scout(club_name: str, platform: str = "auto"):
+    name = (club_name or "").strip()
+    if not name:
+        return {"name": club_name, "found": False, "error": "Nome vazio"}
+    try:
+        search = ea_client.search_club(name, platform)
+        if not search.get("success"):
+            print(f"[ADVERSARIOS] Clube nao encontrado: {name}")
+            return {"name": name, "found": False, "error": "Clube nao encontrado"}
+        club_id = str(search.get("clubId"))
+        plat = search.get("platform") or platform or "common-gen5"
+        real_name = search.get("name") or name
+        overall = ea_client.overall_stats(club_id, plat)
+        members = ea_client.members(club_id, plat)
+        players = parse_players(members)[:5]
+        raw_matches, debug = _light_fetch_opponent_matches(club_id, plat)
+        matches = parse_matches(raw_matches, club_id)
+        stats = calc_club_stats(overall, {}, matches)
+        if not stats.get("matches_played") and matches:
+            stats = calc_club_stats([], {}, matches)
+        style, ga_avg = _infer_opponent_style(stats, players, matches)
+        grade, rank = _opponent_grade(stats, players, ga_avg)
+        strengths, weaknesses, strategy = _build_opponent_strategy(stats, players, style, ga_avg)
+        return {
+            "name": real_name,
+            "searched_name": name,
+            "found": True,
+            "club_id": club_id,
+            "platform": plat,
+            "grade": grade,
+            "rank": rank,
+            "style": style,
+            "stats": {
+                "matches": _int_num(stats.get("matches_played"), len(matches)),
+                "wins": _int_num(stats.get("wins"), 0),
+                "draws": _int_num(stats.get("draws"), 0),
+                "losses": _int_num(stats.get("losses"), 0),
+                "win_rate": _num(stats.get("win_rate"), 0),
+                "goals_for": _int_num(stats.get("goals_for"), 0),
+                "goals_against": _int_num(stats.get("goals_against"), 0),
+                "goal_diff": _int_num(stats.get("goal_diff"), 0),
+                "goals_per_match": _num(stats.get("goals_per_match"), 0),
+                "goals_against_per_match": ga_avg,
+                "clean_sheets": _int_num(stats.get("clean_sheets"), 0),
+            },
+            "top_players": players,
+            "strengths": strengths,
+            "weaknesses": weaknesses,
+            "strategy": strategy,
+            "debug": debug,
+        }
+    except Exception as e:
+        print(f"[ADVERSARIOS] Erro ao analisar {name}: {type(e).__name__}: {e}")
+        return {"name": name, "found": False, "error": f"{type(e).__name__}: {e}"}
+
+
+@app.post("/api/opponents/scout")
+def scout_opponents(req: OpponentScoutRequest):
+    names = []
+    seen = set()
+    for raw in req.names or []:
+        nm = (raw or "").strip()
+        if not nm:
+            continue
+        key = nm.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        names.append(nm)
+    names = names[:5]
+    if not names:
+        raise HTTPException(400, "Informe pelo menos um clube adversario")
+    results = [build_opponent_scout(nm, req.platform) for nm in names]
+    return {"count": len(results), "opponents": results}
+
 # ============================================================
 # AGENDA - CRUD
 # ============================================================
@@ -3636,6 +3850,32 @@ body {
 .mini-insight .k { color: var(--text-2); font-size: 10px; text-transform: uppercase; letter-spacing: 1px; }
 .mini-insight .v { color: var(--text); font-weight: 700; margin-top: 3px; }
 
+
+/* OPPONENT SCOUT */
+.opponent-form { background: var(--bg-card); border: 1px solid var(--border); border-radius: 12px; padding: 16px; margin-bottom: 18px; display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; }
+.opponent-form input { background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: 8px; padding: 11px 12px; font-size: 13px; font-family: inherit; min-width: 0; }
+.opponent-form .full { grid-column: 1 / -1; display:flex; justify-content:flex-end; gap:10px; flex-wrap:wrap; }
+.opponent-results { display:grid; gap:14px; }
+.opponent-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: 12px; padding: 16px; }
+.opponent-head { display:flex; align-items:flex-start; justify-content:space-between; gap:12px; margin-bottom:12px; }
+.opponent-name { font-size:20px; font-weight:900; letter-spacing:.5px; }
+.opponent-style { color:var(--text-2); font-size:12px; margin-top:3px; }
+.opponent-grade { min-width:74px; height:74px; border:2px solid var(--green); border-radius:50%; display:flex; flex-direction:column; align-items:center; justify-content:center; color:var(--green); box-shadow:0 0 18px var(--green-dim); }
+.opponent-grade .rank { font-size:24px; font-weight:900; line-height:1; }
+.opponent-grade .score { font-size:10px; color:var(--text-2); letter-spacing:1px; margin-top:3px; }
+.opponent-table-wrap { overflow-x:auto; border:1px solid var(--border); border-radius:10px; margin:12px 0; }
+.opponent-table { width:100%; min-width:760px; border-collapse:collapse; font-size:12px; }
+.opponent-table th { text-align:left; color:var(--text-2); font-size:10px; letter-spacing:1.5px; text-transform:uppercase; padding:9px 10px; border-bottom:1px solid var(--border); }
+.opponent-table td { padding:10px; border-bottom:1px solid rgba(255,255,255,0.04); vertical-align:top; }
+.opponent-table tr:last-child td { border-bottom:none; }
+.scout-pill { display:inline-block; padding:3px 8px; border-radius:999px; background:var(--green-dim); color:var(--green); border:1px solid rgba(0,255,115,.25); font-size:10px; font-weight:800; letter-spacing:1px; text-transform:uppercase; }
+.scout-cols { display:grid; grid-template-columns:1fr 1fr 1.4fr; gap:12px; }
+.scout-box { background:rgba(255,255,255,0.025); border:1px solid var(--border); border-radius:10px; padding:12px; min-height:96px; }
+.scout-box h4 { color:var(--green); font-size:11px; text-transform:uppercase; letter-spacing:2px; margin-bottom:8px; }
+.scout-box ul { padding-left:17px; color:var(--text-2); font-size:12px; line-height:1.5; }
+.scout-box p { color:var(--text-2); font-size:12px; line-height:1.55; }
+@media (max-width: 900px) { .opponent-form { grid-template-columns:1fr 1fr; } .scout-cols { grid-template-columns:1fr; } }
+@media (max-width: 560px) { .opponent-form { grid-template-columns:1fr; } .opponent-head { align-items:center; } .opponent-grade { min-width:64px; height:64px; } }
 /* AGENDA */
 .agenda-form {
   background: var(--bg-card);
@@ -4063,6 +4303,7 @@ let PLAYER_PROFILES = {};
 let COMPARE_A = null;
 let COMPARE_B = null;
 let AGENDA = [];
+let OPPONENT_SCOUTS = [];
 let AGENDA_EDIT_ID = null;
 let IDEAL_FORMATION = '3-5-2';
 
@@ -4401,6 +4642,7 @@ function render() {
       <div class="tab ${CURRENT_TAB==='time-ideal'?'active':''}" onclick="setTab('time-ideal')">TIME IDEAL</div>
       <div class="tab ${CURRENT_TAB==='cadastro'?'active':''}" onclick="setTab('cadastro')">CADASTRO</div>
       <div class="tab ${CURRENT_TAB==='playstyles'?'active':''}" onclick="setTab('playstyles')">ESTILOS</div>
+      <div class="tab ${CURRENT_TAB==='adversarios'?'active':''}" onclick="setTab('adversarios')">ADVERSÁRIOS</div>
       <div class="tab ${CURRENT_TAB==='agenda'?'active':''}" onclick="setTab('agenda')">AGENDA</div>
     </div>
     
@@ -4446,6 +4688,7 @@ function renderTab() {
   else if (CURRENT_TAB === 'time-ideal') tc.innerHTML = renderTimeIdeal();
   else if (CURRENT_TAB === 'cadastro') tc.innerHTML = renderCadastroJogadores();
   else if (CURRENT_TAB === 'playstyles') tc.innerHTML = renderPlaystyles();
+  else if (CURRENT_TAB === 'adversarios') tc.innerHTML = renderAdversarios();
   else if (CURRENT_TAB === 'agenda') tc.innerHTML = renderAgenda();
 }
 
@@ -5211,7 +5454,7 @@ function suggestBuildRecipe(position, text) {
       why: 'A prioridade é evitar gols primeiro, mas sem virar um goleiro passivo. Os principais aumentam reação, cobertura e saída; os complementares ajudam reposição, controle e segurança em bola aérea.'
     },
     zagueiro: {
-      archetype: /sair|constru|passe|veloc|cobertura/.test(t) ? 'Líbero' : /fisic|area|aereo|muralha/.test(t) ? 'Muralha' : 'Chefia',
+      archetype: 'Chefia',
       main: ['Antecipação','Interceptação','Bloqueio'],
       silver: ['Jogo Aéreo','Contenção','Brigador','Carrinho','Incansável','Passe Pingado','Lançamento Longo','Resistente à Pressão'],
       why: 'Para zagueiro útil, o mais importante é cortar jogada antes do chute. Os três principais melhoram bote, leitura de passe e bloqueio; os oito de apoio dão físico, saída simples e fôlego.'
@@ -5254,7 +5497,37 @@ function suggestBuildRecipe(position, text) {
     }
   };
 
-  const recipe = recipes[role] || recipes.equilibrado;
+  let recipe = recipes[role] || recipes.equilibrado;
+  if (role === 'zagueiro') {
+    const wantsAerialWall = /a[eé]re|area|aereo|altura|cabe[cç]|for[cç]a|combate|fisic|disputa|duelo|muralha/.test(t);
+    const wantsBuildUp = /sair jogando|sa[ií]da|constru|passe|lan[cç]amento|virada|bola longa/.test(t);
+    const wantsChief = /chefia|lider|xerife|comando|capitao|capit[aã]o|organiza/.test(t);
+    if (wantsAerialWall) {
+      recipe = {
+        ...recipe,
+        archetype: 'Muralha',
+        main: ['Jogo Aéreo','Antecipação','Brigador'],
+        silver: ['Bloqueio','Interceptação','Contenção','Carrinho','Incansável','Passe Pingado','Lançamento Longo','Resistente à Pressão'],
+        why: 'O texto descreve um zagueiro forte para duelos, jogo aéreo nas duas áreas, desarme e combate físico. Por isso a base é Muralha: primeiro ganhar confronto e proteger a área; os estilos de passe entram como apoio para sair jogando sem perder a identidade defensiva.'
+      };
+    } else if (wantsBuildUp) {
+      recipe = {
+        ...recipe,
+        archetype: 'Líbero',
+        main: ['Antecipação','Passe Pingado','Lançamento Longo'],
+        silver: ['Jogo Aéreo','Bloqueio','Interceptação','Contenção','Brigador','Carrinho','Incansável','Resistente à Pressão'],
+        why: 'O texto pede um zagueiro que participa da saída. Por isso a base é Líbero: manter leitura defensiva, mas ganhar passe rasteiro forte e bola longa para iniciar ataques com segurança.'
+      };
+    } else if (wantsChief) {
+      recipe = {
+        ...recipe,
+        archetype: 'Chefia',
+        main: ['Antecipação','Interceptação','Bloqueio'],
+        silver: ['Jogo Aéreo','Contenção','Brigador','Carrinho','Incansável','Passe Pingado','Lançamento Longo','Resistente à Pressão'],
+        why: 'O texto aponta para um zagueiro de comando. Chefia prioriza leitura, organização da linha, interceptação e bloqueio antes de qualquer luxo com a bola.'
+      };
+    }
+  }
   const mainNames = uniqueStyleNames(recipe.main).slice(0, 3);
   const silverNames = uniqueStyleNames([...recipe.silver, ...Object.values(recipes).flatMap(r => r.silver)]).filter(x => !mainNames.includes(x)).slice(0, 8);
   const archetype = findArchetype(recipe.archetype);
@@ -5409,6 +5682,63 @@ function renderTimeIdeal() {
     <div class="section-title">Análise Tática</div>
     <button class="btn-primary" onclick="analyzeTeam()">Gerar Análise com IA</button>
   `;
+}
+
+function renderAdversarios() {
+  const results = renderOpponentScouts();
+  return `
+    <div class="section-title">Próximos Adversários</div>
+    <div style="color:var(--text-2);font-size:12px;line-height:1.5;margin-bottom:12px;">Cadastre até 5 clubes rivais para uma leitura rápida: força do time, estilo provável, principais jogadores, pontos fortes/fracos e plano de jogo.</div>
+    <div class="opponent-form">
+      <input class="opp-scout-input" type="text" placeholder="Clube adversário 1">
+      <input class="opp-scout-input" type="text" placeholder="Clube adversário 2">
+      <input class="opp-scout-input" type="text" placeholder="Clube adversário 3">
+      <input class="opp-scout-input" type="text" placeholder="Clube adversário 4">
+      <input class="opp-scout-input" type="text" placeholder="Clube adversário 5">
+      <div class="full"><button type="button" class="btn-primary" id="oppScoutBtn" onclick="scoutOpponents()">Analisar adversários</button></div>
+    </div>
+    <div id="opponentScoutStatus" style="color:var(--text-2);font-size:12px;margin-bottom:10px;"></div>
+    <div id="opponentScoutResults" class="opponent-results">${results}</div>
+  `;
+}
+
+function renderOpponentScouts() {
+  if (!OPPONENT_SCOUTS || !OPPONENT_SCOUTS.length) return '<div class="empty-state" style="padding:44px 20px;"><div class="empty-text">Nenhum adversário analisado ainda.</div></div>';
+  return OPPONENT_SCOUTS.map(o => {
+    if (!o.found) return `<div class="opponent-card"><div class="opponent-name">${escapeAttr(o.name || 'Clube')}</div><div class="empty-text" style="margin-top:6px;">${escapeAttr(o.error || 'Não encontrado')}</div></div>`;
+    const s = o.stats || {};
+    const top = (o.top_players || []).slice(0, 5).map((p, i) => `${i+1}. ${escapeAttr(p.name)} (${escapeAttr(p.position || '-')}) · nota ${escapeAttr(p.rating)} · ${escapeAttr(p.goals || 0)}G/${escapeAttr(p.assists || 0)}A`).join('<br>') || 'Sem jogadores retornados pela EA';
+    const strengths = (o.strengths || []).map(x => `<li>${escapeAttr(x)}</li>`).join('');
+    const weaknesses = (o.weaknesses || []).map(x => `<li>${escapeAttr(x)}</li>`).join('');
+    return `
+      <div class="opponent-card">
+        <div class="opponent-head"><div><div class="opponent-name">${escapeAttr(o.name)}</div><div class="opponent-style"><span class="scout-pill">${escapeAttr(o.style)}</span> · ID ${escapeAttr(o.club_id)} · ${escapeAttr(o.platform)}</div></div><div class="opponent-grade"><div class="rank">${escapeAttr(o.rank)}</div><div class="score">${escapeAttr(o.grade)}/100</div></div></div>
+        <div class="opponent-table-wrap"><table class="opponent-table"><thead><tr><th>Jogos</th><th>V/E/D</th><th>Win</th><th>Gols</th><th>G/J</th><th>Sofre/J</th><th>Saldo</th><th>Top 5 jogadores</th></tr></thead><tbody><tr><td>${escapeAttr(s.matches || 0)}</td><td>${escapeAttr(s.wins || 0)} / ${escapeAttr(s.draws || 0)} / ${escapeAttr(s.losses || 0)}</td><td>${escapeAttr(s.win_rate || 0)}%</td><td>${escapeAttr(s.goals_for || 0)}-${escapeAttr(s.goals_against || 0)}</td><td>${escapeAttr(s.goals_per_match || 0)}</td><td>${escapeAttr(s.goals_against_per_match || 0)}</td><td>${escapeAttr(s.goal_diff || 0)}</td><td>${top}</td></tr></tbody></table></div>
+        <div class="scout-cols"><div class="scout-box"><h4>Pontos fortes</h4><ul>${strengths}</ul></div><div class="scout-box"><h4>Pontos fracos</h4><ul>${weaknesses}</ul></div><div class="scout-box"><h4>Estratégia sugerida</h4><p>${escapeAttr(o.strategy || '')}</p></div></div>
+      </div>`;
+  }).join('');
+}
+
+async function scoutOpponents() {
+  const names = Array.from(document.querySelectorAll('.opp-scout-input')).map(i => i.value.trim()).filter(Boolean).slice(0, 5);
+  const status = document.getElementById('opponentScoutStatus');
+  const btn = document.getElementById('oppScoutBtn');
+  if (!names.length) { if (status) status.textContent = 'Informe pelo menos um clube adversário.'; return; }
+  if (status) status.textContent = 'Buscando clubes na EA e montando scouting...';
+  if (btn) { btn.disabled = true; btn.textContent = 'Analisando...'; }
+  try {
+    const r = await fetch('/api/opponents/scout', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({names, platform: 'auto'}) });
+    if (!r.ok) throw new Error('Erro ao analisar adversários');
+    const data = await r.json();
+    OPPONENT_SCOUTS = data.opponents || [];
+    const target = document.getElementById('opponentScoutResults');
+    if (target) target.innerHTML = renderOpponentScouts();
+    if (status) status.textContent = `${OPPONENT_SCOUTS.length} adversário(s) analisado(s).`;
+  } catch (e) {
+    if (status) status.textContent = 'Erro: ' + e.message;
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = 'Analisar adversários'; }
+  }
 }
 function renderAgenda() {
   return `
@@ -5949,6 +6279,13 @@ if __name__ == "__main__":
     print("="*60 + "\n")
     
     uvicorn.run(app, host="0.0.0.0", port=8000)
+
+
+
+
+
+
+
 
 
 
