@@ -2161,9 +2161,11 @@ def build_player_analytics(player_name, cache, match_type="todos"):
     player_club = next((p for p in club_players if p.get("name", "").lower() == pname), None)
     if player_club:
         base_player = player or {"name": player_club.get("name", player_name), "position": player_club.get("position", "?"), "rating": player_club.get("rating", 0)}
-        player = {**base_player, **player_club, "ea_global_games": base_player.get("games"), "club_games": player_club.get("games", 0)}
+        member_stats = dict(base_player)
+        player = {**base_player, **player_club, "member_stats": member_stats, "ea_global_games": base_player.get("games"), "club_games": player_club.get("games", 0)}
     elif player:
-        player = {**player, "games": 0, "club_games": 0, "ea_global_games": player.get("games")}
+        member_stats = dict(player)
+        player = {**player, "member_stats": member_stats, "games": 0, "club_games": 0, "ea_global_games": player.get("games")}
     else:
         raise HTTPException(404, f"Jogador '{player_name}' sem partidas no clube/filtro atual")
 
@@ -2242,30 +2244,32 @@ def build_player_analytics(player_name, cache, match_type="todos"):
     club_total_games = int(float(player.get("ea_global_games") or player.get("games") or detail_games or 0))
     use_member_totals = wanted_match_type == "todos" and club_total_games > detail_games
     if use_member_totals:
+        member = player.get("member_stats") or player
         analytics["club_total_games"] = club_total_games
         analytics["detail_games"] = detail_games
         analytics["uses_member_totals"] = True
         analytics["display_averages"] = {
-            "rating": round(float(player.get("rating", 0) or 0), 2),
-            "sofi_rating": round(float(analytics["averages"].get("sofi_rating", player.get("rating", 0)) or player.get("rating", 0) or 0), 2),
-            "goals_per_game": round(float(player.get("goals_per_game", 0) or 0), 2),
-            "assists_per_game": round(float(player.get("assists_per_game", 0) or 0), 2),
-            "shots_per_game": round(float(player.get("shots", 0) or 0) / max(club_total_games, 1), 2),
-            "passes_pct": round(float(player.get("pass_pct", 0) or 0), 1),
-            "tackle_pct": round(float(player.get("tackle_pct", 0) or 0), 1),
-            "tackles_per_game": round(float(player.get("tackles_made", 0) or 0) / max(club_total_games, 1), 2),
+            "rating": round(float(member.get("rating", player.get("rating", 0)) or 0), 2),
+            "sofi_rating": round(float(analytics["averages"].get("sofi_rating", member.get("rating", 0)) or member.get("rating", 0) or 0), 2),
+            "goals_per_game": round(float(member.get("goals_per_game", 0) or 0), 2),
+            "assists_per_game": round(float(member.get("assists_per_game", 0) or 0), 2),
+            "shots_per_game": round(float(member.get("shots", 0) or 0) / max(club_total_games, 1), 2),
+            "passes_pct": round(float(member.get("pass_pct", 0) or 0), 1),
+            "tackle_pct": round(float(member.get("tackle_pct", 0) or 0), 1),
+            "tackles_per_game": round(float(member.get("tackles_made", 0) or 0) / max(club_total_games, 1), 2),
             "saves_per_game": round(float(analytics["totals"].get("saves", 0) or 0) / max(detail_games, 1), 2) if detail_games else 0,
         }
         analytics["display_totals"] = {
-            "goals": int(player.get("goals", 0) or 0),
-            "assists": int(player.get("assists", 0) or 0),
-            "shots": int(player.get("shots", 0) or 0),
-            "tackles": int(player.get("tackles_made", 0) or 0),
-            "moms": int(player.get("mom", 0) or 0),
+            "goals": int(member.get("goals", 0) or 0),
+            "assists": int(member.get("assists", 0) or 0),
+            "shots": int(member.get("shots", 0) or 0),
+            "tackles": int(member.get("tackles_made", 0) or 0),
+            "moms": int(member.get("mom", 0) or 0),
             "red_cards": int(analytics["totals"].get("red_cards", 0) or 0),
             "clean_sheets": int(analytics["totals"].get("clean_sheets", 0) or 0),
             "saves": int(analytics["totals"].get("saves", 0) or 0),
         }
+        analytics["member_stats_used"] = True
     else:
         analytics["club_total_games"] = detail_games
         analytics["detail_games"] = detail_games
@@ -7042,6 +7046,9 @@ if __name__ == "__main__":
     print("="*60 + "\n")
     
     uvicorn.run(app, host="0.0.0.0", port=8000)
+
+
+
 
 
 
