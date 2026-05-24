@@ -5870,11 +5870,14 @@ function renderCompareBars() {
 }
 
 function renderConfrontos() {
-  const matches = filteredMatches();
+  // Confrontos usa o histórico completo salvo do tipo selecionado.
+  // O filtro de período continua valendo para Visão, mas aqui não corta em Últ.5/Últ.10.
+  const matches = playerStatMatches();
   if (!matches.length) {
-    return '<div class="empty-state">Nenhuma partida no período selecionado</div>';
+    return '<div class="empty-state">Nenhuma partida salva para este tipo de partida</div>';
   }
-  let html = '<div class="confronts-grid">';
+  const scope = CURRENT_MATCH_TYPE === 'todos' ? 'todas as partidas salvas do clube' : 'todas as partidas salvas de ' + CURRENT_MATCH_TYPE;
+  let html = `<div class="section-title">Confrontos · ${scope}</div><div class="confronts-grid">`;
   matches.forEach(m => {
     const top = (m.players_ratings || [])[0];
     html += `
@@ -6757,8 +6760,8 @@ function renderPlayerDetailHTML(data) {
   const detailedGames = Number(data.detail_games ?? data.games_with_history ?? h.length ?? 0) || h.length || 0;
   const clubTotalGames = Number(data.club_total_games ?? p.ea_global_games ?? p.games ?? detailedGames) || detailedGames;
   const gamesLine = data.uses_member_totals
-    ? `${clubTotalGames} jogos no clube · ${detailedGames} partidas detalhadas salvas · ranking ${rank.rating_rank_label || '-'} · tendência ${trend.status || '-'}`
-    : `${detailedGames} partidas analisadas neste filtro · ranking ${rank.rating_rank_label || '-'} · tendência ${trend.status || '-'}`;
+    ? `${clubTotalGames} jogos no clube (totais EA) · ${detailedGames} partidas detalhadas salvas · ranking ${rank.rating_rank_label || '-'} · tendência ${trend.status || '-'}`
+    : `${detailedGames} partidas detalhadas salvas de ${CURRENT_MATCH_TYPE} · ranking ${rank.rating_rank_label || '-'} · tendência ${trend.status || '-'}`;
   return `
     <div class="player-detail">
       <div class="analytics-hero">
@@ -6823,7 +6826,7 @@ function renderPlayerDetailHTML(data) {
       <div class="section-title">Relatório Scout Offline</div>
       <div class="analytics-note">${renderMarkdown(data.scout_report || '')}</div>
 
-      <div class="section-title" style="margin-top:18px;">Todas as ${h.length} partidas salvas no clube/tipo</div>
+      <div class="section-title" style="margin-top:18px;">Todas as ${h.length} partidas detalhadas salvas ${CURRENT_MATCH_TYPE === 'todos' ? 'no clube' : 'de ' + CURRENT_MATCH_TYPE}</div>
       ${h.length === 0 ? '<div style="color:var(--text-2);padding:20px;text-align:center;">Nenhuma partida com participação registrada.</div>' : `
       <table class="history-table">
         <thead><tr><th>Data</th><th>Tipo</th><th>Adversário</th><th>Resultado</th><th>Pos</th><th>Sofi</th><th>EA</th><th>G</th><th>A</th><th>Chu</th><th>Pass%</th><th>Des%</th><th>Des</th><th>Def</th><th>SG</th><th>Verm</th><th>MOM</th></tr></thead>
@@ -7046,6 +7049,8 @@ if __name__ == "__main__":
     print("="*60 + "\n")
     
     uvicorn.run(app, host="0.0.0.0", port=8000)
+
+
 
 
 
