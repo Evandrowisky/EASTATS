@@ -1378,11 +1378,19 @@ def build_ideal_team(players_list, formation="3-5-2"):
         "CDM": ["MID", "DEF"], "LDM": ["MID", "DEF"], "RDM": ["MID", "DEF"], "LCM": ["MID"], "CM": ["MID"], "RCM": ["MID"], "LM": ["MID", "FWD"], "RM": ["MID", "FWD"],
         "CAM": ["MID", "FWD"], "LAM": ["MID", "FWD"], "RAM": ["MID", "FWD"], "LW": ["FWD", "MID"], "RW": ["FWD", "MID"], "ST": ["FWD"], "LST": ["FWD"], "RST": ["FWD"],
     }
+    def n(value, default=0.0):
+        try:
+            if value is None or value == "":
+                return default
+            return float(value)
+        except Exception:
+            return default
+
     role_bonus = {
-        "GK": lambda p: p.get("rating", 0) * 10,
-        "DEF": lambda p: p.get("rating", 0) * 10 + p.get("tackle_pct", 0) * 0.08 + p.get("mom", 0) * 0.05,
-        "MID": lambda p: p.get("rating", 0) * 10 + p.get("assists_per_game", 0) * 4 + p.get("pass_pct", 0) * 0.05,
-        "FWD": lambda p: p.get("rating", 0) * 10 + p.get("goals_per_game", 0) * 5 + p.get("assists_per_game", 0) * 2,
+        "GK": lambda p: n(p.get("rating")) * 10,
+        "DEF": lambda p: n(p.get("rating")) * 10 + n(p.get("tackle_pct")) * 0.08 + n(p.get("mom")) * 0.05,
+        "MID": lambda p: n(p.get("rating")) * 10 + n(p.get("assists_per_game")) * 4 + n(p.get("pass_pct")) * 0.05,
+        "FWD": lambda p: n(p.get("rating")) * 10 + n(p.get("goals_per_game")) * 5 + n(p.get("assists_per_game")) * 2,
     }
 
     slots = formation_slots.get(formation, formation_slots["3-5-2"])
@@ -2060,17 +2068,17 @@ def build_estimated_heatmap(player, history):
         zones.update({"att_center": 55, "att_left": 24, "att_right": 24, "mid_center": 18})
 
     for h in history:
-        goals = h.get("goals", 0)
-        assists = h.get("assists", 0)
-        shots = h.get("shots", 0)
-        tackles = h.get("tackles_made", 0)
-        saves = h.get("saves", 0)
-        clean = h.get("clean_sheet", 0)
+        goals = float(h.get("goals", 0) or 0)
+        assists = float(h.get("assists", 0) or 0)
+        shots = float(h.get("shots", 0) or 0)
+        tackles = float(h.get("tackles_made", 0) or 0)
+        saves = float(h.get("saves", 0) or 0)
+        clean = float(h.get("clean_sheet", 0) or 0)
         pos = (h.get("position") or player.get("position") or "").lower()
         zones["att_center"] += goals * 8 + shots * 2
         zones["att_left"] += assists * 3
         zones["att_right"] += assists * 3
-        zones["mid_center"] += assists * 5 + h.get("pass_pct", 0) * 0.05
+        zones["mid_center"] += assists * 5 + float(h.get("pass_pct", 0) or 0) * 0.05
         zones["def_center"] += tackles * 3 + saves * 6 + clean * 5
         if "lb" in pos or "lm" in pos or "lw" in pos:
             zones["def_left"] += tackles * 2
@@ -7097,6 +7105,8 @@ if __name__ == "__main__":
     print("="*60 + "\n")
     
     uvicorn.run(app, host="0.0.0.0", port=8000)
+
+
 
 
 
