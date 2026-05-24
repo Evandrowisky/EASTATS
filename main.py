@@ -913,6 +913,29 @@ def _public_user(row: dict) -> dict:
     }
 
 
+
+def _supabase_missing_column_error(exc: Exception, column: str) -> bool:
+    msg = str(exc).lower()
+    return "pgrst204" in msg and column.lower() in msg and "column" in msg
+
+
+def _insert_app_user_supabase(sb, row: dict):
+    payload = dict(row or {})
+    try:
+        return sb.table("app_users").insert(payload).execute()
+    except Exception as e:
+        if _supabase_missing_column_error(e, "status") and "status" in payload:
+            print("[AUTH] Coluna app_users.status ausente; salvando sem status")
+            payload.pop("status", None)
+            try:
+                return sb.table("app_users").insert(payload).execute()
+            except Exception as e2:
+                e = e2
+        if _supabase_missing_column_error(e, "is_active") and "is_active" in payload:
+            print("[AUTH] Coluna app_users.is_active ausente; salvando sem is_active")
+            payload.pop("is_active", None)
+            return sb.table("app_users").insert(payload).execute()
+        raise
 def _get_app_user_by_usuario(usuario: str):
     sb = get_supabase()
     if not sb:
@@ -944,7 +967,7 @@ def club_has_admin(club_id: str) -> bool:
     if not sb or not club_id:
         return False
     try:
-        resp = (
+        q = (
             sb.table("app_users")
             .select("id")
             .eq("club_id", str(club_id))
@@ -952,11 +975,27 @@ def club_has_admin(club_id: str) -> bool:
             .eq("status", "ativo")
             .eq("is_active", True)
             .limit(1)
-            .execute()
         )
+        resp = q.execute()
         rows = getattr(resp, "data", None) or []
         return bool(rows)
     except Exception as e:
+        if _supabase_missing_column_error(e, "status") or _supabase_missing_column_error(e, "is_active"):
+            try:
+                print("[AUTH] app_users sem status/is_active; verificando admin apenas por club_id+cargo")
+                resp = (
+                    sb.table("app_users")
+                    .select("id")
+                    .eq("club_id", str(club_id))
+                    .eq("cargo", "admin")
+                    .limit(1)
+                    .execute()
+                )
+                rows = getattr(resp, "data", None) or []
+                return bool(rows)
+            except Exception as e2:
+                print(f"[AUTH] Aviso ao verificar admin fallback do clube {club_id}: {type(e2).__name__}: {e2}")
+                return False
         print(f"[AUTH] Aviso ao verificar admin do clube {club_id}: {type(e).__name__}: {e}")
         return False
 
@@ -1433,7 +1472,7 @@ def auth_register(payload: AuthRegisterPayload):
         "updated_at": _now_iso(),
     }
     try:
-        resp = sb.table("app_users").insert(row).execute()
+        resp = _insert_app_user_supabase(sb, row)
         rows = getattr(resp, "data", None) or []
         user = _public_user(rows[0] if rows else {**row, "id": ""})
         return {"success": True, "user": user}
@@ -6889,6 +6928,7 @@ if __name__ == "__main__":
     print("="*60 + "\n")
     
     uvicorn.run(app, host="0.0.0.0", port=8000)
+
 
 
 
