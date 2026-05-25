@@ -1040,6 +1040,15 @@ class AuthRegisterPayload(BaseModel):
 class AuthLoginPayload(BaseModel):
     usuario: str
     senha: str
+    clube: str
+
+
+class AuthResetPayload(BaseModel):
+    usuario: str
+    senha_atual: str
+    nova_senha: Optional[str] = None
+    clube: str
+    novo_clube: Optional[str] = None
 
 
 class AdminUserStatusPayload(BaseModel):
@@ -1154,12 +1163,16 @@ def _insert_app_user_supabase(sb, row: dict):
             payload.pop("is_active", None)
             return sb.table("app_users").insert(payload).execute()
         raise
-def _get_app_user_by_usuario(usuario: str):
+def _get_app_user_by_usuario(usuario: str, club_id: Optional[str] = None):
     sb = get_supabase()
     if not sb:
         raise HTTPException(503, "Supabase nao configurado para autenticacao")
+    usuario_norm = str(usuario or "").strip().lower()
     try:
-        resp = sb.table("app_users").select("*").eq("usuario", str(usuario or "").strip().lower()).limit(1).execute()
+        q = sb.table("app_users").select("*").eq("usuario", usuario_norm)
+        if club_id:
+            q = q.eq("club_id", str(club_id))
+        resp = q.limit(1).execute()
         rows = getattr(resp, "data", None) or []
         return rows[0] if rows else None
     except Exception as e:
@@ -1739,12 +1752,12 @@ def auth_register(payload: AuthRegisterPayload):
         raise HTTPException(400, "Nome, usuario, senha e clube sao obrigatorios")
     if len(senha) < 6:
         raise HTTPException(400, "A senha deve ter pelo menos 6 caracteres")
-    if _get_app_user_by_usuario(usuario):
-        raise HTTPException(409, "Usuario ja existe")
 
     resolved = resolve_club_for_auth(clube_informado)
     club_id = resolved["club_id"]
     clube = resolved["clube"]
+    if _get_app_user_by_usuario(usuario, club_id):
+        raise HTTPException(409, "Usuario ja existe neste clube")
 
     row = {
         "club_id": club_id,
@@ -1771,14 +1784,16 @@ def auth_register(payload: AuthRegisterPayload):
 def auth_login(payload: AuthLoginPayload):
     usuario = str(payload.usuario or "").strip().lower()
     senha = str(payload.senha or "")
-    if not usuario or not senha:
-        raise HTTPException(400, "Usuario e senha sao obrigatorios")
+    clube_informado = str(payload.clube or "").strip()
+    if not usuario or not senha or not clube_informado:
+        raise HTTPException(400, "Usuario, senha e nome do clube sao obrigatorios")
 
-    row = _get_app_user_by_usuario(usuario)
+    resolved = resolve_club_for_auth(clube_informado)
+    row = _get_app_user_by_usuario(usuario, resolved["club_id"])
     if not row or not verify_password(senha, row.get("password_hash")):
-        raise HTTPException(401, "Usuario ou senha invalidos")
+        raise HTTPException(401, "Usuario, clube ou senha invalidos")
     if not bool(row.get("is_active", True)):
-        raise HTTPException(403, "Conta inativa")
+        raise HTTPException(403, "Conta inativa. Aguarde o admin liberar seu login.")
     status_value = row.get("status") or "ativo"
     if status_value == "bloqueado":
         raise HTTPException(403, "Conta bloqueada")
@@ -1797,6 +1812,50 @@ def auth_login(payload: AuthLoginPayload):
         "cargo": user["cargo"],
     })
     return {"success": True, "access_token": token, "token_type": "bearer", "user": user}
+
+
+@app.post("/api/auth/reset")
+def auth_reset(payload: AuthResetPayload):
+    sb = get_supabase()
+    if not sb:
+        raise HTTPException(503, "Supabase nao configurado para autenticacao")
+    usuario = str(payload.usuario or "").strip().lower()
+    senha_atual = str(payload.senha_atual or "")
+    nova_senha = str(payload.nova_senha or "").strip()
+    clube_informado = str(payload.clube or "").strip()
+    novo_clube = str(payload.novo_clube or "").strip()
+    if not usuario or not senha_atual or not clube_informado:
+        raise HTTPException(400, "Usuario, senha atual e clube atual sao obrigatorios")
+
+    resolved = resolve_club_for_auth(clube_informado)
+    row = _get_app_user_by_usuario(usuario, resolved["club_id"])
+    if not row or not verify_password(senha_atual, row.get("password_hash")):
+        raise HTTPException(401, "Usuario, clube ou senha atual invalidos")
+
+    update = {"updated_at": _now_iso()}
+    if nova_senha:
+        if len(nova_senha) < 6:
+            raise HTTPException(400, "A nova senha deve ter pelo menos 6 caracteres")
+        update["password_hash"] = hash_password(nova_senha)
+    if novo_clube:
+        new_resolved = resolve_club_for_auth(novo_clube)
+        existing = _get_app_user_by_usuario(usuario, new_resolved["club_id"])
+        if existing and str(existing.get("id")) != str(row.get("id")):
+            raise HTTPException(409, "Este usuario ja possui cadastro neste clube")
+        update["club_id"] = new_resolved["club_id"]
+        update["clube"] = new_resolved["clube"]
+        update["status"] = "pendente"
+        update["is_active"] = False
+    if len(update) == 1:
+        raise HTTPException(400, "Informe uma nova senha ou um novo clube")
+
+    try:
+        resp = sb.table("app_users").update(update).eq("id", str(row.get("id"))).execute()
+        rows = getattr(resp, "data", None) or []
+        return {"success": True, "user": _public_user(rows[0] if rows else {**row, **update})}
+    except Exception as e:
+        print(f"[AUTH] Erro redefinindo acesso: {type(e).__name__}: {e}")
+        raise HTTPException(500, "Erro ao redefinir acesso")
 
 
 @app.get("/api/auth/me")
@@ -3193,16 +3252,20 @@ def list_player_profiles(current_user: dict = Depends(get_current_user)):
 
 
 @app.put("/api/player-profiles/{player_name}")
-def update_player_profile(player_name: str, item: PlayerProfileUpdate, current_user: dict = Depends(require_admin)):
-    """Salva ajuste manual do admin e preserva campos que nao foram reenviados."""
+def update_player_profile(player_name: str, item: PlayerProfileUpdate, current_user: dict = Depends(get_current_user)):
+    """Salva ajuste manual. Admin edita tudo; jogador edita apenas proprio arquetipo/playstyles."""
     club_id = str((current_user or {}).get("club_id") or _current_club_id_from_cache())
+    is_admin_user = str((current_user or {}).get("cargo") or "").strip().lower() == "admin"
+    current_names = {str((current_user or {}).get("usuario") or "").strip().lower(), str((current_user or {}).get("nome") or "").strip().lower()}
+    if not is_admin_user and str(player_name or "").strip().lower() not in current_names:
+        raise HTTPException(403, "Jogador so pode editar o proprio scout")
     field_set = set(getattr(item, "model_fields_set", None) or getattr(item, "__fields_set__", set()) or set())
     existing = (load_player_profiles(club_id) or {}).get(player_name, {}) or {}
 
-    raw_manual_position = item.manual_position if "manual_position" in field_set else existing.get("manual_position")
+    raw_manual_position = (item.manual_position if "manual_position" in field_set else existing.get("manual_position")) if is_admin_user else existing.get("manual_position")
     raw_archetype = item.archetype if "archetype" in field_set else existing.get("archetype")
     raw_playstyles = item.playstyles if "playstyles" in field_set else existing.get("playstyles")
-    raw_notes = item.notes if "notes" in field_set else existing.get("notes")
+    raw_notes = (item.notes if "notes" in field_set else existing.get("notes")) if is_admin_user else existing.get("notes")
 
     manual_position = (raw_manual_position or "").strip() or None
     archetype = (raw_archetype or "").strip() or None
@@ -5439,6 +5502,7 @@ html, body { max-width: 100%; }
   .period-filter { padding-left: 0; padding-right: 0; }
   .profile-user-row { grid-template-columns: 1fr; }
   .my-scout-self { grid-template-columns: 1fr !important; }
+  .my-scout-profile-editor { grid-template-columns: 1fr !important; }
   .field { height: min(680px, 150vw); }
 }
 
@@ -5550,22 +5614,30 @@ function renderAuth(mode = 'login') {
   const c = document.getElementById('content');
   if (!c) return;
   const isRegister = mode === 'register';
+  const isReset = mode === 'reset';
   if (!isAdmin() && ['jogadores','comparar','confrontos','cadastro','adversarios'].includes(CURRENT_TAB)) CURRENT_TAB = 'visao';
+  const title = isRegister ? 'Criar Conta' : isReset ? 'Redefinir Acesso' : 'Entrar no Scout Clubs';
+  const help = isRegister
+    ? 'Crie sua conta como jogador. O admin do clube libera ou bloqueia seu login depois.'
+    : isReset
+      ? 'Use sua senha atual para trocar senha ou mudar o clube vinculado. Se mudar de clube, o admin do novo clube precisa liberar seu acesso.'
+      : 'Use seu usu?rio, senha e nome do clube exatamente como aparece no Pro Clubs.';
   c.innerHTML = `
     <div class="auth-shell">
       <div class="auth-card">
-        <h1>${isRegister ? 'Criar Conta' : 'Entrar no Scout Clubs'}</h1>
-        <p>${isRegister ? 'Crie sua conta como jogador. O acesso ao sistema fica liberado quando o clube tiver um admin ativo.' : 'Use seu usuário e senha para acessar o scout do seu clube.'}</p>
-        <form onsubmit="${isRegister ? 'submitRegister(event)' : 'submitLogin(event)'}">
+        <h1>${title}</h1>
+        <p>${help}</p>
+        <form onsubmit="${isRegister ? 'submitRegister(event)' : isReset ? 'submitResetAccess(event)' : 'submitLogin(event)'}">
           ${isRegister ? `<div class="auth-field"><label>Nome</label><input id="authNome" autocomplete="name" required></div>` : ''}
-          <div class="auth-field"><label>Usuário</label><input id="authUsuario" autocomplete="username" required>${isRegister ? `<div style="color:var(--text-2);font-size:11px;line-height:1.4;">Dica: use como usuário o ID/nome do jogador no FIFA/EA FC, igual aparece no Pro Clubs. É assim que o Meu Scout encontra suas estatísticas.</div>` : ``}</div>
-          <div class="auth-field"><label>Senha</label><input id="authSenha" type="password" autocomplete="${isRegister ? 'new-password' : 'current-password'}" required></div>
-          ${isRegister ? `
-            <div class="auth-field"><label>Nome do Clube</label><input id="authClube" placeholder="Nome do clube" required></div>
-          ` : ''}
+          <div class="auth-field"><label>Usu?rio / ID FIFA</label><input id="authUsuario" autocomplete="username" required><div style="color:var(--text-2);font-size:11px;line-height:1.4;">Use o mesmo ID/nome do jogador no FIFA/EA FC, igual aparece no Pro Clubs. ? assim que o Meu Scout encontra suas estat?sticas.</div></div>
+          <div class="auth-field"><label>${isReset ? 'Senha atual' : 'Senha'}</label><input id="authSenha" type="password" autocomplete="${isRegister ? 'new-password' : 'current-password'}" required></div>
+          ${isReset ? `<div class="auth-field"><label>Nova senha (opcional)</label><input id="authNovaSenha" type="password" autocomplete="new-password" placeholder="Preencha s? se quiser trocar a senha"></div>` : ''}
+          <div class="auth-field"><label>${isReset ? 'Clube atual' : 'Nome do Clube'}</label><input id="authClube" placeholder="Nome do clube igual ao Pro Clubs" required><div style="color:var(--text-2);font-size:11px;line-height:1.4;">Digite o nome do clube como est? no EA FC Pro Clubs, incluindo acentos e espa?os quando houver.</div></div>
+          ${isReset ? `<div class="auth-field"><label>Novo clube (opcional)</label><input id="authNovoClube" placeholder="Preencha s? se quiser trocar de clube"></div>` : ''}
           <div class="auth-actions">
-            <button class="btn-primary" type="submit">${isRegister ? 'Criar Conta' : 'Entrar'}</button>
-            <button class="auth-link" type="button" onclick="renderAuth('${isRegister ? 'login' : 'register'}')">${isRegister ? 'Já tenho conta' : 'Criar conta'}</button>
+            <button class="btn-primary" type="submit">${isRegister ? 'Criar Conta' : isReset ? 'Salvar Altera??o' : 'Entrar'}</button>
+            <button class="auth-link" type="button" onclick="renderAuth('${isRegister || isReset ? 'login' : 'register'}')">${isRegister || isReset ? 'J? tenho conta' : 'Criar conta'}</button>
+            ${!isRegister && !isReset ? `<button class="auth-link" type="button" onclick="renderAuth('reset')">Redefinir senha/clube</button>` : ''}
           </div>
           <div id="authError" class="auth-error"></div>
         </form>
@@ -5573,12 +5645,14 @@ function renderAuth(mode = 'login') {
     </div>`;
 }
 
+
 async function submitLogin(ev) {
   ev.preventDefault();
   try {
     const body = {
       usuario: document.getElementById('authUsuario').value.trim(),
       senha: document.getElementById('authSenha').value,
+      clube: document.getElementById('authClube').value.trim(),
     };
     const r = await fetch('/api/auth/login', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
     const data = await r.json().catch(() => ({}));
@@ -5619,8 +5693,10 @@ async function submitRegister(ev) {
       renderAuth('login');
       setTimeout(() => {
         const userInput = document.getElementById('authUsuario');
+        const clubInput = document.getElementById('authClube');
         if (userInput) userInput.value = body.usuario;
-        showAuthMessage('Conta criada. Agora faça login com sua senha.', 'success');
+        if (clubInput) clubInput.value = body.clube;
+        showAuthMessage('Conta criada. Aguarde o admin liberar seu login.', 'success');
       }, 60);
     }, 900);
   } catch (e) {
@@ -5631,6 +5707,39 @@ async function submitRegister(ev) {
     showAuthError(e.message);
   }
 }
+
+async function submitResetAccess(ev) {
+  ev.preventDefault();
+  const btn = ev.submitter || ev.target.querySelector('button[type="submit"]');
+  const oldText = btn ? btn.textContent : '';
+  if (btn) { btn.disabled = true; btn.textContent = 'SALVANDO...'; }
+  try {
+    const body = {
+      usuario: document.getElementById('authUsuario').value.trim(),
+      senha_atual: document.getElementById('authSenha').value,
+      nova_senha: document.getElementById('authNovaSenha').value,
+      clube: document.getElementById('authClube').value.trim(),
+      novo_clube: document.getElementById('authNovoClube').value.trim(),
+    };
+    const r = await fetch('/api/auth/reset', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(data.detail || data.message || 'Erro ao redefinir acesso');
+    showAuthMessage(body.novo_clube ? 'Acesso atualizado. O admin do novo clube precisa liberar seu login.' : 'Senha atualizada. Volte para o login.', 'success');
+    setTimeout(() => {
+      renderAuth('login');
+      setTimeout(() => {
+        const userInput = document.getElementById('authUsuario');
+        const clubInput = document.getElementById('authClube');
+        if (userInput) userInput.value = body.usuario;
+        if (clubInput) clubInput.value = body.novo_clube || body.clube;
+      }, 60);
+    }, 1000);
+  } catch (e) {
+    showAuthError(e.message);
+    if (btn) { btn.disabled = false; btn.textContent = oldText; }
+  }
+}
+
 
 function logout(render = true) {
   AUTH_TOKEN = '';
@@ -6470,6 +6579,46 @@ function clearMyScoutName() {
   localStorage.removeItem('scout_my_player_name');
   renderTab();
 }
+
+function renderMyScoutProfileEditor(name) {
+  const id = cssSafeId(name || 'meu-scout');
+  const profile = profileForPlayer(name);
+  const selected = (profile.playstyles || []).map(normalizePlaystyleName);
+  return `
+    <div class="section-title" style="margin-top:20px;">Meu cadastro de arqu?tipo e PlayStyles</div>
+    <div class="agenda-form my-scout-profile-editor" style="grid-template-columns: repeat(4, minmax(0,1fr)); align-items:end;">
+      <select id="my-arch-${id}" style="grid-column:span 1;">${archetypeSelectOptions(profile.archetype || '')}</select>
+      <select id="my-ps-1-${id}" style="grid-column:span 1;">${playstyleSelectOptions(selected[0] || '')}</select>
+      <select id="my-ps-2-${id}" style="grid-column:span 1;">${playstyleSelectOptions(selected[1] || '')}</select>
+      <select id="my-ps-3-${id}" style="grid-column:span 1;">${playstyleSelectOptions(selected[2] || '')}</select>
+      <div style="grid-column:1/-1;display:flex;gap:8px;align-items:center;justify-content:flex-end;">
+        <span id="my-prof-status-${id}" style="display:none;color:var(--green);font-size:12px;font-weight:700;letter-spacing:1px;">Salvo</span>
+        <button id="my-prof-save-${id}" type="button" class="btn-primary" style="padding:9px 16px;" onclick="saveMyScoutProfile('${name.replace(/'/g, "\\'")}')">Salvar meu cadastro</button>
+      </div>
+    </div>
+  `;
+}
+
+async function saveMyScoutProfile(name) {
+  const id = cssSafeId(name || 'meu-scout');
+  const profile = profileForPlayer(name);
+  const arch = normalizeArchetypeName(document.getElementById('my-arch-' + id)?.value || '');
+  const playstyles = [1,2,3].map(i => normalizePlaystyleName(document.getElementById(`my-ps-${i}-` + id)?.value || '')).filter(Boolean);
+  const btn = document.getElementById('my-prof-save-' + id);
+  const status = document.getElementById('my-prof-status-' + id);
+  const old = btn ? btn.textContent : '';
+  try {
+    if (btn) { btn.disabled = true; btn.textContent = 'Salvando...'; }
+    await savePlayerProfile(name, profile.manual_position || '', arch, profile.notes || '', playstyles);
+    if (status) { status.textContent = 'Dados salvos'; status.style.display = 'inline'; }
+    if (btn) btn.textContent = 'Salvo!';
+    setTimeout(() => { if (btn) { btn.disabled = false; btn.textContent = old || 'Salvar meu cadastro'; } if (status) status.style.display = 'none'; renderTab(); }, 900);
+  } catch (e) {
+    if (btn) { btn.disabled = false; btn.textContent = old || 'Salvar meu cadastro'; }
+    alert(e.message || 'Erro ao salvar cadastro');
+  }
+}
+
 
 function renderMeuScout() {
   const players = scopedPlayers();
