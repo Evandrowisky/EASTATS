@@ -5508,55 +5508,55 @@ async function initAuth() {
 const PLAYSTYLE_CATALOG = [
   {name:'Chute colocado', code:'Finesse Shot', group:'Finalização', desc:'Chutes colocados com curva e precisão.'},
   {name:'Cavadinha', code:'Chip Shot', group:'Finalização', desc:'Cavadinhas e finalizações por cobertura mais eficientes.'},
-  {name:'Chute forte', code:'Power Shot', group:'Finalização', desc:'Chutes fortes de média/longa distância com mais potência.'},
+  {name:'Superchute', code:'Power Shot', group:'Finalização', desc:'Chutes fortes de média/longa distância com mais potência.'},
   {name:'Bola parada', code:'Dead Ball', group:'Finalização', desc:'Faltas, escanteios e bolas paradas com mais curva e precisão.'},
   {name:'Cabeceio preciso', code:'Precision Header', group:'Finalização', desc:'Cabeceios ofensivos mais precisos e fortes.'},
   {name:'Acrobático', code:'Acrobatic', group:'Finalização', desc:'Voleios, bicicletas e ações acrobáticas.'},
   {name:'Chute rasteiro', code:'Low Driven Shot', group:'Finalização', desc:'Chutes rasteiros com velocidade e precisão.'},
-  {name:'Decisivo', code:'Gamechanger', group:'Finalização', desc:'Finalizações criativas e imprevisíveis em momentos decisivos.'},
+  {name:'Vanguarda', code:'Gamechanger', group:'Finalização', desc:'Finalizações criativas e imprevisíveis em momentos decisivos.'},
   {name:'Passe incisivo', code:'Incisive Pass', group:'Passe', desc:'Enfiadas e passes que quebram linhas.'},
-  {name:'Passe pingado', code:'Pinged Pass', group:'Passe', desc:'Passes rasteiros fortes com velocidade e controle.'},
-  {name:'Lançamento longo', code:'Long Ball Pass', group:'Passe', desc:'Lançamentos longos mais precisos.'},
+  {name:'Passe forte', code:'Pinged Pass', group:'Passe', desc:'Passes rasteiros fortes com velocidade e controle.'},
+  {name:'Passe longo', code:'Long Ball Pass', group:'Passe', desc:'Lançamentos longos mais precisos.'},
   {name:'Tiki Taka', code:'Tiki Taka', group:'Passe', desc:'Passes curtos de primeira e combinações rápidas.'},
-  {name:'Cruzamento tenso', code:'Whipped Pass', group:'Passe', desc:'Cruzamentos com curva, velocidade e perigo.'},
-  {name:'Inventivo', code:'Inventive', group:'Passe', desc:'Passes criativos, imprevisíveis e combinações não convencionais.'},
+  {name:'Cruzamento preciso', code:'Whipped Pass', group:'Passe', desc:'Cruzamentos com curva, velocidade e perigo.'},
+  {name:'Criativo', code:'Inventive', group:'Passe', desc:'Passes criativos, imprevisíveis e combinações não convencionais.'},
   {name:'Cercar', code:'Jockey', group:'Defesa', desc:'Jockey lateral e marcação em jockey mais eficiente.'},
-  {name:'Bloqueio', code:'Block', group:'Defesa', desc:'Bloqueios defensivos mais eficazes.'},
+  {name:'Barreira', code:'Block', group:'Defesa', desc:'Bloqueios defensivos mais eficazes.'},
   {name:'Interceptação', code:'Intercept', group:'Defesa', desc:'Interceptações e cortes de passe melhores.'},
-  {name:'Antecipar', code:'Anticipate', group:'Defesa', desc:'Botes em pé e antecipações mais limpos.'},
+  {name:'Antecipação', code:'Anticipate', group:'Defesa', desc:'Botes em pé e antecipações mais limpos.'},
   {name:'Carrinho', code:'Slide Tackle', group:'Defesa', desc:'Carrinhos com maior alcance e precisão.'},
-  {name:'Fortaleza aérea', code:'Aerial Fortress', group:'Defesa', desc:'Domínio de disputas aéreas ofensivas e defensivas.'},
-  {name:'Técnico', code:'Technical', group:'Controle de bola', desc:'Condução técnica e dribles controlados.'},
-  {name:'Rápido', code:'Rapid', group:'Controle de bola', desc:'Corridas em velocidade com a bola.'},
-  {name:'Primeiro toque', code:'First Touch', group:'Controle de bola', desc:'Primeiro toque orientado e domínio sob pressão.'},
-  {name:'Malabarista', code:'Trickster', group:'Controle de bola', desc:'Dribles especiais e movimentos de habilidade.'},
-  {name:'Resistente à pressão', code:'Press Proven', group:'Controle de bola', desc:'Protege a bola melhor sob pressão.'},
-  {name:'Passo rápido', code:'Quick Step', group:'Físico', desc:'Explosão nos primeiros metros.'},
+  {name:'Força aérea', code:'Aerial Fortress', group:'Defesa', desc:'Domínio de disputas aéreas ofensivas e defensivas.'},
+  {name:'Condução ágil', code:'Technical', group:'Controle de bola', desc:'Condução técnica e dribles controlados.'},
+  {name:'Veloz', code:'Rapid', group:'Controle de bola', desc:'Corridas em velocidade com a bola.'},
+  {name:'Domínio', code:'First Touch', group:'Controle de bola', desc:'Primeiro toque orientado e domínio sob pressão.'},
+  {name:'Ilusionista', code:'Trickster', group:'Controle de bola', desc:'Dribles especiais e movimentos de habilidade.'},
+  {name:'Cabeça fria', code:'Press Proven', group:'Controle de bola', desc:'Protege a bola melhor sob pressão.'},
+  {name:'Impulso', code:'Quick Step', group:'Físico', desc:'Explosão nos primeiros metros.'},
   {name:'Incansável', code:'Relentless', group:'Físico', desc:'Fôlego, recomposição e pressão por mais tempo.'},
-  {name:'Arremesso lateral longo', code:'Long Throw', group:'Físico', desc:'Laterais longos para área ou profundidade.'},
-  {name:'Brigador', code:'Bruiser', group:'Físico', desc:'Duelos físicos e disputas de corpo mais fortes.'},
+  {name:'Lateral longo', code:'Long Throw', group:'Físico', desc:'Laterais longos para área ou profundidade.'},
+  {name:'Xerife', code:'Bruiser', group:'Físico', desc:'Duelos físicos e disputas de corpo mais fortes.'},
   {name:'Impositor', code:'Enforcer', group:'Físico', desc:'Contato físico, proteção e imposição corporal com mais eficiência.'},
   {name:'Arremesso longo', code:'Far Throw', group:'Goleiro', desc:'Reposição longa com as mãos.'},
   {name:'Defesa com os pés', code:'Footwork', group:'Goleiro', desc:'Defesas com os pés e ajustes curtos.'},
-  {name:'Pegador de cruzamento', code:'Cross Claimer', group:'Goleiro', desc:'Saídas em cruzamentos.'},
-  {name:'Saída rápida', code:'Rush Out', group:'Goleiro', desc:'Saídas rápidas do gol para abafar.'},
-  {name:'Alcance longo', code:'Far Reach', group:'Goleiro', desc:'Alcance em defesas no canto.'},
-  {name:'Espalmador', code:'Deflector', group:'Goleiro', desc:'Espalmadas para zonas mais seguras.'},
+  {name:'Saída aérea', code:'Cross Claimer', group:'Goleiro', desc:'Saídas em cruzamentos.'},
+  {name:'Saída mano a mano', code:'Rush Out', group:'Goleiro', desc:'Saídas rápidas do gol para abafar.'},
+  {name:'Joga luva', code:'Far Reach', group:'Goleiro', desc:'Alcance em defesas no canto.'},
+  {name:'Espalma', code:'Deflector', group:'Goleiro', desc:'Espalmadas para zonas mais seguras.'},
 ];
 const ARCHETYPE_CATALOG = [
-  {name:'Finalizador', code:'Finisher', group:'Atacantes', desc:'Finalizador de área: posicionamento, chute e decisão para transformar chance em gol.'},
-  {name:'Referência', code:'Target', group:'Atacantes', desc:'Atacante de referência: pivô, jogo aéreo, proteção e presença na área.'},
-  {name:'Mago', code:'Magician', group:'Atacantes', desc:'Atacante criativo: mobilidade, improviso, último passe e finalização diferente.'},
-  {name:'Criador', code:'Creator', group:'Meias / pontas', desc:'Criador de chances: visão, passe incisivo, assistência e jogo entre linhas.'},
-  {name:'Maestro', code:'Maestro', group:'Meias / pontas', desc:'Controlador de ritmo: passe curto, circulação, pausa e organização.'},
-  {name:'Reciclador', code:'Recycler', group:'Meias / pontas', desc:'Recuperador/reciclador: rouba, protege e recoloca a bola em jogo com segurança.'},
-  {name:'Faísca', code:'Spark', group:'Meias / pontas', desc:'Jogador explosivo: aceleração, drible, 1x1 e desequilíbrio pelo lado.'},
+  {name:'Capitã', code:'Finisher', group:'Atacantes', desc:'Atacante de decisão: posicionamento, chute e frieza para transformar chance em gol.'},
+  {name:'Alvo', code:'Target', group:'Atacantes', desc:'Atacante de referência: pivô, jogo aéreo, proteção e presença na área.'},
+  {name:'Bruxo', code:'Magician', group:'Atacantes', desc:'Atacante criativo: mobilidade, improviso, último passe e finalização diferente.'},
+  {name:'Cérebro', code:'Creator', group:'Meio-campistas', desc:'Criador de chances: visão, passe incisivo, assistência e jogo entre linhas.'},
+  {name:'Maestro', code:'Maestro', group:'Meio-campistas', desc:'Controlador de ritmo: passe curto, circulação, pausa e organização.'},
+  {name:'Compasso', code:'Recycler', group:'Meio-campistas', desc:'Meio-campista de equilíbrio: recupera, protege e recoloca a bola em jogo com segurança.'},
+  {name:'Gatilho', code:'Spark', group:'Meio-campistas', desc:'Jogador explosivo: aceleração, drible, 1x1 e desequilíbrio pelo lado.'},
   {name:'Chefia', code:'Boss', group:'Defensores', desc:'Líder defensivo: organiza a linha, ganha duelos, protege a área e domina pelo alto.'},
-  {name:'Saqueador', code:'Marauder', group:'Defensores', desc:'Defensor/ala agressivo: avança, pressiona, cruza e recompõe corredor.'},
-  {name:'Progressor', code:'Progressor', group:'Defensores', desc:'Defensor construtor: antecipa, conduz e progride a saída com passes.'},
-  {name:'Motor', code:'Engine', group:'Defensores', desc:'Defensor de energia: cobertura, ritmo, combate e presença em várias zonas.'},
-  {name:'Goleiro muralha', code:'Shot Stopper', group:'Goleiros', desc:'Goleiro de reflexo: foco em defesa de chutes, alcance e segurança na meta.'},
-  {name:'Goleiro líbero', code:'Sweeper Keeper', group:'Goleiros', desc:'Goleiro líbero: sai do gol, cobre profundidade e inicia jogadas.'},
+  {name:'Comandante', code:'Marauder', group:'Defensores', desc:'Defensor dominante: impõe presença, pressiona, vence contatos e sustenta a linha.'},
+  {name:'Ambivalente', code:'Progressor', group:'Defensores', desc:'Defensor versátil: antecipa, conduz, progride a saída e ajuda na construção.'},
+  {name:'Motorzinho', code:'Engine', group:'Defensores', desc:'Defensor de energia: cobertura, ritmo, combate e presença em várias zonas.'},
+  {name:'Muralha', code:'Shot Stopper', group:'Goleiros', desc:'Goleiro de reflexo: foco em defesa de chutes, alcance e segurança na meta.'},
+  {name:'GL-Linha', code:'Sweeper Keeper', group:'Goleiros', desc:'Goleiro-líbero: sai do gol, cobre profundidade e inicia jogadas.'},
 ];
 function filteredMatches() {
   let all = (DATA && DATA.matches) ? [...DATA.matches] : [];
@@ -6751,23 +6751,23 @@ function normalizePlaystyleName(value) {
   if (found) return found.code;
   const map = {
     'Chute colocado':'Finesse Shot', 'Finesse Shot':'Finesse Shot', 'Finesse':'Finesse Shot',
-    'Cavadinha':'Chip Shot', 'Chip Shot':'Chip Shot', 'Chute forte':'Power Shot', 'Power Shot':'Power Shot',
+    'Cavadinha':'Chip Shot', 'Chip Shot':'Chip Shot', 'Superchute':'Power Shot', 'Chute forte':'Power Shot', 'Power Shot':'Power Shot',
     'Bola parada':'Dead Ball', 'Dead Ball':'Dead Ball', 'Cabeceio preciso':'Precision Header', 'Cabeçada precisa':'Precision Header', 'Precision Header':'Precision Header',
     'Acrobático':'Acrobatic', 'Acrobata':'Acrobatic', 'Acrobatic':'Acrobatic', 'Chute rasteiro':'Low Driven Shot', 'Low Driven Shot':'Low Driven Shot',
-    'Decisivo':'Gamechanger', 'Gamechanger':'Gamechanger', 'Passe incisivo':'Incisive Pass', 'Incisive Pass':'Incisive Pass',
-    'Passe pingado':'Pinged Pass', 'Pinged Pass':'Pinged Pass', 'Lançamento longo':'Long Ball Pass', 'Passe longo':'Long Ball Pass', 'Long Ball Pass':'Long Ball Pass',
-    'Tiki Taka':'Tiki Taka', 'Cruzamento tenso':'Whipped Pass', 'Whipped Pass':'Whipped Pass', 'Inventivo':'Inventive', 'Inventive':'Inventive',
-    'Cercar':'Jockey', 'Jockey':'Jockey', 'Bloqueio':'Block', 'Block':'Block', 'Interceptação':'Intercept', 'Interceptacao':'Intercept', 'Intercept':'Intercept',
-    'Antecipar':'Anticipate', 'Anticipate':'Anticipate', 'Carrinho':'Slide Tackle', 'Slide Tackle':'Slide Tackle',
-    'Fortaleza aérea':'Aerial Fortress', 'Jogo aéreo':'Aerial Fortress', 'Aerial Fortress':'Aerial Fortress',
-    'Técnico':'Technical', 'Tecnico':'Technical', 'Technical':'Technical', 'Rápido':'Rapid', 'Rapido':'Rapid', 'Rapid':'Rapid',
-    'Primeiro toque':'First Touch', 'First Touch':'First Touch', 'Malabarista':'Trickster', 'Trickster':'Trickster',
-    'Resistente à pressão':'Press Proven', 'Resistente a pressao':'Press Proven', 'Press Proven':'Press Proven',
-    'Passo rápido':'Quick Step', 'Passo rapido':'Quick Step', 'Quick Step':'Quick Step', 'Incansável':'Relentless', 'Incansavel':'Relentless', 'Relentless':'Relentless',
-    'Arremesso lateral longo':'Long Throw', 'Lateral longo':'Long Throw', 'Long Throw':'Long Throw', 'Brigador':'Bruiser', 'Bruiser':'Bruiser', 'Impositor':'Enforcer', 'Enforcer':'Enforcer',
+    'Vanguarda':'Gamechanger', 'Decisivo':'Gamechanger', 'Gamechanger':'Gamechanger', 'Passe incisivo':'Incisive Pass', 'Incisive Pass':'Incisive Pass',
+    'Passe forte':'Pinged Pass', 'Passe pingado':'Pinged Pass', 'Pinged Pass':'Pinged Pass', 'Passe longo':'Long Ball Pass', 'Lançamento longo':'Long Ball Pass', 'Long Ball Pass':'Long Ball Pass',
+    'Tiki Taka':'Tiki Taka', 'Cruzamento preciso':'Whipped Pass', 'Cruzamento tenso':'Whipped Pass', 'Whipped Pass':'Whipped Pass', 'Criativo':'Inventive', 'Inventivo':'Inventive', 'Inventive':'Inventive',
+    'Cercar':'Jockey', 'Jockey':'Jockey', 'Barreira':'Block', 'Bloqueio':'Block', 'Block':'Block', 'Interceptação':'Intercept', 'Interceptacao':'Intercept', 'Intercept':'Intercept',
+    'Antecipação':'Anticipate', 'Antecipacao':'Anticipate', 'Antecipar':'Anticipate', 'Anticipate':'Anticipate', 'Carrinho':'Slide Tackle', 'Slide Tackle':'Slide Tackle',
+    'Força aérea':'Aerial Fortress', 'Forca aerea':'Aerial Fortress', 'Fortaleza aérea':'Aerial Fortress', 'Jogo aéreo':'Aerial Fortress', 'Aerial Fortress':'Aerial Fortress',
+    'Condução ágil':'Technical', 'Conducao agil':'Technical', 'Técnico':'Technical', 'Tecnico':'Technical', 'Technical':'Technical', 'Veloz':'Rapid', 'Rápido':'Rapid', 'Rapido':'Rapid', 'Rapid':'Rapid',
+    'Domínio':'First Touch', 'Dominio':'First Touch', 'Primeiro toque':'First Touch', 'First Touch':'First Touch', 'Ilusionista':'Trickster', 'Malabarista':'Trickster', 'Trickster':'Trickster',
+    'Cabeça fria':'Press Proven', 'Cabeca fria':'Press Proven', 'Resistente à pressão':'Press Proven', 'Resistente a pressao':'Press Proven', 'Press Proven':'Press Proven',
+    'Impulso':'Quick Step', 'Passo rápido':'Quick Step', 'Passo rapido':'Quick Step', 'Quick Step':'Quick Step', 'Incansável':'Relentless', 'Incansavel':'Relentless', 'Relentless':'Relentless',
+    'Lateral longo':'Long Throw', 'Arremesso lateral longo':'Long Throw', 'Long Throw':'Long Throw', 'Xerife':'Bruiser', 'Brigador':'Bruiser', 'Bruiser':'Bruiser', 'Impositor':'Enforcer', 'Enforcer':'Enforcer',
     'Arremesso longo':'Far Throw', 'Far Throw':'Far Throw', 'Defesa com os pés':'Footwork', 'Defesa com os pes':'Footwork', 'Footwork':'Footwork',
-    'Pegador de cruzamento':'Cross Claimer', 'Cross Claimer':'Cross Claimer', 'Saída rápida':'Rush Out', 'Saida rapida':'Rush Out', 'Rush Out':'Rush Out',
-    'Alcance longo':'Far Reach', 'Far Reach':'Far Reach', 'Espalmador':'Deflector', 'Deflector':'Deflector'
+    'Saída aérea':'Cross Claimer', 'Saida aerea':'Cross Claimer', 'Pegador de cruzamento':'Cross Claimer', 'Cross Claimer':'Cross Claimer', 'Saída mano a mano':'Rush Out', 'Saida mano a mano':'Rush Out', 'Saída rápida':'Rush Out', 'Saida rapida':'Rush Out', 'Rush Out':'Rush Out',
+    'Joga luva':'Far Reach', 'Alcance longo':'Far Reach', 'Far Reach':'Far Reach', 'Espalma':'Deflector', 'Espalmador':'Deflector', 'Deflector':'Deflector'
   };
   return map[v] || v;
 }
@@ -6777,12 +6777,12 @@ function normalizeArchetypeName(value) {
   const found = ARCHETYPE_CATALOG.find(a => a.code === v || a.name === v);
   if (found) return found.code;
   const map = {
-    'Finalizador':'Finisher', 'Finisher':'Finisher', 'Referência':'Target', 'Referencia':'Target', 'Target':'Target', 'Alvo':'Target',
-    'Mago':'Magician', 'Magician':'Magician', 'Criador':'Creator', 'Creator':'Creator', 'Maestro':'Maestro',
-    'Reciclador':'Recycler', 'Recycler':'Recycler', 'Faísca':'Spark', 'Faisca':'Spark', 'Spark':'Spark',
-    'Chefia':'Boss', 'Boss':'Boss', 'Líder':'Boss', 'Lider':'Boss', 'Muralha':'Boss',
-    'Saqueador':'Marauder', 'Marauder':'Marauder', 'Progressor':'Progressor', 'Motor':'Engine', 'Engine':'Engine',
-    'Goleiro muralha':'Shot Stopper', 'Shot Stopper':'Shot Stopper', 'Goleiro líbero':'Sweeper Keeper', 'Goleiro libero':'Sweeper Keeper', 'Sweeper Keeper':'Sweeper Keeper'
+    'Capitã':'Finisher', 'Capita':'Finisher', 'Finalizador':'Finisher', 'Finisher':'Finisher', 'Alvo':'Target', 'Referência':'Target', 'Referencia':'Target', 'Target':'Target',
+    'Bruxo':'Magician', 'Mago':'Magician', 'Magician':'Magician', 'Cérebro':'Creator', 'Cerebro':'Creator', 'Criador':'Creator', 'Creator':'Creator', 'Maestro':'Maestro',
+    'Compasso':'Recycler', 'Reciclador':'Recycler', 'Recycler':'Recycler', 'Gatilho':'Spark', 'Faísca':'Spark', 'Faisca':'Spark', 'Spark':'Spark',
+    'Chefia':'Boss', 'Boss':'Boss', 'Líder':'Boss', 'Lider':'Boss',
+    'Comandante':'Marauder', 'Saqueador':'Marauder', 'Marauder':'Marauder', 'Ambivalente':'Progressor', 'Progressor':'Progressor', 'Motorzinho':'Engine', 'Motor':'Engine', 'Engine':'Engine',
+    'Muralha':'Shot Stopper', 'Goleiro muralha':'Shot Stopper', 'Shot Stopper':'Shot Stopper', 'GL-Linha':'Sweeper Keeper', 'GL Linha':'Sweeper Keeper', 'Goleiro líbero':'Sweeper Keeper', 'Goleiro libero':'Sweeper Keeper', 'Sweeper Keeper':'Sweeper Keeper'
   };
   return map[v] || v;
 }
@@ -6843,7 +6843,7 @@ function renderCadastroJogadores() {
         <select id="prof-ps-1-${cssSafeId(p.name)}">${playstyleSelectOptions(selectedStyles[0] || '')}</select>
         <select id="prof-ps-2-${cssSafeId(p.name)}">${playstyleSelectOptions(selectedStyles[1] || '')}</select>
         <select id="prof-ps-3-${cssSafeId(p.name)}">${playstyleSelectOptions(selectedStyles[2] || '')}</select>
-        <button class="btn-mini" onclick="saveProfileFromRow('${p.name.replace(/'/g, "\'")}')">Salvar</button>
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;"><button id="prof-save-${cssSafeId(p.name)}" class="btn-mini" onclick="saveProfileFromRow('${p.name.replace(/'/g, "\'")}')">Salvar</button><span id="prof-status-${cssSafeId(p.name)}" style="display:none;color:var(--green);font-size:11px;font-weight:800;letter-spacing:1px;text-transform:uppercase;">Dados salvos</span></div>
       </div>
     `;
   }).join('');
@@ -6871,14 +6871,25 @@ async function saveProfileFromRow(name) {
   const arch = normalizeArchetypeName(document.getElementById('prof-arch-' + id)?.value || '');
   const notes = profile.notes || '';
   const playstyles = [1,2,3].map(i => normalizePlaystyleName(document.getElementById(`prof-ps-${i}-` + id)?.value || '')).filter(Boolean);
+  const btn = document.getElementById('prof-save-' + id);
+  const status = document.getElementById('prof-status-' + id);
+  const oldText = btn ? btn.textContent : '';
   try {
+    if (btn) { btn.disabled = true; btn.textContent = 'Salvando...'; }
+    if (status) { status.style.color = 'var(--green)'; status.style.display = 'none'; status.textContent = ''; }
     await savePlayerProfile(name, pos, arch, notes, playstyles);
-    renderTab();
+    if (btn) { btn.textContent = 'Salvo!'; }
+    if (status) { status.textContent = 'Dados salvos'; status.style.display = 'inline'; }
+    setTimeout(() => {
+      if (btn) { btn.disabled = false; btn.textContent = oldText || 'Salvar'; }
+      if (status) status.style.display = 'none';
+    }, 1800);
   } catch (e) {
+    if (btn) { btn.disabled = false; btn.textContent = oldText || 'Salvar'; }
+    if (status) { status.textContent = 'Erro ao salvar'; status.style.color = 'var(--red)'; status.style.display = 'inline'; }
     alert(e.message);
   }
 }
-
 
 function findPlaystyle(name) {
   const code = normalizePlaystyleName(name);
@@ -7043,11 +7054,11 @@ function runPlaystyleSimulator() {
   const txt = document.getElementById('sim-text')?.value || '';
   const build = suggestBuildRecipe('', txt);
   const mainHtml = build.main.map((p, i) => `<div class="build-card primary">
-    <div class="style-card-head">${styleIconHtml(playstyleIcon(p.name))}<div><div class="style-card-title">${i+1}. ${p.name}</div><div class="style-card-code">Principal/ouro · ${p.code || ''} · ${p.group}</div></div></div>
+    <div class="style-card-head">${styleIconHtml(playstyleIcon(p.code || p.name))}<div><div class="style-card-title">${i+1}. ${p.name}</div><div class="style-card-code">Principal/ouro · ${p.code || ''} · ${p.group}</div></div></div>
     <div class="build-card-desc">${p.desc}</div>
   </div>`).join('');
   const silverHtml = build.silver.map((p, i) => `<div class="build-card">
-    <div class="style-card-head">${styleIconHtml(playstyleIcon(p.name), true)}<div><div class="style-card-title">${i+1}. ${p.name}</div><div class="style-card-code">Complementar/prata · ${p.code || ''} · ${p.group}</div></div></div>
+    <div class="style-card-head">${styleIconHtml(playstyleIcon(p.code || p.name), true)}<div><div class="style-card-title">${i+1}. ${p.name}</div><div class="style-card-code">Complementar/prata · ${p.code || ''} · ${p.group}</div></div></div>
     <div class="build-card-desc">${p.desc}</div>
   </div>`).join('');
   const attrHtml = (build.attributes || []).map(a => `<tr>
@@ -7061,7 +7072,7 @@ function runPlaystyleSimulator() {
   document.getElementById('sim-result').innerHTML = `
     <div class="section-title" style="grid-column:1/-1;margin-top:8px;">Arquétipo recomendado</div>
     <div class="build-card primary" style="grid-column:1/-1;">
-      <div class="style-card-head">${styleIconHtml(archetypeIcon(build.archetype.name))}<div><div class="style-card-title">${build.archetype.name}</div><div class="style-card-code">${build.archetype.group} · função detectada: ${build.role}</div></div></div>
+      <div class="style-card-head">${styleIconHtml(archetypeIcon(build.archetype.code || build.archetype.name))}<div><div class="style-card-title">${build.archetype.name}</div><div class="style-card-code">${build.archetype.group} · função detectada: ${build.role}</div></div></div>
       <div style="color:var(--text-2);font-size:13px;line-height:1.55;">${build.archetype.desc}</div>
       <div class="build-why">Por que: ${build.why}</div>
     </div>
@@ -7085,7 +7096,7 @@ function renderPlaystyles() {
     <div class="players-grid">
       ${list.map(ps => `<div class="player-card" style="cursor:default;">
         <div class="style-card-group">${ps.group}</div>
-        <div class="style-card-head">${styleIconHtml(playstyleIcon(ps.name))}${styleIconHtml(playstyleIcon(ps.name), true)}<div><div class="style-card-title">${ps.name}</div><div class="style-card-code">${ps.code || ''}</div></div></div>
+        <div class="style-card-head">${styleIconHtml(playstyleIcon(ps.name))}${styleIconHtml(playstyleIcon(ps.code || ps.name), true)}<div><div class="style-card-title">${ps.name}</div><div class="style-card-code">${ps.code || ''}</div></div></div>
         <div style="color:var(--text-2);font-size:12px;line-height:1.5;">${ps.desc}</div>
       </div>`).join('')}
     </div>
@@ -7097,7 +7108,7 @@ function renderPlaystyles() {
     <div class="players-grid">
       ${list.map(a => `<div class="player-card" style="cursor:default;">
         <div class="style-card-group">${a.group}</div>
-        <div class="style-card-head">${styleIconHtml(archetypeIcon(a.name))}<div><div class="style-card-title">${a.name}</div><div class="style-card-code">Arquétipo</div></div></div>
+        <div class="style-card-head">${styleIconHtml(archetypeIcon(a.code || a.name))}<div><div class="style-card-title">${a.name}</div><div class="style-card-code">Arquétipo</div></div></div>
         <div style="color:var(--text-2);font-size:12px;line-height:1.5;">${a.desc}</div>
       </div>`).join('')}
     </div>
@@ -7838,6 +7849,9 @@ if __name__ == "__main__":
     print("="*60 + "\n")
     
     uvicorn.run(app, host="0.0.0.0", port=8000)
+
+
+
 
 
 
