@@ -31,7 +31,7 @@ from fastapi.middleware.cors import CORSMiddleware
 # CONFIGURAÇÃO
 # ============================================================
 
-APP_NAME = "Scout Clubs Pro"
+APP_NAME = "ClubScout Pro"
 
 # Vercel só permite escrita temporária em /tmp
 if os.getenv("VERCEL") == "1":
@@ -899,6 +899,29 @@ def load_latest_club_data_supabase(club_id: Optional[str] = None):
     return None
 
 
+def existing_club_image_url(club_id: str) -> str:
+    """Busca URL de escudo ja salva para preservar em novas sincronizacoes."""
+    try:
+        old = load_latest_club_data_supabase(str(club_id)) or {}
+        club = old.get("club") if isinstance(old, dict) else {}
+        return str((club or {}).get("image_url") or "").strip()
+    except Exception as e:
+        print(f"[club-settings] Aviso ao carregar imagem antiga: {e}")
+        return ""
+
+
+def preserve_club_settings(club_data: dict) -> dict:
+    if not isinstance(club_data, dict):
+        return club_data
+    club = club_data.setdefault("club", {})
+    club_id = str(club.get("id") or "").strip()
+    if club_id and not str(club.get("image_url") or "").strip():
+        image_url = existing_club_image_url(club_id)
+        if image_url:
+            club["image_url"] = image_url
+    return club_data
+
+
 def load_club_meta_supabase(club_id: str) -> dict:
     """Carrega nome/plataforma do clube salvo no Supabase para syncs automaticas."""
     sb = get_supabase()
@@ -1054,6 +1077,10 @@ class AuthResetPayload(BaseModel):
 class AdminUserStatusPayload(BaseModel):
     is_active: Optional[bool] = None
     status: Optional[str] = None
+
+
+class ClubSettingsPayload(BaseModel):
+    image_url: Optional[str] = None
 
 
 def _get_pwd_context():
@@ -2121,6 +2148,31 @@ def get_dashboard(current_user: dict = Depends(get_current_user)):
         return cache
     return {"club": None, "stats": None, "players": [], "matches": [], "opponents": [], "ideal_team": None, "player_profiles": {}}
 
+@app.put("/api/club-settings")
+def update_club_settings(payload: ClubSettingsPayload, current_user: dict = Depends(require_admin)):
+    club_id = str((current_user or {}).get("club_id") or "").strip()
+    if not club_id:
+        raise HTTPException(400, "Clube do usuario nao encontrado")
+    image_url = str(payload.image_url or "").strip()
+    if image_url and not (image_url.startswith("http://") or image_url.startswith("https://")):
+        raise HTTPException(400, "A imagem precisa ser uma URL http ou https")
+
+    club_data = load_latest_club_data_supabase(club_id) or load_cache() or {}
+    club = club_data.setdefault("club", {})
+    club["id"] = club_id
+    club["name"] = club.get("name") or (current_user or {}).get("clube") or "Clube"
+    club["platform"] = club.get("platform") or "common-gen5"
+    club["image_url"] = image_url
+    club["settings_updated_at"] = _now_iso()
+
+    save_club_supabase(club_data)
+    try:
+        save_cache(club_data)
+        save_club_json_history(club_id, club_data)
+    except Exception as e:
+        print(f"[club-settings] Aviso ao salvar fallback local: {e}")
+    return {"success": True, "club": club}
+
 @app.get("/api/ideal-team")
 def get_ideal_team(formation: str = Query("3-5-2"), current_user: dict = Depends(get_current_user)):
     """Retorna o melhor 11 recalculado para a formacao escolhida."""
@@ -2351,6 +2403,7 @@ async def sync_stream(
                 "debug_matchtypes": debug_matchtypes,
                 "matchtype_summary": summarize_matches_by_type(matches),
             }
+            club_data = preserve_club_settings(club_data)
             
             try:
                 if _env_flag("USE_SUPABASE"):
@@ -2548,6 +2601,7 @@ def sync_club_for_auto_update(club_ref: dict) -> dict:
         "debug_matchtypes": debug_matchtypes,
         "matchtype_summary": summarize_matches_by_type(matches),
     }
+    club_data = preserve_club_settings(club_data)
 
     save_club_supabase(club_data)
     save_players_supabase(club_id, players)
@@ -3780,6 +3834,40 @@ body {
   justify-content: center;
   font-size: 28px;
   border: 1px solid var(--border-2);
+}
+
+.club-shield img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: 12px;
+}
+.club-image-editor {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) auto;
+  gap: 8px;
+  margin-top: 10px;
+  max-width: 620px;
+}
+.club-image-editor input {
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  font-family: inherit;
+}
+.club-image-status {
+  grid-column: 1 / -1;
+  color: var(--green);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  display: none;
+}
+@media (max-width: 760px) {
+  .club-image-editor { grid-template-columns: 1fr; }
 }
 
 .club-name {
@@ -5604,7 +5692,7 @@ html, body { max-width: 100%; }
     <div class="logo">
       <div class="logo-icon">⚽</div>
       <div>
-        <div class="logo-text">SCOUT <span>CLUBS</span></div>
+        <div class="logo-text">ClubScout <span>Pro</span></div>
         <div class="logo-sub">Inteligência Esportiva</div>
       </div>
     </div>
@@ -5705,7 +5793,7 @@ function renderAuth(mode = 'login') {
   const isRegister = mode === 'register';
   const isReset = mode === 'reset';
   if (!isAdmin() && ['jogadores','comparar','confrontos','cadastro','adversarios'].includes(CURRENT_TAB)) CURRENT_TAB = 'visao';
-  const title = isRegister ? 'Criar Conta' : isReset ? 'Redefinir Acesso' : 'Entrar no Scout Clubs';
+  const title = isRegister ? 'Criar Conta' : isReset ? 'Redefinir Acesso' : 'Entrar no ClubScout Pro';
   const help = isRegister
     ? 'Crie sua conta como jogador. O admin do clube libera ou bloqueia seu login depois.'
     : isReset
@@ -6226,6 +6314,60 @@ async function loadData() {
   }
 }
 
+function clubImageUrl() {
+  return String((DATA && DATA.club && DATA.club.image_url) || '').trim();
+}
+
+function renderClubShield() {
+  const url = clubImageUrl();
+  if (!url) return '<div class="club-shield">&#128737;</div>';
+  return `<div class="club-shield"><img src="${escapeAttr(url)}" alt="Escudo do clube" onerror="this.parentElement.innerHTML='&#128737;'"></div>`;
+}
+
+function renderClubImageEditor() {
+  if (!isAdmin()) return '';
+  return `
+    <div class="club-image-editor">
+      <input id="clubImageInput" type="url" placeholder="URL da imagem/escudo do clube" value="${escapeAttr(clubImageUrl())}">
+      <button class="btn-mini" type="button" onclick="saveClubImage()">Salvar escudo</button>
+      <div id="clubImageStatus" class="club-image-status">Escudo salvo</div>
+    </div>
+  `;
+}
+
+async function saveClubImage() {
+  const input = document.getElementById('clubImageInput');
+  const status = document.getElementById('clubImageStatus');
+  const imageUrl = (input && input.value ? input.value : '').trim();
+  try {
+    const r = await authFetch('/api/club-settings', {
+      method: 'PUT',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({image_url: imageUrl})
+    });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(data.detail || 'Erro ao salvar escudo');
+    if (DATA && DATA.club) DATA.club.image_url = imageUrl;
+    if (status) {
+      status.textContent = 'Escudo salvo';
+      status.style.display = 'block';
+      status.style.color = 'var(--green)';
+      setTimeout(() => { status.style.display = 'none'; }, 1800);
+    }
+    const shield = document.querySelector('.club-shield');
+    if (shield) shield.outerHTML = renderClubShield();
+  } catch (e) {
+    if (status) {
+      status.textContent = e.message || 'Erro ao salvar';
+      status.style.display = 'block';
+      status.style.color = 'var(--red)';
+      setTimeout(() => { status.style.display = 'none'; status.style.color = 'var(--green)'; }, 2600);
+    } else {
+      alert(e.message || 'Erro ao salvar escudo');
+    }
+  }
+}
+
 function render() {
   const c = document.getElementById('content');
   
@@ -6245,10 +6387,11 @@ function render() {
   c.innerHTML = `
     <div class="club-card">
       <div class="club-info">
-        <div class="club-shield">🛡️</div>
-        <div>
+        ${renderClubShield()}
+        <div style="flex:1;min-width:0;">
           <div class="club-name">${DATA.club.name}</div>
           <div class="club-meta">${computePlayersForMatches(DATA.matches || []).length} jogadores com partidas no clube &middot; ${DATA.matches?.length || 0} partidas</div>
+          ${renderClubImageEditor()}
         </div>
       </div>
     </div>
