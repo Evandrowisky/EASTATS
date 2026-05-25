@@ -1261,7 +1261,7 @@ def _get_app_user_by_usuario(usuario: str, club_id: Optional[str] = None):
         raise HTTPException(503, "Supabase nao configurado para autenticacao")
     usuario_norm = str(usuario or "").strip().lower()
     try:
-        q = sb.table("app_users").select("*").eq("usuario", usuario_norm)
+        q = sb.table("app_users").select("*").ilike("usuario", usuario_norm)
         if club_id:
             q = q.eq("club_id", str(club_id))
         resp = q.limit(1).execute()
@@ -1279,7 +1279,7 @@ def _get_app_users_by_usuario(usuario: str):
         raise HTTPException(503, "Supabase nao configurado para autenticacao")
     usuario_norm = str(usuario or "").strip().lower()
     try:
-        resp = sb.table("app_users").select("*").eq("usuario", usuario_norm).execute()
+        resp = sb.table("app_users").select("*").ilike("usuario", usuario_norm).execute()
         return getattr(resp, "data", None) or []
     except Exception as e:
         print(f"[AUTH] Erro buscando usuarios por login: {type(e).__name__}: {e}")
@@ -1856,7 +1856,7 @@ def auth_register(payload: AuthRegisterPayload):
 
     nome = str(payload.nome or "").strip()
     usuario = str(payload.usuario or "").strip().lower()
-    senha = str(payload.senha or "")
+    senha = str(payload.senha or "").strip()
     clube_informado = str(payload.clube or "").strip()
 
     if not nome or not usuario or not senha or not clube_informado:
@@ -1894,13 +1894,14 @@ def auth_register(payload: AuthRegisterPayload):
 @app.post("/api/auth/login")
 def auth_login(payload: AuthLoginPayload):
     usuario = str(payload.usuario or "").strip().lower()
-    senha = str(payload.senha or "")
+    senha = str(payload.senha or "").strip()
     clube_informado = str(payload.clube or "").strip()
     if not usuario or not senha or not clube_informado:
         raise HTTPException(400, "Usuario, senha e nome do clube sao obrigatorios")
 
     rows = _get_app_users_by_usuario(usuario)
     if not rows:
+        print(f"[AUTH] Login falhou: usuario={usuario} nao encontrado")
         raise HTTPException(401, "Usuario, clube ou senha invalidos")
 
     resolved = None
@@ -1913,6 +1914,7 @@ def auth_login(payload: AuthLoginPayload):
 
     password_matches = [r for r in rows if verify_password(senha, r.get("password_hash"))]
     if not password_matches:
+        print(f"[AUTH] Login falhou: usuario={usuario} encontrado em {len(rows)} cadastro(s), senha nao confere")
         raise HTTPException(401, "Usuario, clube ou senha invalidos")
 
     club_id_resolved = str((resolved or {}).get("club_id") or "")
@@ -1929,6 +1931,7 @@ def auth_login(payload: AuthLoginPayload):
     if row is None and len(password_matches) == 1:
         row = password_matches[0]
     if row is None:
+        print(f"[AUTH] Login falhou: usuario={usuario}, senha ok, clube informado={clube_informado}, club_id_resolvido={club_id_resolved}, cadastros={len(password_matches)}")
         raise HTTPException(401, "Usuario, clube ou senha invalidos")
 
     if not bool(row.get("is_active", True)):
@@ -1958,7 +1961,7 @@ def auth_reset(payload: AuthResetPayload):
     if not sb:
         raise HTTPException(503, "Supabase nao configurado para autenticacao")
     usuario = str(payload.usuario or "").strip().lower()
-    senha_atual = str(payload.senha_atual or "")
+    senha_atual = str(payload.senha_atual or "").strip()
     nova_senha = str(payload.nova_senha or "").strip()
     clube_informado = str(payload.clube or "").strip()
     novo_clube = str(payload.novo_clube or "").strip()
@@ -9235,6 +9238,11 @@ if __name__ == "__main__":
     print("="*60 + "\n")
     
     uvicorn.run(app, host="0.0.0.0", port=8000)
+
+
+
+
+
 
 
 
