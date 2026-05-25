@@ -5470,50 +5470,80 @@ html, body { max-width: 100%; }
   gap: 14px;
 }
 .ranking-card {
-  background: var(--bg-card);
-  border: 1px solid var(--border);
-  border-radius: 12px;
+  background:
+    linear-gradient(145deg, rgba(0,255,115,0.08), rgba(0,0,0,0) 45%),
+    var(--bg-card);
+  border: 1px solid rgba(0,255,115,0.22);
+  border-radius: 14px;
   padding: 16px;
+  box-shadow: 0 0 22px rgba(0,255,115,0.04);
 }
 .ranking-title {
   color: var(--green);
   font-size: 12px;
-  font-weight: 800;
+  font-weight: 900;
   letter-spacing: 2px;
   text-transform: uppercase;
   margin-bottom: 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.ranking-title-icon {
+  width: 30px;
+  height: 30px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 10px;
+  background: rgba(0,255,115,0.12);
+  border: 1px solid rgba(0,255,115,0.28);
+  font-size: 16px;
 }
 .ranking-list { display: grid; gap: 8px; }
 .ranking-row {
   display: grid;
-  grid-template-columns: 34px 1fr auto;
+  grid-template-columns: 38px 1fr auto;
   gap: 10px;
   align-items: center;
   padding: 10px;
-  border: 1px solid rgba(255,255,255,0.06);
-  border-radius: 8px;
+  border: 1px solid rgba(255,255,255,0.07);
+  border-radius: 10px;
   background: rgba(0,255,115,0.035);
   cursor: pointer;
+  transition: transform .18s ease, border-color .18s ease, background .18s ease;
 }
-.ranking-row:hover { border-color: var(--green); background: rgba(0,255,115,0.08); }
+.ranking-row:hover { border-color: var(--green); background: rgba(0,255,115,0.09); transform: translateY(-1px); }
 .ranking-pos {
-  width: 30px;
-  height: 30px;
-  border-radius: 50%;
+  width: 34px;
+  height: 34px;
+  border-radius: 12px;
   display: flex;
   align-items: center;
   justify-content: center;
   background: var(--green-dim);
   color: var(--green);
   font-weight: 900;
+  box-shadow: inset 0 0 0 1px rgba(0,255,115,0.16);
 }
-.ranking-name { font-weight: 800; overflow-wrap: anywhere; }
+.ranking-pos.top1 { background: rgba(255,170,0,0.18); color: var(--yellow); }
+.ranking-pos.top2 { background: rgba(255,255,255,0.12); color: #e6e6e6; }
+.ranking-pos.top3 { background: rgba(205,127,50,0.18); color: #d59a5f; }
+.ranking-name { font-weight: 900; overflow-wrap: anywhere; }
 .ranking-meta { color: var(--text-2); font-size: 11px; margin-top: 2px; }
-.ranking-value { color: var(--green); font-size: 22px; font-weight: 900; text-align: right; }
+.ranking-value {
+  color: var(--green);
+  font-size: 24px;
+  font-weight: 950;
+  text-align: right;
+  min-width: 58px;
+  text-shadow: 0 0 12px rgba(0,255,115,0.35);
+}
 @media (max-width: 760px) {
   .rankings-grid { grid-template-columns: 1fr; }
   .ranking-card { padding: 12px; }
-  .ranking-value { font-size: 18px; }
+  .ranking-row { grid-template-columns: 34px 1fr auto; padding: 9px; }
+  .ranking-value { font-size: 18px; min-width: 44px; }
 }
 
 /* FINAL LAYOUT FIXES */
@@ -5688,14 +5718,14 @@ function renderAuth(mode = 'login') {
         <p>${help}</p>
         <form onsubmit="${isRegister ? 'submitRegister(event)' : isReset ? 'submitResetAccess(event)' : 'submitLogin(event)'}">
           ${isRegister ? `<div class="auth-field"><label>Nome</label><input id="authNome" autocomplete="name" required></div>` : ''}
-          <div class="auth-field"><label>Usu?rio / ID FIFA</label><input id="authUsuario" autocomplete="username" required><div style="color:var(--text-2);font-size:11px;line-height:1.4;">Use o mesmo ID/nome do jogador no FIFA/EA FC, igual aparece no Pro Clubs. ? assim que o Meu Scout encontra suas estat?sticas.</div></div>
+          <div class="auth-field"><label>Usuário / ID FIFA</label><input id="authUsuario" autocomplete="username" required><div style="color:var(--text-2);font-size:11px;line-height:1.4;">Use o mesmo ID/nome do jogador no FIFA/EA FC, igual aparece no Pro Clubs. É assim que o Meu Scout encontra suas estatísticas.</div></div>
           <div class="auth-field"><label>${isReset ? 'Senha atual' : 'Senha'}</label><input id="authSenha" type="password" autocomplete="${isRegister ? 'new-password' : 'current-password'}" required></div>
           ${isReset ? `<div class="auth-field"><label>Nova senha (opcional)</label><input id="authNovaSenha" type="password" autocomplete="new-password" placeholder="Preencha s? se quiser trocar a senha"></div>` : ''}
           <div class="auth-field"><label>${isReset ? 'Clube atual' : 'Nome do Clube'}</label><input id="authClube" placeholder="Nome do clube igual ao Pro Clubs" required><div style="color:var(--text-2);font-size:11px;line-height:1.4;">Digite o nome do clube como est? no EA FC Pro Clubs, incluindo acentos e espa?os quando houver.</div></div>
           ${isReset ? `<div class="auth-field"><label>Novo clube (opcional)</label><input id="authNovoClube" placeholder="Preencha s? se quiser trocar de clube"></div>` : ''}
           <div class="auth-actions">
-            <button class="btn-primary" type="submit">${isRegister ? 'Criar Conta' : isReset ? 'Salvar Altera??o' : 'Entrar'}</button>
-            <button class="auth-link" type="button" onclick="renderAuth('${isRegister || isReset ? 'login' : 'register'}')">${isRegister || isReset ? 'J? tenho conta' : 'Criar conta'}</button>
+            <button class="btn-primary" type="submit">${isRegister ? 'Criar Conta' : isReset ? 'Salvar Alteração' : 'Entrar'}</button>
+            <button class="auth-link" type="button" onclick="renderAuth('${isRegister || isReset ? 'login' : 'register'}')">${isRegister || isReset ? 'Já tenho conta' : 'Criar conta'}</button>
             ${!isRegister && !isReset ? `<button class="auth-link" type="button" onclick="renderAuth('reset')">Redefinir senha/clube</button>` : ''}
           </div>
           <div id="authError" class="auth-error"></div>
@@ -6708,7 +6738,7 @@ function renderMeuScout() {
     </div>`;
 
   let html = `
-    <div class="section-title">Meu Scout ? ${scopeLabel}</div>
+    <div class="section-title">Meu Scout · ${scopeLabel}</div>
     ${scoutControls}
   `;
 
@@ -6811,11 +6841,11 @@ function renderRankings() {
     amistoso: 'amistosos'
   }[CURRENT_MATCH_TYPE] || 'filtro de tipo atual';
   const periodLabel = {
-    todos: 'todo o hist?rico salvo',
-    ult5: '?ltimas 5 partidas',
-    ult10: '?ltimas 10 partidas',
-    semana: '?ltimos 7 dias',
-    mes: '?ltimos 30 dias'
+    todos: 'todo o histórico salvo',
+    ult5: 'últimas 5 partidas',
+    ult10: 'últimas 10 partidas',
+    semana: 'últimos 7 dias',
+    mes: 'últimos 30 dias'
   }[CURRENT_PERIOD] || 'filtro atual';
 
   if (!players.length) {
@@ -6841,7 +6871,10 @@ function renderRankings() {
     return rounded + suffix;
   };
 
-  const topList = (title, key, suffix='', minGames=1, requirePositive=false) => {
+  const podiumIcon = (idx) => idx === 0 ? '??' : idx === 1 ? '??' : idx === 2 ? '??' : String(idx + 1);
+  const podiumClass = (idx) => idx === 0 ? 'top1' : idx === 1 ? 'top2' : idx === 2 ? 'top3' : '';
+
+  const topList = (title, icon, key, suffix='', minGames=1, requirePositive=false) => {
     const rows = players
       .filter(p => Number(p.games || 0) >= minGames)
       .map(p => ({...p, _rank_value: rankValue(p, key)}))
@@ -6850,11 +6883,11 @@ function renderRankings() {
       .slice(0, 5);
     return `
       <div class="ranking-card">
-        <div class="ranking-title">${title}</div>
+        <div class="ranking-title"><span class="ranking-title-icon">${icon}</span>${title}</div>
         <div class="ranking-list">
           ${rows.map((p, idx) => `
-            <div class="ranking-row" onclick="showPlayerDetail('${p.name.replace(/'/g, "\\'")}')">
-              <div class="ranking-pos">${idx + 1}</div>
+            <div class="ranking-row" onclick="showPlayerDetail('${p.name.replace(/'/g, "\'")}')">
+              <div class="ranking-pos ${podiumClass(idx)}">${podiumIcon(idx)}</div>
               <div class="ranking-main">
                 <div class="ranking-name">${p.name}</div>
                 <div class="ranking-meta">${p.position || '-'} ? ${p.games || 0} jogos no filtro</div>
@@ -6867,17 +6900,17 @@ function renderRankings() {
   };
 
   return `
-    <div class="section-title">Rankings ? ${typeLabel} ? ${periodLabel}</div>
+    <div class="section-title">Rankings · ${typeLabel} · ${periodLabel}</div>
     <div style="color:var(--text-2);font-size:12px;margin-bottom:14px;line-height:1.5;">
-      Top 5 calculado somente com partidas do clube atual e respeitando per?odo + tipo de partida selecionados.
+      Top 5 calculado somente com partidas do clube atual e respeitando período + tipo de partida selecionados.
     </div>
     <div class="rankings-grid">
-      ${topList('Top 5 Nota M?dia EA', 'rating')}
-      ${topList('Top 5 Gols', 'goals', '', 1, true)}
-      ${topList('Top 5 Assist?ncias', 'assists', '', 1, true)}
-      ${topList('Top 5 % Passes Certos', 'pass_pct', '%', 1, true)}
-      ${topList('Top 5 % Divididas', 'tackle_pct', '%', 1, true)}
-      ${topList('Top 5 MOM', 'mom', '', 1, true)}
+      ${topList('Top 5 Nota Média EA', '&#9733;', 'rating')}
+      ${topList('Top 5 Gols', '&#9917;', 'goals', '', 1, true)}
+      ${topList('Top 5 Assistências', '&#9673;', 'assists', '', 1, true)}
+      ${topList('Top 5 % Passes Certos', '&#10148;', 'pass_pct', '%', 1, true)}
+      ${topList('Top 5 % Divididas', '&#9635;', 'tackle_pct', '%', 1, true)}
+      ${topList('Top 5 MOM', '&#9819;', 'mom', '', 1, true)}
     </div>
   `;
 }
@@ -7400,7 +7433,7 @@ function renderClubUsersAdmin() {
     const active = !!u.is_active && (u.status || 'ativo') === 'ativo';
     return `
     <div class="profile-row profile-user-row">
-      <div><div class="profile-name">${escapeAttr(u.nome || '-')}</div><div class="profile-meta">Usu?rio/ID FIFA: ${escapeAttr(u.usuario || '-')}</div></div>
+      <div><div class="profile-name">${escapeAttr(u.nome || '-')}</div><div class="profile-meta">Usuário/ID FIFA: ${escapeAttr(u.usuario || '-')}</div></div>
       <div>${escapeAttr(u.clube || '')}</div>
       <div><span class="tag ${u.cargo === 'admin' ? 'liga' : 'amistoso'}">${escapeAttr(u.cargo || 'jogador')}</span></div>
       <div><span class="tag ${active ? 'liga' : (u.status === 'pendente' ? 'e' : 'd')}">${active ? 'ativo' : (u.status || 'inativo')}</span></div>
