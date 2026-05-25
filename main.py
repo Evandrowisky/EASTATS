@@ -14,6 +14,7 @@ import json
 import sqlite3
 import asyncio
 import time
+import unicodedata
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional, Dict, List, Any
@@ -130,14 +131,7 @@ class EAFCClient:
         # Endpoint correto (EA mudou em 2025): allTimeLeaderboard/search
         url = f"{self.BASE_URL}/allTimeLeaderboard/search"
         # Tenta variacoes do nome e multiplas plataformas
-        name_variants = [
-            club_name,
-            club_name.upper(),
-            club_name.title(),
-            club_name.lower(),
-            club_name.replace(' SC', '').strip(),
-            club_name.replace('SC', '').strip(),
-        ]
+        name_variants = _name_variants(club_name)
         if platform == "auto" or not platform:
             platforms = ["common-gen5", "common-gen4"]
         else:
@@ -153,9 +147,9 @@ class EAFCClient:
                 if result and isinstance(result, list) and len(result) > 0:
                     club = result[0]
                     # Nome esta em clubName ou clubInfo.name
-                    cname = club.get("clubName") or club.get("name") or (
+                    cname = _fix_mojibake(club.get("clubName") or club.get("name") or (
                         club.get("clubInfo", {}).get("name") if isinstance(club.get("clubInfo"), dict) else None
-                    ) or nm
+                    ) or nm)
                     return {
                         "success": True,
                         "clubId": str(club.get("clubId")),
@@ -322,8 +316,46 @@ def save_club_json_history(club_id: str, data: dict):
     except Exception as e:
         print(f"[CLUB JSON] Aviso ao salvar historico do clube {club_id}: {e}")
 
+def _strip_accents(value: str) -> str:
+    text = str(value or "")
+    return "".join(ch for ch in unicodedata.normalize("NFKD", text) if not unicodedata.combining(ch))
+
+
+def _fix_mojibake(value: str) -> str:
+    text = str(value or "")
+    if any(mark in text for mark in ("Ã", "Â", "â€", "�")):
+        try:
+            fixed = text.encode("latin1", errors="ignore").decode("utf-8", errors="ignore")
+            if fixed and len(fixed) >= max(2, len(text) * 0.6):
+                return fixed
+        except Exception:
+            pass
+    return text
+
+
+def _name_variants(value: str) -> List[str]:
+    base = _fix_mojibake(str(value or "").strip())
+    no_acc = _strip_accents(base)
+    variants = [
+        base, base.upper(), base.title(), base.lower(),
+        no_acc, no_acc.upper(), no_acc.title(), no_acc.lower(),
+        base.replace(" ", ""), no_acc.replace(" ", ""),
+        base.replace(" SC", "").replace("SC", "").strip(),
+        no_acc.replace(" SC", "").replace("SC", "").strip(),
+    ]
+    out = []
+    seen = set()
+    for item in variants:
+        item = str(item or "").strip()
+        key = item.lower()
+        if item and key not in seen:
+            seen.add(key)
+            out.append(item)
+    return out
+
+
 def _norm_club_name(value: str) -> str:
-    return " ".join(str(value or "").strip().lower().split())
+    return " ".join(_strip_accents(_fix_mojibake(value)).strip().lower().split())
 
 
 def _club_name_matches(wanted: str, candidate: str) -> bool:
@@ -1409,12 +1441,25 @@ def build_ideal_team(players_list, formation="3-5-2"):
     """Monta 11 ideal por formacao, funcao e melhor encaixe disponivel."""
     formation_slots = {
         "3-5-2": ["GK", "LCB", "CB", "RCB", "LM", "LCM", "CM", "RCM", "RM", "LST", "RST"],
-        "4-3-3": ["GK", "LB", "LCB", "RCB", "RB", "LCM", "CM", "RCM", "LW", "ST", "RW"],
-        "4-4-2": ["GK", "LB", "LCB", "RCB", "RB", "LM", "LCM", "RCM", "RM", "LST", "RST"],
-        "4-2-3-1": ["GK", "LB", "LCB", "RCB", "RB", "LDM", "RDM", "LAM", "CAM", "RAM", "ST"],
-        "4-1-2-1-2": ["GK", "LB", "LCB", "RCB", "RB", "CDM", "LCM", "RCM", "CAM", "LST", "RST"],
         "3-4-3": ["GK", "LCB", "CB", "RCB", "LM", "LCM", "RCM", "RM", "LW", "ST", "RW"],
+        "3-4-1-2": ["GK", "LCB", "CB", "RCB", "LM", "LCM", "RCM", "RM", "CAM", "LST", "RST"],
+        "3-1-4-2": ["GK", "LCB", "CB", "RCB", "CDM", "LM", "LCM", "RCM", "RM", "LST", "RST"],
+        "3-4-2-1": ["GK", "LCB", "CB", "RCB", "LM", "LCM", "RCM", "RM", "LF", "RF", "ST"],
+        "4-3-3": ["GK", "LB", "LCB", "RCB", "RB", "LCM", "CM", "RCM", "LW", "ST", "RW"],
+        "4-3-3 Defensivo": ["GK", "LB", "LCB", "RCB", "RB", "CDM", "LCM", "RCM", "LW", "ST", "RW"],
+        "4-3-3 Ofensivo": ["GK", "LB", "LCB", "RCB", "RB", "LCM", "RCM", "CAM", "LW", "ST", "RW"],
+        "4-3-2-1": ["GK", "LB", "LCB", "RCB", "RB", "LCM", "CM", "RCM", "LF", "RF", "ST"],
+        "4-4-2": ["GK", "LB", "LCB", "RCB", "RB", "LM", "LCM", "RCM", "RM", "LST", "RST"],
+        "4-1-4-1": ["GK", "LB", "LCB", "RCB", "RB", "CDM", "LM", "LCM", "RCM", "RM", "ST"],
+        "4-5-1": ["GK", "LB", "LCB", "RCB", "RB", "LM", "LCM", "CM", "RCM", "RM", "ST"],
+        "4-2-3-1": ["GK", "LB", "LCB", "RCB", "RB", "LDM", "RDM", "LAM", "CAM", "RAM", "ST"],
+        "4-2-2-2": ["GK", "LB", "LCB", "RCB", "RB", "LDM", "RDM", "LAM", "RAM", "LST", "RST"],
+        "4-1-2-1-2": ["GK", "LB", "LCB", "RCB", "RB", "CDM", "LCM", "RCM", "CAM", "LST", "RST"],
+        "4-2-4": ["GK", "LB", "LCB", "RCB", "RB", "LDM", "RDM", "LW", "LST", "RST", "RW"],
         "5-3-2": ["GK", "LWB", "LCB", "CB", "RCB", "RWB", "LCM", "CM", "RCM", "LST", "RST"],
+        "5-2-3": ["GK", "LWB", "LCB", "CB", "RCB", "RWB", "LCM", "RCM", "LW", "ST", "RW"],
+        "5-2-1-2": ["GK", "LWB", "LCB", "CB", "RCB", "RWB", "LDM", "RDM", "CAM", "LST", "RST"],
+        "5-4-1": ["GK", "LWB", "LCB", "CB", "RCB", "RWB", "LM", "LCM", "RCM", "RM", "ST"],
     }
     slot_descriptions = {
         "GK": "Goleiro - protege a meta e inicia a saida de bola.",
@@ -1438,6 +1483,8 @@ def build_ideal_team(players_list, formation="3-5-2"):
         "RAM": "Meia ofensivo direito - corta para dentro e cria.",
         "LW": "Ponta esquerda - profundidade e finalizacao pelo lado.",
         "RW": "Ponta direita - profundidade e finalizacao pelo lado.",
+        "LF": "Atacante/ponta interior esquerdo - ataca meia-lua e profundidade.",
+        "RF": "Atacante/ponta interior direito - ataca meia-lua e profundidade.",
         "ST": "Centroavante - referencia, gols e ataque a area.",
         "LST": "Atacante esquerdo - ataca espacos e combina por dentro.",
         "RST": "Atacante direito - ataca espacos e combina por dentro.",
@@ -1445,7 +1492,7 @@ def build_ideal_team(players_list, formation="3-5-2"):
     slot_coords = {
         "GK": (50, 92), "LB": (18, 76), "LWB": (14, 68), "LCB": (35, 78), "CB": (50, 80), "RCB": (65, 78), "RB": (82, 76), "RWB": (86, 68),
         "CDM": (50, 64), "LDM": (40, 64), "RDM": (60, 64), "LCM": (36, 52), "CM": (50, 50), "RCM": (64, 52), "LM": (18, 48), "RM": (82, 48),
-        "LAM": (34, 34), "CAM": (50, 34), "RAM": (66, 34), "LW": (24, 22), "RW": (76, 22), "ST": (50, 16), "LST": (42, 16), "RST": (58, 16),
+        "LAM": (34, 34), "CAM": (50, 34), "RAM": (66, 34), "LW": (24, 22), "RW": (76, 22), "LF": (38, 24), "RF": (62, 24), "ST": (50, 16), "LST": (42, 16), "RST": (58, 16),
     }
     family_by_position = {
         "goalkeeper": "GK", "gk": "GK",
@@ -1457,7 +1504,7 @@ def build_ideal_team(players_list, formation="3-5-2"):
         "GK": ["GK"],
         "LB": ["DEF", "MID"], "RB": ["DEF", "MID"], "LWB": ["DEF", "MID"], "RWB": ["DEF", "MID"], "LCB": ["DEF"], "CB": ["DEF"], "RCB": ["DEF"],
         "CDM": ["MID", "DEF"], "LDM": ["MID", "DEF"], "RDM": ["MID", "DEF"], "LCM": ["MID"], "CM": ["MID"], "RCM": ["MID"], "LM": ["MID", "FWD"], "RM": ["MID", "FWD"],
-        "CAM": ["MID", "FWD"], "LAM": ["MID", "FWD"], "RAM": ["MID", "FWD"], "LW": ["FWD", "MID"], "RW": ["FWD", "MID"], "ST": ["FWD"], "LST": ["FWD"], "RST": ["FWD"],
+        "CAM": ["MID", "FWD"], "LAM": ["MID", "FWD"], "RAM": ["MID", "FWD"], "LW": ["FWD", "MID"], "RW": ["FWD", "MID"], "LF": ["FWD", "MID"], "RF": ["FWD", "MID"], "ST": ["FWD"], "LST": ["FWD"], "RST": ["FWD"],
     }
     def n(value, default=0.0):
         try:
@@ -2929,7 +2976,7 @@ def list_player_profiles(current_user: dict = Depends(get_current_user)):
 
 
 @app.put("/api/player-profiles/{player_name}")
-def update_player_profile(player_name: str, item: PlayerProfileUpdate, current_user: dict = Depends(get_current_user)):
+def update_player_profile(player_name: str, item: PlayerProfileUpdate, current_user: dict = Depends(require_admin)):
     """Salva ajuste manual para um jogador sem depender de banco externo."""
     club_id = str((current_user or {}).get("club_id") or _current_club_id_from_cache())
     manual_position = (item.manual_position or "").strip() or None
@@ -5215,7 +5262,7 @@ function renderAuth(mode = 'login') {
   const c = document.getElementById('content');
   if (!c) return;
   const isRegister = mode === 'register';
-  if (!isAdmin() && ['jogadores','comparar','confrontos','adversarios'].includes(CURRENT_TAB)) CURRENT_TAB = 'visao';
+  if (!isAdmin() && ['jogadores','comparar','confrontos','cadastro','adversarios'].includes(CURRENT_TAB)) CURRENT_TAB = 'visao';
   c.innerHTML = `
     <div class="auth-shell">
       <div class="auth-card">
@@ -5328,59 +5375,58 @@ async function initAuth() {
 }
 
 const PLAYSTYLE_CATALOG = [
-  {name:'Chute Forte', code:'Power Shot', group:'Finalização', desc:'Chutes fortes de média/longa distância com mais potência.'},
-  {name:'Bola Parada', code:'Dead Ball', group:'Finalização', desc:'Faltas, escanteios e bolas paradas com mais curva e precisão.'},
-  {name:'Cavadinha', code:'Chip Shot', group:'Finalização', desc:'Cavadinhas e finalizações por cobertura mais eficientes.'},
-  {name:'Chute Colocado', code:'Finesse Shot', group:'Finalização', desc:'Chutes colocados com curva e precisão.'},
-  {name:'Cabeceio Forte', code:'Power Header', group:'Finalização', desc:'Cabeceios ofensivos mais fortes e precisos.'},
-  {name:'Passe Incisivo', code:'Incisive Pass', group:'Passe', desc:'Enfiadas e passes que quebram linhas.'},
-  {name:'Passe Pingado', code:'Pinged Pass', group:'Passe', desc:'Passes rasteiros fortes com velocidade e controle.'},
-  {name:'Lançamento Longo', code:'Long Ball Pass', group:'Passe', desc:'Lançamentos longos mais precisos.'},
-  {name:'Tiki-Taka', code:'Tiki Taka', group:'Passe', desc:'Passes curtos de primeira e combinações rápidas.'},
-  {name:'Cruzamento Tenso', code:'Whipped Pass', group:'Passe', desc:'Cruzamentos com curva, velocidade e perigo.'},
-  {name:'Primeiro Toque', code:'First Touch', group:'Controle', desc:'Primeiro toque orientado e domínio sob pressão.'},
-  {name:'Estilo', code:'Flair', group:'Controle', desc:'Passes e finalizações plásticas com mais eficácia.'},
-  {name:'Resistente à Pressão', code:'Press Proven', group:'Controle', desc:'Protege a bola melhor sob pressão.'},
-  {name:'Rápido com Bola', code:'Rapid', group:'Controle', desc:'Corridas em velocidade com a bola.'},
-  {name:'Técnico', code:'Technical', group:'Controle', desc:'Condução técnica e dribles controlados.'},
-  {name:'Driblador', code:'Trickster', group:'Controle', desc:'Dribles especiais e movimentos de habilidade.'},
-  {name:'Bloqueio', code:'Block', group:'Defesa', desc:'Bloqueios defensivos mais eficazes.'},
-  {name:'Brigador', code:'Bruiser', group:'Defesa', desc:'Duelos físicos e disputas de corpo mais fortes.'},
-  {name:'Interceptação', code:'Intercept', group:'Defesa', desc:'Interceptações e cortes de passe melhores.'},
-  {name:'Contenção', code:'Jockey', group:'Defesa', desc:'Contenção lateral e marcação em jockey mais eficiente.'},
-  {name:'Carrinho', code:'Slide Tackle', group:'Defesa', desc:'Carrinhos com maior alcance e precisão.'},
-  {name:'Antecipação', code:'Anticipate', group:'Defesa', desc:'Botes em pé e antecipações mais limpos.'},
-  {name:'Acrobático', code:'Acrobatic', group:'Físico', desc:'Voleios, bicicletas e ações acrobáticas.'},
-  {name:'Jogo Aéreo', code:'Aerial', group:'Físico', desc:'Disputas aéreas ofensivas e defensivas.'},
-  {name:'Trivela', code:'Trivela', group:'Físico', desc:'Passes e chutes de três dedos.'},
-  {name:'Incansável', code:'Relentless', group:'Físico', desc:'Fôlego, recomposição e pressão por mais tempo.'},
-  {name:'Arranque', code:'Quick Step', group:'Físico', desc:'Explosão nos primeiros metros.'},
-  {name:'Arremesso Longo', code:'Long Throw', group:'Físico', desc:'Laterais longos para área ou profundidade.'},
-  {name:'Reposição Longa', code:'Far Throw', group:'Goleiro', desc:'Reposição longa com as mãos.'},
-  {name:'Defesa com os Pés', code:'Footwork', group:'Goleiro', desc:'Defesas com os pés e ajustes curtos.'},
-  {name:'Domínio da Área', code:'Cross Claimer', group:'Goleiro', desc:'Saídas em cruzamentos.'},
-  {name:'Saída Rápida', code:'Rush Out', group:'Goleiro', desc:'Saídas rápidas do gol para abafar.'},
-  {name:'Alcance Longo', code:'Far Reach', group:'Goleiro', desc:'Alcance em defesas no canto.'},
-  {name:'Reflexos Rápidos', code:'Quick Reflexes', group:'Goleiro', desc:'Reflexos em chutes próximos.'},
+  {name:'Finesse Shot', code:'Finesse Shot', group:'Finalização', desc:'Chutes colocados com curva e precisão.'},
+  {name:'Chip Shot', code:'Chip Shot', group:'Finalização', desc:'Cavadinhas e finalizações por cobertura mais eficientes.'},
+  {name:'Power Shot', code:'Power Shot', group:'Finalização', desc:'Chutes fortes de média/longa distância com mais potência.'},
+  {name:'Dead Ball', code:'Dead Ball', group:'Finalização', desc:'Faltas, escanteios e bolas paradas com mais curva e precisão.'},
+  {name:'Precision Header', code:'Precision Header', group:'Finalização', desc:'Cabeceios ofensivos mais precisos e fortes.'},
+  {name:'Acrobatic', code:'Acrobatic', group:'Finalização', desc:'Voleios, bicicletas e ações acrobáticas.'},
+  {name:'Low Driven Shot', code:'Low Driven Shot', group:'Finalização', desc:'Chutes rasteiros com velocidade e precisão.'},
+  {name:'Gamechanger', code:'Gamechanger', group:'Finalização', desc:'Finalizações criativas e imprevisíveis em momentos decisivos.'},
+  {name:'Incisive Pass', code:'Incisive Pass', group:'Passe', desc:'Enfiadas e passes que quebram linhas.'},
+  {name:'Pinged Pass', code:'Pinged Pass', group:'Passe', desc:'Passes rasteiros fortes com velocidade e controle.'},
+  {name:'Long Ball Pass', code:'Long Ball Pass', group:'Passe', desc:'Lançamentos longos mais precisos.'},
+  {name:'Tiki Taka', code:'Tiki Taka', group:'Passe', desc:'Passes curtos de primeira e combinações rápidas.'},
+  {name:'Whipped Pass', code:'Whipped Pass', group:'Passe', desc:'Cruzamentos com curva, velocidade e perigo.'},
+  {name:'Inventive', code:'Inventive', group:'Passe', desc:'Passes criativos, imprevisíveis e combinações não convencionais.'},
+  {name:'Jockey', code:'Jockey', group:'Defesa', desc:'Jockey lateral e marcação em jockey mais eficiente.'},
+  {name:'Block', code:'Block', group:'Defesa', desc:'Blocks defensivos mais eficazes.'},
+  {name:'Intercept', code:'Intercept', group:'Defesa', desc:'Interceptações e cortes de passe melhores.'},
+  {name:'Anticipate', code:'Anticipate', group:'Defesa', desc:'Botes em pé e antecipações mais limpos.'},
+  {name:'Slide Tackle', code:'Slide Tackle', group:'Defesa', desc:'Slide Tackles com maior alcance e precisão.'},
+  {name:'Aerial Fortress', code:'Aerial Fortress', group:'Defesa', desc:'Domínio de disputas aéreas ofensivas e defensivas.'},
+  {name:'Technical', code:'Technical', group:'Controle de bola', desc:'Condução técnica e dribles controlados.'},
+  {name:'Rapid', code:'Rapid', group:'Controle de bola', desc:'Corridas em velocidade com a bola.'},
+  {name:'First Touch', code:'First Touch', group:'Controle de bola', desc:'Primeiro toque orientado e domínio sob pressão.'},
+  {name:'Trickster', code:'Trickster', group:'Controle de bola', desc:'Dribles especiais e movimentos de habilidade.'},
+  {name:'Press Proven', code:'Press Proven', group:'Controle de bola', desc:'Protege a bola melhor sob pressão.'},
+  {name:'Quick Step', code:'Quick Step', group:'Físico', desc:'Explosão nos primeiros metros.'},
+  {name:'Relentless', code:'Relentless', group:'Físico', desc:'Fôlego, recomposição e pressão por mais tempo.'},
+  {name:'Long Throw', code:'Long Throw', group:'Físico', desc:'Laterais longos para área ou profundidade.'},
+  {name:'Bruiser', code:'Bruiser', group:'Físico', desc:'Duelos físicos e disputas de corpo mais fortes.'},
+  {name:'Enforcer', code:'Enforcer', group:'Físico', desc:'Contato físico, proteção e imposição corporal com mais eficiência.'},
+  {name:'Far Throw', code:'Far Throw', group:'Goleiro', desc:'Reposição longa com as mãos.'},
+  {name:'Footwork', code:'Footwork', group:'Goleiro', desc:'Defesas com os pés e ajustes curtos.'},
+  {name:'Cross Claimer', code:'Cross Claimer', group:'Goleiro', desc:'Saídas em cruzamentos.'},
+  {name:'Rush Out', code:'Rush Out', group:'Goleiro', desc:'Saídas rápidas do gol para abafar.'},
+  {name:'Far Reach', code:'Far Reach', group:'Goleiro', desc:'Alcance em defesas no canto.'},
+  {name:'Deflector', code:'Deflector', group:'Goleiro', desc:'Espalma e desvia bolas para zonas mais seguras.'},
 ];
-
 const ARCHETYPE_CATALOG = [
-  {name:'Chefia', group:'Defesa', desc:'Perfil de liderança defensiva: organiza a linha, ganha duelos e protege a área.'},
-  {name:'Líbero', group:'Defesa', desc:'Zagueiro que antecipa, cobre profundidade e ajuda na saída de bola.'},
-  {name:'Cão de Guarda', group:'Defesa', desc:'Marcador agressivo para pressão, bote e combate no meio.'},
-  {name:'Progressor', group:'Defesa', desc:'Zagueiro moderno que avança com segurança e inicia ataques com passe progressivo.'},
-  {name:'Motor', group:'Meio-campo', desc:'Meio-campista de ida e volta, pressão constante e apoio nas duas fases.'},
-  {name:'Maestro', group:'Meio-campo', desc:'Criador que controla ritmo, acha passes e organiza a construção.'},
-  {name:'Camisa 10', group:'Meio-campo', desc:'Meia ofensivo de criação, último passe e tomada de decisão perto da área.'},
-  {name:'Ala Criador', group:'Meio-campo', desc:'Jogador aberto para amplitude, cruzamentos e apoio ofensivo.'},
-  {name:'Ponta Agudo', group:'Ataque', desc:'Atacante de lado com velocidade, drible e ataque ao espaço.'},
-  {name:'Matador', group:'Ataque', desc:'Finalizador central, foco em gols, posicionamento e decisão na área.'},
-  {name:'Falso 9', group:'Ataque', desc:'Atacante que sai da área, conecta jogadas e cria para quem infiltra.'},
-  {name:'Referência', group:'Ataque', desc:'Centroavante físico para pivô, proteção e jogo aéreo.'},
-  {name:'Paredão', group:'Goleiro', desc:'Goleiro de reflexo e defesa de chutes próximos.'},
-  {name:'Goleiro Líbero', group:'Goleiro', desc:'Goleiro que sai do gol, cobre profundidade e inicia jogadas.'},
+  {name:'Finisher', group:'Atacantes', desc:'Finalizador de área: posicionamento, chute e decisão para transformar chance em gol.'},
+  {name:'Target', group:'Atacantes', desc:'Target física: pivô, jogo aéreo, proteção e presença na área.'},
+  {name:'Magician', group:'Atacantes', desc:'Atacante criativo: mobilidade, improviso, último passe e finalização diferente.'},
+  {name:'Creator', group:'Meias / pontas', desc:'Criador de chances: visão, passe incisivo, assistência e jogo entre linhas.'},
+  {name:'Maestro', group:'Meias / pontas', desc:'Controlador de ritmo: passe curto, circulação, pausa e organização.'},
+  {name:'Recycler', group:'Meias / pontas', desc:'Recuperador/reciclador: rouba, protege e recoloca a bola em jogo com segurança.'},
+  {name:'Spark', group:'Meias / pontas', desc:'Jogador explosivo: aceleração, drible, 1x1 e desequilíbrio pelo lado.'},
+  {name:'Boss', group:'Defensores', desc:'Líder defensivo: organiza a linha, ganha duelos, protege a área e domina pelo alto.'},
+  {name:'Marauder', group:'Defensores', desc:'Defensor/ala agressivo: avança, pressiona, cruza e recompõe corredor.'},
+  {name:'Progressor', group:'Defensores', desc:'Defensor construtor: antecipa, conduz e progride a saída com passes.'},
+  {name:'Engine', group:'Defensores', desc:'Defensor de energia: cobertura, ritmo, combate e presença em várias zonas.'},
+  {name:'Shot Stopper', group:'Goleiros', desc:'Goleiro de reflexo: foco em defesa de chutes, alcance e segurança na meta.'},
+  {name:'Sweeper Keeper', group:'Goleiros', desc:'Goleiro líbero: sai do gol, cobre profundidade e inicia jogadas.'},
 ];
-
 function filteredMatches() {
   let all = (DATA && DATA.matches) ? [...DATA.matches] : [];
   if (CURRENT_MATCH_TYPE !== 'todos') {
@@ -5415,7 +5461,7 @@ function setPeriod(p, ev) {
   if (ev && ev.target) ev.target.classList.add('active');
   if (!isAdmin()) {
     document.querySelectorAll('.tab').forEach(el => {
-      if (['JOGADORES','COMPARAR','CONFRONTOS','ADVERSÁRIOS'].includes((el.textContent || '').trim())) el.remove();
+      if (['JOGADORES','COMPARAR','CONFRONTOS','CADASTRO','ADVERSÁRIOS'].includes((el.textContent || '').trim())) el.remove();
     });
   }
   renderTab();
@@ -5428,7 +5474,7 @@ function setMatchType(t, ev) {
   if (ev && ev.target) ev.target.classList.add('active');
   if (!isAdmin()) {
     document.querySelectorAll('.tab').forEach(el => {
-      if (['JOGADORES','COMPARAR','CONFRONTOS','ADVERSÁRIOS'].includes((el.textContent || '').trim())) el.remove();
+      if (['JOGADORES','COMPARAR','CONFRONTOS','CADASTRO','ADVERSÁRIOS'].includes((el.textContent || '').trim())) el.remove();
     });
   }
   renderTab();
@@ -5699,7 +5745,7 @@ function render() {
   const c = document.getElementById('content');
   
   if (!DATA || !DATA.club) {
-    if (!isAdmin() && ['jogadores','comparar','confrontos','adversarios'].includes(CURRENT_TAB)) CURRENT_TAB = 'visao';
+    if (!isAdmin() && ['jogadores','comparar','confrontos','cadastro','adversarios'].includes(CURRENT_TAB)) CURRENT_TAB = 'visao';
   c.innerHTML = `
       <div class="empty-state">
         <div class="empty-icon">⚽</div>
@@ -5710,7 +5756,7 @@ function render() {
     return;
   }
   
-  if (!isAdmin() && ['jogadores','comparar','confrontos','adversarios'].includes(CURRENT_TAB)) CURRENT_TAB = 'visao';
+  if (!isAdmin() && ['jogadores','comparar','confrontos','cadastro','adversarios'].includes(CURRENT_TAB)) CURRENT_TAB = 'visao';
   c.innerHTML = `
     <div class="club-card">
       <div class="club-info">
@@ -5729,7 +5775,7 @@ function render() {
       <div class="tab ${CURRENT_TAB==='comparar'?'active':''}" onclick="setTab('comparar')">COMPARAR</div>
       <div class="tab ${CURRENT_TAB==='confrontos'?'active':''}" onclick="setTab('confrontos')">CONFRONTOS</div>
       <div class="tab ${CURRENT_TAB==='time-ideal'?'active':''}" onclick="setTab('time-ideal')">TIME IDEAL</div>
-      <div class="tab ${CURRENT_TAB==='cadastro'?'active':''}" onclick="setTab('cadastro')">CADASTRO</div>
+      ${isAdmin() ? `<div class="tab ${CURRENT_TAB==='cadastro'?'active':''}" onclick="setTab('cadastro')">CADASTRO</div>` : ''}
       <div class="tab ${CURRENT_TAB==='playstyles'?'active':''}" onclick="setTab('playstyles')">ESTILOS</div>
       <div class="tab ${CURRENT_TAB==='adversarios'?'active':''}" onclick="setTab('adversarios')">ADVERSÁRIOS</div>
       <div class="tab ${CURRENT_TAB==='agenda'?'active':''}" onclick="setTab('agenda')">AGENDA</div>
@@ -5758,7 +5804,7 @@ function render() {
   
   if (!isAdmin()) {
     document.querySelectorAll('.tab').forEach(el => {
-      if (['JOGADORES','COMPARAR','CONFRONTOS','ADVERSÁRIOS'].includes((el.textContent || '').trim())) el.remove();
+      if (['JOGADORES','COMPARAR','CONFRONTOS','CADASTRO','ADVERSÁRIOS'].includes((el.textContent || '').trim())) el.remove();
     });
   }
   renderTab();
@@ -5770,7 +5816,7 @@ function setTab(t) {
   event.target.classList.add('active');
   if (!isAdmin()) {
     document.querySelectorAll('.tab').forEach(el => {
-      if (['JOGADORES','COMPARAR','CONFRONTOS','ADVERSÁRIOS'].includes((el.textContent || '').trim())) el.remove();
+      if (['JOGADORES','COMPARAR','CONFRONTOS','CADASTRO','ADVERSÁRIOS'].includes((el.textContent || '').trim())) el.remove();
     });
   }
   renderTab();
@@ -5786,10 +5832,10 @@ function renderTab() {
   else if (CURRENT_TAB === 'comparar') { tc.innerHTML = renderComparar(); renderCompareBars(); }
   else if (CURRENT_TAB === 'confrontos') tc.innerHTML = renderConfrontos();
   else if (CURRENT_TAB === 'time-ideal') tc.innerHTML = renderTimeIdeal();
-  else if (CURRENT_TAB === 'cadastro') tc.innerHTML = renderCadastroJogadores();
+  else if (CURRENT_TAB === 'cadastro' && isAdmin()) tc.innerHTML = renderCadastroJogadores();
   else if (CURRENT_TAB === 'playstyles') tc.innerHTML = renderPlaystyles();
   else if (CURRENT_TAB === 'adversarios') tc.innerHTML = renderAdversarios();
-  else if (['jogadores','comparar','confrontos','adversarios'].includes(CURRENT_TAB) && !isAdmin()) { CURRENT_TAB = 'visao'; tc.innerHTML = renderVisao(); }
+  else if (['jogadores','comparar','confrontos','cadastro','adversarios'].includes(CURRENT_TAB) && !isAdmin()) { CURRENT_TAB = 'visao'; tc.innerHTML = renderVisao(); }
   else if (CURRENT_TAB === 'agenda') tc.innerHTML = renderAgenda();
 }
 
@@ -6424,18 +6470,30 @@ function inferPlayerPositionIntel(player) {
 }
 const FORMATION_SLOTS = {
   '3-5-2': ['GK','LCB','CB','RCB','LM','LCM','CM','RCM','RM','LST','RST'],
-  '4-3-3': ['GK','LB','LCB','RCB','RB','LCM','CM','RCM','LW','ST','RW'],
-  '4-4-2': ['GK','LB','LCB','RCB','RB','LM','LCM','RCM','RM','LST','RST'],
-  '4-2-3-1': ['GK','LB','LCB','RCB','RB','LDM','RDM','LAM','CAM','RAM','ST'],
-  '4-1-2-1-2': ['GK','LB','LCB','RCB','RB','CDM','LCM','RCM','CAM','LST','RST'],
   '3-4-3': ['GK','LCB','CB','RCB','LM','LCM','RCM','RM','LW','ST','RW'],
+  '3-4-1-2': ['GK','LCB','CB','RCB','LM','LCM','RCM','RM','CAM','LST','RST'],
+  '3-1-4-2': ['GK','LCB','CB','RCB','CDM','LM','LCM','RCM','RM','LST','RST'],
+  '3-4-2-1': ['GK','LCB','CB','RCB','LM','LCM','RCM','RM','LF','RF','ST'],
+  '4-3-3': ['GK','LB','LCB','RCB','RB','LCM','CM','RCM','LW','ST','RW'],
+  '4-3-3 Defensivo': ['GK','LB','LCB','RCB','RB','CDM','LCM','RCM','LW','ST','RW'],
+  '4-3-3 Ofensivo': ['GK','LB','LCB','RCB','RB','LCM','RCM','CAM','LW','ST','RW'],
+  '4-3-2-1': ['GK','LB','LCB','RCB','RB','LCM','CM','RCM','LF','RF','ST'],
+  '4-4-2': ['GK','LB','LCB','RCB','RB','LM','LCM','RCM','RM','LST','RST'],
+  '4-1-4-1': ['GK','LB','LCB','RCB','RB','CDM','LM','LCM','RCM','RM','ST'],
+  '4-5-1': ['GK','LB','LCB','RCB','RB','LM','LCM','CM','RCM','RM','ST'],
+  '4-2-3-1': ['GK','LB','LCB','RCB','RB','LDM','RDM','LAM','CAM','RAM','ST'],
+  '4-2-2-2': ['GK','LB','LCB','RCB','RB','LDM','RDM','LAM','RAM','LST','RST'],
+  '4-1-2-1-2': ['GK','LB','LCB','RCB','RB','CDM','LCM','RCM','CAM','LST','RST'],
+  '4-2-4': ['GK','LB','LCB','RCB','RB','LDM','RDM','LW','LST','RST','RW'],
   '5-3-2': ['GK','LWB','LCB','CB','RCB','RWB','LCM','CM','RCM','LST','RST'],
+  '5-2-3': ['GK','LWB','LCB','CB','RCB','RWB','LCM','RCM','LW','ST','RW'],
+  '5-2-1-2': ['GK','LWB','LCB','CB','RCB','RWB','LDM','RDM','CAM','LST','RST'],
+  '5-4-1': ['GK','LWB','LCB','CB','RCB','RWB','LM','LCM','RCM','RM','ST'],
 };
-
 const ROLE_COORDS = {
   GK:[50,94], LB:[16,78], LWB:[12,66], LCB:[32,82], CB:[50,84], RCB:[68,82], RB:[84,78], RWB:[88,66],
   CDM:[50,66], LDM:[38,66], RDM:[62,66], LCM:[34,54], CM:[50,51], RCM:[66,54], LM:[14,48], RM:[86,48],
-  LAM:[32,35], CAM:[50,33], RAM:[68,35], LW:[20,22], RW:[80,22], ST:[50,15], LST:[39,15], RST:[61,15],
+  LAM:[32,35], CAM:[50,33], RAM:[68,35], LW:[20,22], RW:[80,22], LF:[38,24], RF:[62,24], ST:[50,15], LST:[39,15], RST:[61,15],
 };
 
 const ROLE_DESC = {
@@ -6448,13 +6506,14 @@ const ROLE_DESC = {
   LM:'Meia/ala esquerdo - amplitude e criação pelo lado.', RM:'Meia/ala direito - amplitude e criação pelo lado.',
   CAM:'Meia ofensivo - cria chances entre linhas.', LAM:'Meia ofensivo esquerdo - corta para dentro e cria.', RAM:'Meia ofensivo direito - corta para dentro e cria.',
   LW:'Ponta esquerda - profundidade e finalização pelo lado.', RW:'Ponta direita - profundidade e finalização pelo lado.',
+  LF:'Atacante/ponta interior esquerdo - ataca meia-lua e profundidade.', RF:'Atacante/ponta interior direito - ataca meia-lua e profundidade.',
   ST:'Centroavante - referência, gols e ataque à área.', LST:'Atacante esquerdo - ataca espaços e combina por dentro.', RST:'Atacante direito - ataca espaços e combina por dentro.',
 };
 
 const ROLE_PREF = {
   GK:['GK'], LB:['DEF','MID'], RB:['DEF','MID'], LWB:['DEF','MID'], RWB:['DEF','MID'], LCB:['DEF'], CB:['DEF'], RCB:['DEF'],
   CDM:['MID','DEF'], LDM:['MID','DEF'], RDM:['MID','DEF'], LCM:['MID'], CM:['MID'], RCM:['MID'], LM:['MID','FWD'], RM:['MID','FWD'],
-  CAM:['MID','FWD'], LAM:['MID','FWD'], RAM:['MID','FWD'], LW:['FWD','MID'], RW:['FWD','MID'], ST:['FWD'], LST:['FWD'], RST:['FWD'],
+  CAM:['MID','FWD'], LAM:['MID','FWD'], RAM:['MID','FWD'], LW:['FWD','MID'], RW:['FWD','MID'], LF:['FWD','MID'], RF:['FWD','MID'], ST:['FWD'], LST:['FWD'], RST:['FWD'],
 };
 
 function roleScore(p, targetFamily) {
@@ -6500,7 +6559,7 @@ function setIdealFormation(value) {
   IDEAL_FORMATION = value;
   if (!isAdmin()) {
     document.querySelectorAll('.tab').forEach(el => {
-      if (['JOGADORES','COMPARAR','CONFRONTOS','ADVERSÁRIOS'].includes((el.textContent || '').trim())) el.remove();
+      if (['JOGADORES','COMPARAR','CONFRONTOS','CADASTRO','ADVERSÁRIOS'].includes((el.textContent || '').trim())) el.remove();
     });
   }
   renderTab();
@@ -6509,16 +6568,42 @@ function setIdealFormation(value) {
 function playstyleIcon(nameOrCode) {
   const key = String(nameOrCode || '').toLowerCase();
   const map = {
-    'chute forte':'💥', 'power shot':'💥', 'bola parada':'🎯', 'dead ball':'🎯', 'cavadinha':'🧤', 'chip shot':'🧤',
-    'chute colocado':'🌀', 'finesse shot':'🌀', 'cabeceio forte':'🦅', 'power header':'🦅', 'acrobático':'🤸', 'acrobatic':'🤸',
-    'chute rasteiro':'⬇', 'low driven shot':'⬇', 'decisivo':'⚡', 'gamechanger':'⚡', 'passe incisivo':'🧭', 'incisive pass':'🧭',
-    'passe pingado':'➡', 'pinged pass':'➡', 'bola longa':'↗', 'long ball pass':'↗', 'tiki taka':'🔁', 'passe curvado':'〰', 'whipped pass':'〰',
-    'inventivo':'🎩', 'inventive':'🎩', 'jóquei':'🕺', 'jockey':'🕺', 'bloqueio':'🚧', 'block':'🚧', 'interceptação':'🪝', 'intercept':'🪝',
-    'antecipação':'🦊', 'anticipate':'🦊', 'carrinho':'🛝', 'slide tackle':'🛝', 'fortaleza aérea':'🛡', 'aerial fortress':'🛡',
-    'técnico':'🎮', 'technical':'🎮', 'rápido':'💨', 'rapid':'💨', 'primeiro toque':'🧲', 'first touch':'🧲', 'malandro':'✨', 'trickster':'✨',
-    'pressão provada':'🧱', 'press proven':'🧱', 'arranque':'🚀', 'quick step':'🚀', 'incansável':'♾', 'relentless':'♾', 'arremesso longo':'🙌', 'long throw':'🙌',
-    'brutamontes':'💪', 'bruiser':'💪', 'protetor':'🥊', 'enforcer':'🥊', 'lançamento longo':'🎯', 'far throw':'🎯', 'jogo com os pés':'🦶', 'footwork':'🦶',
-    'pegador de cruzamento':'🧤', 'cross claimer':'🧤', 'saída rápida':'🏃', 'rush out':'🏃', 'alcance longo':'🪽', 'far reach':'🪽', 'defletor':'🪞', 'deflector':'🪞'
+    'finesse shot':'🎯', 'chute colocado':'🎯',
+    'chip shot':'🧤', 'cavadinha':'🧤',
+    'power shot':'💥', 'chute forte':'💥',
+    'dead ball':'🎯', 'bola parada':'🎯',
+    'precision header':'🦅', 'cabeceio forte':'🦅', 'power header':'🦅',
+    'acrobatic':'🤸', 'acrobático':'🤸',
+    'low driven shot':'⬇', 'chute rasteiro':'⬇',
+    'gamechanger':'⚡', 'decisivo':'⚡',
+    'incisive pass':'🧭', 'passe incisivo':'🧭',
+    'pinged pass':'➡', 'passe pingado':'➡',
+    'long ball pass':'↗', 'lançamento longo':'↗', 'bola longa':'↗',
+    'tiki taka':'🔁', 'tiki-taka':'🔁',
+    'whipped pass':'〰', 'cruzamento tenso':'〰',
+    'inventive':'🎩', 'inventivo':'🎩', 'trivela':'🎩', 'flair':'🎩',
+    'jockey':'🕺', 'contenção':'🕺',
+    'block':'🚧', 'bloqueio':'🚧',
+    'intercept':'🪝', 'interceptação':'🪝',
+    'anticipate':'🦊', 'antecipação':'🦊',
+    'slide tackle':'🛝', 'carrinho':'🛝',
+    'aerial fortress':'🛡', 'jogo aéreo':'🛡', 'aerial':'🛡',
+    'technical':'🎮', 'técnico':'🎮',
+    'rapid':'💨', 'rápido com bola':'💨',
+    'first touch':'🧲', 'primeiro toque':'🧲',
+    'trickster':'✨', 'driblador':'✨',
+    'press proven':'🧱', 'resistente à pressão':'🧱',
+    'quick step':'🚀', 'arranque':'🚀',
+    'relentless':'♾', 'incansável':'♾',
+    'long throw':'🙌', 'arremesso longo':'🙌',
+    'bruiser':'💪', 'brigador':'💪',
+    'enforcer':'🥊', 'protetor':'🥊',
+    'far throw':'🎯', 'reposição longa':'🎯',
+    'footwork':'🦶', 'defesa com os pés':'🦶',
+    'cross claimer':'🧤', 'pegador de cruzamento':'🧤',
+    'rush out':'🏃', 'saída rápida':'🏃',
+    'far reach':'🪽', 'alcance longo':'🪽',
+    'deflector':'🪞', 'defletor':'🪞'
   };
   return map[key] || '◆';
 }
@@ -6526,13 +6611,14 @@ function playstyleIcon(nameOrCode) {
 function archetypeIcon(name) {
   const key = String(name || '').toLowerCase();
   const map = {
-    'chefia':'🛡', 'chefão':'🛡', 'chefao':'🛡', 'líbero':'↗', 'libero':'↗', 'progressor':'↗', 'cão de guarda':'🐕', 'cao de guarda':'🐕', 'saqueador':'⚡', 'muralha':'🧤',
-    'regista':'🎼', 'motor':'⚙', 'armador':'🧠', 'box-to-box':'🔄', 'ponta veloz':'💨', 'camisa 10':'🔟',
-    'finalizador':'🎯', 'homem alvo':'🗼', 'goleiro linha':'🧤', 'goleiro líbero':'🧤', 'gl-linha':'🧤', 'paredão':'🧱', 'ala profundo':'↕'
+    'finisher':'🎯', 'target':'🗼', 'magician':'🎩',
+    'creator':'🧠', 'maestro':'🎼', 'recycler':'♻️', 'spark':'⚡',
+    'boss':'🛡', 'marauder':'↕', 'progressor':'↗', 'engine':'⚙',
+    'shot stopper':'🧱', 'sweeper keeper':'🧤',
+    'chefia':'🛡', 'líbero':'↗', 'libero':'↗', 'motor':'⚙', 'paredão':'🧱', 'goleiro líbero':'🧤'
   };
   return map[key] || '◆';
 }
-
 function styleIconHtml(icon, plus=false) {
   return `<span class="style-icon ${plus ? 'plus' : ''}" aria-hidden="true"><span>${icon}</span></span>`;
 }
@@ -6650,9 +6736,9 @@ function suggestBuildRecipe(position, text) {
   const commonExplain = 'Os números abaixo são metas práticas de atributo, não custo exato de PA. No FC 26, cada Arquétipo tem mínimos/máximos próprios, atributos-chave mais baratos e custo crescente conforme o atributo sobe. Por isso a regra é: primeiro atingir os atributos que liberam/fortalecem a função, depois completar conforto e luxo.';
   const recipes = {
     goleiro: {
-      archetype: has(/linha|sair|pé|pe|reposi/) ? 'Goleiro Líbero' : 'Paredão',
-      main: ['Defesa com os Pés','Alcance Longo','Saída Rápida'],
-      silver: ['Pegador de Cruzamento','Reposição Longa','Incansável','Primeiro Toque','Passe Pingado','Lançamento Longo','Resistente à Pressão','Jogo Aéreo'],
+      archetype: has(/linha|sair|pé|pe|reposi/) ? 'Sweeper Keeper' : 'Shot Stopper',
+      main: ['Footwork','Far Reach','Rush Out'],
+      silver: ['Cross Claimer','Far Throw','Relentless','First Touch','Pinged Pass','Long Ball Pass','Press Proven','Aerial Fortress'],
       why: 'Goleiro precisa primeiro defender. Se o texto pede saída, a build vira mais líbero; se não, prioriza reflexo e segurança.',
       attributes: [
         ['Goleiro','Reflexos','92-95','1','Base para defesas rápidas e 1x1.'], ['Goleiro','Alcance/Posicionamento','90-94','1','Ajuda em chutes colocados e bolas cruzadas.'], ['Goleiro','Jogo com os pés','80-86','2','Para repor curto e iniciar jogadas.'], ['Físico','Reação','88-92','2','Melhora resposta em bola viva.'], ['Passe','Passe curto','75-82','3','Só o bastante para não entregar saída.']
@@ -6660,39 +6746,39 @@ function suggestBuildRecipe(position, text) {
       phases: ['Primeiro suba atributos de defesa de goleiro até 90+.', 'Depois invista em reação e reposição.', 'Só gaste em passe/controle se o time realmente usa saída curta.']
     },
     zagueiro: {
-      archetype: 'Chefia',
-      main: ['Antecipação','Interceptação','Bloqueio'],
-      silver: ['Jogo Aéreo','Contenção','Brigador','Carrinho','Incansável','Passe Pingado','Lançamento Longo','Resistente à Pressão'],
+      archetype: 'Boss',
+      main: ['Anticipate','Intercept','Block'],
+      silver: ['Aerial Fortress','Jockey','Bruiser','Slide Tackle','Relentless','Pinged Pass','Long Ball Pass','Press Proven'],
       why: 'Zagueiro competitivo precisa parar jogada antes do chute, ganhar duelo físico e ainda sair simples quando recuperar a bola.',
       attributes: [
-        ['Defesa','Interceptação','90-94','1','Corta passe antes de virar chance clara.'], ['Defesa','Cabeceio','90-94','1','Ganha bola aérea defensiva e vira ameaça no escanteio.'], ['Defesa','Noção defensiva','90-94','1','Mantém posicionamento e leitura da linha.'], ['Defesa','Dividida em pé','88-92','1','Desarme principal; não deixe baixo.'], ['Físico','Força','90-95','1','Sustenta contato e disputa corporal.'], ['Físico','Impulsão','88-93','2','Combina com cabeceio para dominar bolas altas.'], ['Físico','Combatividade','88-92','2','Ajuda pressão, choque e recuperação.'], ['Ritmo','Aceleração/Pique','86-90','2','Suficiente para cobrir profundidade sem torrar tudo.'], ['Passe','Passe curto','78-84','3','Saída simples após recuperar.'], ['Passe','Lançamento','80-86','3','Virada e bola longa quando houver tempo.'], ['Controle','Agilidade/Reação','84-90','3','Virar o corpo e responder rápido sem virar build de meia.']
+        ['Defesa','Intercept','90-94','1','Corta passe antes de virar chance clara.'], ['Defesa','Cabeceio','90-94','1','Ganha bola aérea defensiva e vira ameaça no escanteio.'], ['Defesa','Noção defensiva','90-94','1','Mantém posicionamento e leitura da linha.'], ['Defesa','Dividida em pé','88-92','1','Desarme principal; não deixe baixo.'], ['Físico','Força','90-95','1','Sustenta contato e disputa corporal.'], ['Físico','Impulsão','88-93','2','Combina com cabeceio para dominar bolas altas.'], ['Físico','Combatividade','88-92','2','Ajuda pressão, choque e recuperação.'], ['Ritmo','Aceleração/Pique','86-90','2','Suficiente para cobrir profundidade sem torrar tudo.'], ['Passe','Passe curto','78-84','3','Saída simples após recuperar.'], ['Passe','Lançamento','80-86','3','Virada e bola longa quando houver tempo.'], ['Controle','Agilidade/Reação','84-90','3','Virar o corpo e responder rápido sem virar build de meia.']
       ],
       phases: ['Feche primeiro Defesa + Força: interceptação, cabeceio, noção defensiva, dividida em pé e força.', 'Depois busque impulsão, combatividade e ritmo até uma faixa segura.', 'Por último, coloque passe curto/lançamento para sair jogando sem sacrificar a identidade defensiva.']
     },
     volante: {
-      archetype: has(/box|chegar|ida|volta|motor/) ? 'Motor' : 'Cão de Guarda',
-      main: ['Interceptação','Antecipação','Incansável'],
-      silver: ['Passe Pingado','Tiki-Taka','Resistente à Pressão','Contenção','Brigador','Lançamento Longo','Primeiro Toque','Bloqueio'],
+      archetype: has(/box|chegar|ida|volta|motor/) ? 'Engine' : 'Recycler',
+      main: ['Intercept','Anticipate','Relentless'],
+      silver: ['Pinged Pass','Tiki Taka','Press Proven','Jockey','Bruiser','Long Ball Pass','First Touch','Block'],
       why: 'Volante bom recupera, protege a zaga e entrega limpo. Não adianta roubar se perde a bola no passe seguinte.',
       attributes: [
-        ['Defesa','Interceptação','88-92','1','Corta passe por dentro.'], ['Defesa','Dividida em pé','86-90','1','Bote seguro.'], ['Passe','Passe curto','84-90','1','Saída limpa sob pressão.'], ['Passe','Visão','82-88','2','Acha passe vertical.'], ['Físico','Fôlego','88-94','1','Mantém pressão o jogo todo.'], ['Físico','Combatividade','86-92','2','Ganha segunda bola.'], ['Controle','Reação','84-90','2','Decide rápido após recuperar.'], ['Ritmo','Aceleração','82-88','3','Para cobrir lados curtos.']
+        ['Defesa','Intercept','88-92','1','Corta passe por dentro.'], ['Defesa','Dividida em pé','86-90','1','Bote seguro.'], ['Passe','Passe curto','84-90','1','Saída limpa sob pressão.'], ['Passe','Visão','82-88','2','Acha passe vertical.'], ['Físico','Fôlego','88-94','1','Mantém pressão o jogo todo.'], ['Físico','Combatividade','86-92','2','Ganha segunda bola.'], ['Controle','Reação','84-90','2','Decide rápido após recuperar.'], ['Ritmo','Aceleração','82-88','3','Para cobrir lados curtos.']
       ],
       phases: ['Primeiro defesa, passe curto e fôlego.', 'Depois visão/reação para acelerar transição.', 'Finalize com ritmo e físico extra.']
     },
     lateral: {
-      archetype: 'Ala Criador',
-      main: ['Cruzamento Tenso','Incansável','Arranque'],
-      silver: ['Rápido com Bola','Passe Pingado','Tiki-Taka','Interceptação','Contenção','Primeiro Toque','Lançamento Longo','Jogo Aéreo'],
+      archetype: 'Marauder',
+      main: ['Whipped Pass','Relentless','Quick Step'],
+      silver: ['Rapid','Pinged Pass','Tiki Taka','Intercept','Jockey','First Touch','Long Ball Pass','Aerial Fortress'],
       why: 'Lateral precisa repetir corredor: defender, correr, cruzar e voltar. A build deve evitar ficar boa só atacando.',
       attributes: [
-        ['Ritmo','Aceleração/Pique','88-92','1','Corredor inteiro.'], ['Físico','Fôlego','90-95','1','Repetição de sprint.'], ['Passe','Cruzamento','84-90','1','Entrega pelo lado.'], ['Defesa','Dividida em pé','82-88','2','Não ser avenida.'], ['Defesa','Interceptação','82-88','2','Cortar passe lateral.'], ['Controle','Condução','82-88','2','Avançar sem perder bola.'], ['Passe','Passe curto','80-86','3','Tabela por fora.']
+        ['Ritmo','Aceleração/Pique','88-92','1','Corredor inteiro.'], ['Físico','Fôlego','90-95','1','Repetição de sprint.'], ['Passe','Cruzamento','84-90','1','Entrega pelo lado.'], ['Defesa','Dividida em pé','82-88','2','Não ser avenida.'], ['Defesa','Intercept','82-88','2','Cortar passe lateral.'], ['Controle','Condução','82-88','2','Avançar sem perder bola.'], ['Passe','Passe curto','80-86','3','Tabela por fora.']
       ],
       phases: ['Priorize ritmo, fôlego e cruzamento.', 'Depois suba defesa básica.', 'Finalize com condução e passe curto.']
     },
     criador: {
-      archetype: has(/ritmo|controle|maestro|cm|meio/) ? 'Maestro' : 'Camisa 10',
-      main: ['Passe Incisivo','Tiki-Taka','Resistente à Pressão'],
-      silver: ['Primeiro Toque','Lançamento Longo','Passe Pingado','Técnico','Incansável','Trivela','Chute Colocado','Cruzamento Tenso'],
+      archetype: has(/ritmo|controle|maestro|cm|meio/) ? 'Maestro' : 'Creator',
+      main: ['Incisive Pass','Tiki Taka','Press Proven'],
+      silver: ['First Touch','Long Ball Pass','Pinged Pass','Technical','Relentless','Inventive','Finesse Shot','Whipped Pass'],
       why: 'Criador precisa receber pressionado, virar o corpo e transformar posse em chance clara.',
       attributes: [
         ['Passe','Visão','88-94','1','Passe que quebra linha.'], ['Passe','Passe curto','88-94','1','Tabela e posse segura.'], ['Passe','Lançamento','84-90','2','Inversão e bola longa.'], ['Controle','Controle de bola','86-92','1','Receber sob pressão.'], ['Controle','Reação','86-92','2','Decidir rápido.'], ['Controle','Agilidade/Equilíbrio','84-90','2','Girar e proteger.'], ['Finalização','Chute de longe','75-84','3','Punir espaço na entrada da área.']
@@ -6700,9 +6786,9 @@ function suggestBuildRecipe(position, text) {
       phases: ['Primeiro visão, passe curto e controle.', 'Depois reação/agilidade para jogar pressionado.', 'Finalize com lançamento e chute de longe se sobrar PA.']
     },
     ponta: {
-      archetype: 'Ponta Agudo',
-      main: ['Rápido com Bola','Técnico','Arranque'],
-      silver: ['Primeiro Toque','Chute Colocado','Cruzamento Tenso','Passe Incisivo','Trivela','Incansável','Driblador','Resistente à Pressão'],
+      archetype: 'Spark',
+      main: ['Rapid','Technical','Quick Step'],
+      silver: ['First Touch','Finesse Shot','Whipped Pass','Incisive Pass','Inventive','Relentless','Trickster','Press Proven'],
       why: 'Ponta útil vence 1x1 e decide depois: cruzar, tocar ou finalizar.',
       attributes: [
         ['Ritmo','Aceleração/Pique','90-95','1','Separar do marcador.'], ['Controle','Condução','88-94','1','Carregar em velocidade.'], ['Controle','Agilidade/Equilíbrio','88-94','1','Corte seco e mudança de direção.'], ['Passe','Cruzamento','82-88','2','Bola final pelo lado.'], ['Finalização','Finalização','80-88','2','Atacar diagonal.'], ['Passe','Passe curto','78-84','3','Tabela curta.'], ['Físico','Fôlego','84-90','3','Repetir corrida.']
@@ -6710,9 +6796,9 @@ function suggestBuildRecipe(position, text) {
       phases: ['Primeiro ritmo e condução.', 'Depois finalização/cruzamento conforme seu lado.', 'Finalize com passe curto e fôlego.']
     },
     atacante: {
-      archetype: has(/pivo|refer|alto|cabe/) ? 'Referência' : has(/criar|falso|sair da area|sair da área/) ? 'Falso 9' : 'Matador',
-      main: ['Chute Colocado','Chute Forte','Primeiro Toque'],
-      silver: ['Cabeceio Forte','Trivela','Passe Incisivo','Rápido com Bola','Técnico','Resistente à Pressão','Acrobático','Incansável'],
+      archetype: has(/pivo|refer|alto|cabe/) ? 'Target' : has(/criar|falso|sair da area|sair da área/) ? 'Magician' : 'Finisher',
+      main: ['Finesse Shot','Power Shot','First Touch'],
+      silver: ['Precision Header','Inventive','Incisive Pass','Rapid','Technical','Press Proven','Acrobatic','Relentless'],
       why: 'Atacante precisa transformar poucas chances em gol e dominar rápido dentro da área.',
       attributes: [
         ['Finalização','Finalização','90-95','1','Chance clara precisa virar gol.'], ['Finalização','Posicionamento','88-94','1','Atacar espaço certo.'], ['Finalização','Força do chute','86-92','1','Finalizar com potência.'], ['Controle','Primeiro toque/controle','84-90','2','Dominar e bater rápido.'], ['Ritmo','Aceleração/Pique','86-92','2','Atacar profundidade.'], ['Físico','Força','78-88','3','Segurar zagueiro se fizer pivô.'], ['Passe','Passe curto','75-82','3','Parede e tabela.']
@@ -6720,12 +6806,12 @@ function suggestBuildRecipe(position, text) {
       phases: ['Primeiro finalização, posicionamento e força do chute.', 'Depois primeiro toque e ritmo.', 'Só então coloque passe/físico conforme seu estilo.']
     },
     equilibrado: {
-      archetype: 'Motor',
-      main: ['Primeiro Toque','Incansável','Tiki-Taka'],
-      silver: ['Passe Pingado','Resistente à Pressão','Interceptação','Arranque','Técnico','Passe Incisivo','Lançamento Longo','Chute Colocado'],
+      archetype: 'Engine',
+      main: ['First Touch','Relentless','Tiki Taka'],
+      silver: ['Pinged Pass','Press Proven','Intercept','Quick Step','Technical','Incisive Pass','Long Ball Pass','Finesse Shot'],
       why: 'Quando a descrição está aberta, a build segura é um jogador completo, útil e sem desperdício pesado em atributo de luxo.',
       attributes: [
-        ['Controle','Reação','84-90','1','Base universal para responder rápido.'], ['Passe','Passe curto','84-90','1','Não quebrar jogada simples.'], ['Físico','Fôlego','86-92','1','Participar o jogo todo.'], ['Ritmo','Aceleração','84-90','2','Chegar antes no lance.'], ['Defesa','Interceptação','78-86','2','Ajudar sem bola.'], ['Controle','Controle de bola','82-88','2','Receber sob pressão.']
+        ['Controle','Reação','84-90','1','Base universal para responder rápido.'], ['Passe','Passe curto','84-90','1','Não quebrar jogada simples.'], ['Físico','Fôlego','86-92','1','Participar o jogo todo.'], ['Ritmo','Aceleração','84-90','2','Chegar antes no lance.'], ['Defesa','Intercept','78-86','2','Ajudar sem bola.'], ['Controle','Controle de bola','82-88','2','Receber sob pressão.']
       ],
       phases: ['Monte uma base segura: reação, passe curto e fôlego.', 'Depois ajuste ritmo/controle.', 'Por fim especialize conforme a função que o time mais precisa.']
     }
@@ -6737,11 +6823,11 @@ function suggestBuildRecipe(position, text) {
     const wantsAerialWall = has(/a[eé]re|area|aereo|altura|cabe[cç]|for[cç]a|combate|fisic|disputa|duelo/);
     const wantsBuildUp = has(/sair jogando|sa[ií]da|constru|passe|lan[cç]amento|virada|bola longa/);
     if (wantsChief) {
-      recipe = {...recipe, archetype:'Chefia', main:['Antecipação','Interceptação','Bloqueio'], why:'O texto pede zagueiro de comando. Chefia prioriza leitura, organização da linha, interceptação e bloqueio; use físico e cabeceio como sustentação.'};
+      recipe = {...recipe, archetype:'Boss', main:['Anticipate','Intercept','Block'], why:'O texto pede zagueiro de comando. Boss prioriza leitura, organização da linha, interceptação e bloqueio; use físico e cabeceio como sustentação.'};
     } else if (wantsAerialWall) {
-      recipe = {...recipe, archetype:'Chefia', main:['Jogo Aéreo','Antecipação','Brigador'], why:'O texto descreve um zagueiro forte, líder, dominante em duelos e jogo aéreo. A base correta é Chefia/Chefão: comandar a defesa, proteger a área e vencer contato; saída de bola entra como complemento, não como identidade principal.'};
+      recipe = {...recipe, archetype:'Boss', main:['Aerial Fortress','Anticipate','Bruiser'], why:'O texto descreve um zagueiro forte, líder, dominante em duelos e jogo aéreo. A base correta é Boss/Chefão: comandar a defesa, proteger a área e vencer contato; saída de bola entra como complemento, não como identidade principal.'};
     } else if (wantsBuildUp) {
-      recipe = {...recipe, archetype:'Líbero', main:['Antecipação','Passe Pingado','Lançamento Longo'], why:'O texto pede zagueiro que sai jogando. Líbero mantém leitura defensiva, mas investe mais cedo em passe rasteiro forte e bola longa.'};
+      recipe = {...recipe, archetype:'Progressor', main:['Anticipate','Pinged Pass','Long Ball Pass'], why:'O texto pede zagueiro que sai jogando. Progressor mantém leitura defensiva, mas investe mais cedo em passe rasteiro forte e bola longa.'};
     }
   }
   const mainNames = uniqueStyleNames(recipe.main).slice(0, 3);
@@ -6828,9 +6914,9 @@ function renderPlaystyles() {
   `).join('');
   return `
     <div class="section-title">Simulador de Arquétipo, Estilos e Qualidades</div>
-    <div style="color:var(--text-2);font-size:12px;margin-bottom:12px;line-height:1.55;">Escreva do jeito que você falaria para um colega: posição, função, pontos fortes desejados e o que o jogador precisa fazer em campo. Exemplo: "zagueiro Chefia forte no jogo aéreo, bom desarme, saída simples e força para combate".</div>
+    <div style="color:var(--text-2);font-size:12px;margin-bottom:12px;line-height:1.55;">Escreva do jeito que você falaria para um colega: posição, função, pontos fortes desejados e o que o jogador precisa fazer em campo. Exemplo: "zagueiro Boss forte no jogo aéreo, bom desarme, saída simples e força para combate".</div>
     <div class="agenda-form" style="grid-template-columns:repeat(6,1fr);">
-      <textarea id="sim-text" style="grid-column:span 6;min-height:92px;" placeholder="Descreva o jogador que você quer montar: zagueiro Chefia forte no jogo aéreo e desarme; volante que rouba e passa simples; atacante matador rápido; meia que cria e protege a bola..."></textarea>
+      <textarea id="sim-text" style="grid-column:span 6;min-height:92px;" placeholder="Descreva o jogador que você quer montar: zagueiro Boss forte no jogo aéreo e desarme; volante que rouba e passa simples; atacante matador rápido; meia que cria e protege a bola..."></textarea>
       <div class="full"><button type="button" class="btn-primary" onclick="runPlaystyleSimulator()">Sugerir build completo</button></div>
     </div><div id="sim-result" class="build-result-grid"></div>
     <div class="section-title">Legenda de Arquétipos</div>
@@ -7048,7 +7134,7 @@ function cancelAgendaEdit() {
   AGENDA_EDIT_ID = null;
   if (!isAdmin()) {
     document.querySelectorAll('.tab').forEach(el => {
-      if (['JOGADORES','COMPARAR','CONFRONTOS','ADVERSÁRIOS'].includes((el.textContent || '').trim())) el.remove();
+      if (['JOGADORES','COMPARAR','CONFRONTOS','CADASTRO','ADVERSÁRIOS'].includes((el.textContent || '').trim())) el.remove();
     });
   }
   renderTab();
@@ -7562,6 +7648,13 @@ if __name__ == "__main__":
     print("="*60 + "\n")
     
     uvicorn.run(app, host="0.0.0.0", port=8000)
+
+
+
+
+
+
+
 
 
 
