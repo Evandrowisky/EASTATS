@@ -1803,6 +1803,53 @@ def auth_me(current_user: dict = Depends(get_current_user)):
 def auth_logout():
     return {"success": True}
 
+
+
+@app.get("/api/admin/users")
+def admin_list_users(current_user: dict = Depends(require_admin)):
+    sb = get_supabase()
+    if not sb:
+        raise HTTPException(503, "Supabase nao configurado")
+    club_id = str(current_user.get("club_id") or "")
+    try:
+        resp = (
+            sb.table("app_users")
+            .select("id,nome,usuario,clube,club_id,cargo,status,is_active,created_at")
+            .eq("club_id", club_id)
+            .order("created_at", desc=False)
+            .execute()
+        )
+        rows = getattr(resp, "data", None) or []
+        return {"users": [_public_user(r) | {"created_at": r.get("created_at")} for r in rows]}
+    except Exception as e:
+        print(f"[AUTH] Erro listando usuarios do clube: {type(e).__name__}: {e}")
+        raise HTTPException(500, "Erro ao listar usuarios")
+
+
+@app.delete("/api/admin/users/{user_id}")
+def admin_delete_user(user_id: str, current_user: dict = Depends(require_admin)):
+    sb = get_supabase()
+    if not sb:
+        raise HTTPException(503, "Supabase nao configurado")
+    club_id = str(current_user.get("club_id") or "")
+    my_id = str(current_user.get("id") or "")
+    if str(user_id) == my_id:
+        raise HTTPException(400, "Voce nao pode excluir seu proprio usuario")
+    try:
+        existing = sb.table("app_users").select("id,club_id,cargo").eq("id", str(user_id)).limit(1).execute()
+        rows = getattr(existing, "data", None) or []
+        if not rows:
+            raise HTTPException(404, "Usuario nao encontrado")
+        if str(rows[0].get("club_id") or "") != club_id:
+            raise HTTPException(403, "Usuario pertence a outro clube")
+        sb.table("app_users").delete().eq("id", str(user_id)).eq("club_id", club_id).execute()
+        return {"success": True, "deleted": str(user_id)}
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"[AUTH] Erro excluindo usuario: {type(e).__name__}: {e}")
+        raise HTTPException(500, "Erro ao excluir usuario")
+
 @app.get("/api/test-search")
 def test_search(
     club_name: str = Query("DESAGREGADOS SC"),
@@ -4790,7 +4837,23 @@ body {
 .scout-box ul { padding-left:17px; color:var(--text-2); font-size:12px; line-height:1.5; }
 .scout-box p { color:var(--text-2); font-size:12px; line-height:1.55; }
 @media (max-width: 900px) { .opponent-form { grid-template-columns:1fr 1fr; } .scout-cols { grid-template-columns:1fr; } }
-@media (max-width: 560px) { .opponent-form { grid-template-columns:1fr; } .opponent-head { align-items:center; } .opponent-grade { min-width:64px; height:64px; } }
+@media (max-width: 560px) {
+  .opponent-form { grid-template-columns:1fr; }
+  .opponent-card { padding:12px; overflow:hidden; }
+  .opponent-head { align-items:flex-start; }
+  .opponent-name { font-size:17px; overflow-wrap:anywhere; }
+  .opponent-style { font-size:10px; line-height:1.35; }
+  .opponent-grade { min-width:58px; width:58px; height:58px; }
+  .opponent-grade .rank { font-size:20px; }
+  .opponent-grade .score { font-size:8px; }
+  .opponent-table-wrap { border:0; overflow:visible; }
+  .opponent-table, .opponent-table tbody, .opponent-table tr, .opponent-table td { display:block; width:100%; min-width:0; }
+  .opponent-table thead { display:none; }
+  .opponent-table tr { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+  .opponent-table td { padding:8px; border:1px solid var(--border); border-radius:8px; background:rgba(255,255,255,0.025); font-size:11px; overflow-wrap:anywhere; }
+  .opponent-table td::before { content: attr(data-label); display:block; color:var(--green); font-size:9px; text-transform:uppercase; letter-spacing:1px; margin-bottom:3px; }
+  .opponent-table td:last-child { grid-column:1 / -1; }
+}
 
 /* AUTH */
 .auth-shell {
@@ -5296,7 +5359,8 @@ html, body { max-width: 100%; }
         <div class="logo-sub">Inteligência Esportiva</div>
       </div>
     </div>
-    <div style="display:flex;gap:8px;align-items:center;">`r`n      <button id="syncButton" class="btn-sync" onclick="startSync()">↻ Sincronizar</button>
+    <div style="display:flex;gap:8px;align-items:center;">
+      <button id="syncButton" class="btn-sync" onclick="startSync()">↻ Sincronizar</button>
       <div id="authBox" class="auth-user-box"></div>
     </div>
   </div>
@@ -5331,6 +5395,7 @@ let COMPARE_A = null;
 let COMPARE_B = null;
 let AGENDA = [];
 let OPPONENT_SCOUTS = [];
+let CLUB_USERS = [];
 let AGENDA_EDIT_ID = null;
 let IDEAL_FORMATION = '3-5-2';
 let IDEAL_MODE = localStorage.getItem('scout_ideal_mode') || 'auto';
@@ -5397,7 +5462,7 @@ function renderAuth(mode = 'login') {
         <p>${isRegister ? 'Crie sua conta como jogador. O acesso ao sistema fica liberado quando o clube tiver um admin ativo.' : 'Use seu usuário e senha para acessar o scout do seu clube.'}</p>
         <form onsubmit="${isRegister ? 'submitRegister(event)' : 'submitLogin(event)'}">
           ${isRegister ? `<div class="auth-field"><label>Nome</label><input id="authNome" autocomplete="name" required></div>` : ''}
-          <div class="auth-field"><label>Usuário</label><input id="authUsuario" autocomplete="username" required></div>
+          <div class="auth-field"><label>Usuário</label><input id="authUsuario" autocomplete="username" required>${isRegister ? `<div style="color:var(--text-2);font-size:11px;line-height:1.4;">Dica: use como usuário o ID/nome do jogador no FIFA/EA FC, igual aparece no Pro Clubs. É assim que o Meu Scout encontra suas estatísticas.</div>` : ``}</div>
           <div class="auth-field"><label>Senha</label><input id="authSenha" type="password" autocomplete="${isRegister ? 'new-password' : 'current-password'}" required></div>
           ${isRegister ? `
             <div class="auth-field"><label>Nome do Clube</label><input id="authClube" placeholder="Nome do clube" required></div>
@@ -5958,7 +6023,7 @@ function renderTab() {
   else if (CURRENT_TAB === 'comparar') { tc.innerHTML = renderComparar(); renderCompareBars(); }
   else if (CURRENT_TAB === 'confrontos') tc.innerHTML = renderConfrontos();
   else if (CURRENT_TAB === 'time-ideal') tc.innerHTML = renderTimeIdeal();
-  else if (CURRENT_TAB === 'cadastro' && isAdmin()) tc.innerHTML = renderCadastroJogadores();
+  else if (CURRENT_TAB === 'cadastro' && isAdmin()) { tc.innerHTML = '<div class="loading"><div class="spinner"></div> Carregando cadastro...</div>'; loadClubUsers().then(() => { const t=document.getElementById('tabContent'); if (t && CURRENT_TAB === 'cadastro') t.innerHTML = renderCadastroJogadores(); }); }
   else if (CURRENT_TAB === 'playstyles') tc.innerHTML = renderPlaystyles();
   else if (CURRENT_TAB === 'adversarios') tc.innerHTML = renderAdversarios();
   else if (['jogadores','comparar','confrontos','cadastro','adversarios'].includes(CURRENT_TAB) && !isAdmin()) { CURRENT_TAB = 'visao'; tc.innerHTML = renderVisao(); }
@@ -6293,7 +6358,7 @@ function findPlayerByTypedName(name, players) {
 }
 
 function currentMyScoutName() {
-  return localStorage.getItem('scout_my_player_name') || (AUTH_USER && (AUTH_USER.nome || AUTH_USER.usuario)) || '';
+  return (AUTH_USER && !isAdmin() ? (AUTH_USER.usuario || AUTH_USER.nome) : '') || localStorage.getItem('scout_my_player_name') || (AUTH_USER && (AUTH_USER.usuario || AUTH_USER.nome)) || '';
 }
 
 function saveMyScoutName(ev) {
@@ -6322,7 +6387,7 @@ function renderMeuScout() {
     <form class="agenda-form" onsubmit="saveMyScoutName(event)" style="grid-template-columns: 1fr auto auto auto; align-items:end;">
       <div style="grid-column:auto;">
         <div style="font-size:10px;color:var(--text-2);letter-spacing:2px;text-transform:uppercase;margin-bottom:8px;">Nome no Pro Clubs</div>
-        <input id="myScoutName" list="myScoutPlayers" type="text" placeholder="Digite exatamente seu nome no EA FC" value="${escapeAttr(savedName)}">
+        <input id="myScoutName" list="myScoutPlayers" type="text" placeholder="Digite exatamente seu nome no EA FC" value="${escapeAttr(savedName)}" ${!isAdmin() ? 'readonly' : ''}>
         <datalist id="myScoutPlayers">${options}</datalist>
       </div>
       <button type="submit" class="btn-primary" style="padding:10px 18px;">Buscar</button>
@@ -6881,6 +6946,51 @@ function archetypeSelectOptions(selected='') {
   ).join('');
 }
 
+
+async function loadClubUsers() {
+  if (!isAdmin()) return [];
+  try {
+    const r = await authFetch('/api/admin/users');
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(data.detail || 'Erro ao carregar usuários');
+    CLUB_USERS = data.users || [];
+  } catch (e) {
+    console.warn('Erro ao carregar usuarios do clube', e);
+    CLUB_USERS = [];
+  }
+  return CLUB_USERS;
+}
+
+async function deleteClubUser(userId, nome) {
+  if (!confirm(`Excluir o acesso de ${nome || 'este usuário'}?`)) return;
+  try {
+    const r = await authFetch('/api/admin/users/' + encodeURIComponent(userId), {method:'DELETE'});
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(data.detail || 'Erro ao excluir usuário');
+    await loadClubUsers();
+    renderTab();
+  } catch (e) {
+    alert(e.message);
+  }
+}
+
+function renderClubUsersAdmin() {
+  const rows = (CLUB_USERS || []).map(u => `
+    <div class="profile-row" style="grid-template-columns:1.2fr 1fr 90px 90px auto;">
+      <div><div class="profile-name">${escapeAttr(u.nome || '-')}</div><div class="profile-meta">Usuário/ID FIFA: ${escapeAttr(u.usuario || '-')}</div></div>
+      <div>${escapeAttr(u.clube || '')}</div>
+      <div><span class="tag ${u.cargo === 'admin' ? 'liga' : 'amistoso'}">${escapeAttr(u.cargo || 'jogador')}</span></div>
+      <div><span class="tag ${u.is_active ? 'liga' : 'd'}">${u.is_active ? 'ativo' : 'inativo'}</span></div>
+      <button class="btn-mini danger" onclick="deleteClubUser('${escapeAttr(u.id)}','${escapeAttr(u.nome || u.usuario)}')" ${u.id === AUTH_USER?.id ? 'disabled' : ''}>Excluir</button>
+    </div>
+  `).join('');
+  return `
+    <div class="section-title">Usuários cadastrados no clube</div>
+    <div style="color:var(--text-2);font-size:12px;margin-bottom:12px;line-height:1.5;">Aqui o admin vê todos os acessos cadastrados no clube. O ideal é o usuário ser igual ao ID/nome do FIFA/EA FC para o Meu Scout puxar automaticamente as estatísticas certas.</div>
+    <div class="profile-list">${rows || '<div class="empty-state" style="padding:30px 20px;">Nenhum usuário cadastrado encontrado.</div>'}</div>
+  `;
+}
+
 function renderCadastroJogadores() {
   const players = computePlayersForMatches(DATA.matches || []);
   const fallback = (DATA.players || []).map(p => {
@@ -6921,6 +7031,7 @@ function renderCadastroJogadores() {
       O script sugere posição pela posição favorita da EA e pelas posições dos últimos jogos. Se errar, ajuste aqui uma vez e o Time Ideal passa a obedecer. As estatísticas continuam sempre só do clube pesquisado.
     </div>
     <div class="profile-list">${rowsHtml}</div>
+    ${renderClubUsersAdmin()}
   `;
 }
 
@@ -7310,7 +7421,7 @@ function renderOpponentScouts() {
     return `
       <div class="opponent-card">
         <div class="opponent-head"><div><div class="opponent-name">${escapeAttr(o.name)}</div><div class="opponent-style"><span class="scout-pill">${escapeAttr(o.style)}</span> · ID ${escapeAttr(o.club_id)} · ${escapeAttr(o.platform)}</div></div><div class="opponent-grade"><div class="rank">${escapeAttr(o.rank)}</div><div class="score">${escapeAttr(o.grade)}/100</div></div></div>
-        <div class="opponent-table-wrap"><table class="opponent-table"><thead><tr><th>Jogos</th><th>V/E/D</th><th>Win</th><th>Gols</th><th>G/J</th><th>Sofre/J</th><th>Saldo</th><th>Top 5 jogadores</th></tr></thead><tbody><tr><td>${escapeAttr(s.matches || 0)}</td><td>${escapeAttr(s.wins || 0)} / ${escapeAttr(s.draws || 0)} / ${escapeAttr(s.losses || 0)}</td><td>${escapeAttr(s.win_rate || 0)}%</td><td>${escapeAttr(s.goals_for || 0)}-${escapeAttr(s.goals_against || 0)}</td><td>${escapeAttr(s.goals_per_match || 0)}</td><td>${escapeAttr(s.goals_against_per_match || 0)}</td><td>${escapeAttr(s.goal_diff || 0)}</td><td>${top}</td></tr></tbody></table></div>
+        <div class="opponent-table-wrap"><table class="opponent-table"><thead><tr><th>Jogos</th><th>V/E/D</th><th>Win</th><th>Gols</th><th>G/J</th><th>Sofre/J</th><th>Saldo</th><th>Top 5 jogadores</th></tr></thead><tbody><tr><td data-label="Jogos">${escapeAttr(s.matches || 0)}</td><td data-label="V/E/D">${escapeAttr(s.wins || 0)} / ${escapeAttr(s.draws || 0)} / ${escapeAttr(s.losses || 0)}</td><td data-label="Win">${escapeAttr(s.win_rate || 0)}%</td><td data-label="Gols">${escapeAttr(s.goals_for || 0)}-${escapeAttr(s.goals_against || 0)}</td><td data-label="G/J">${escapeAttr(s.goals_per_match || 0)}</td><td data-label="Sofre/J">${escapeAttr(s.goals_against_per_match || 0)}</td><td data-label="Saldo">${escapeAttr(s.goal_diff || 0)}</td><td data-label="Top 5 jogadores">${top}</td></tr></tbody></table></div>
         <div class="scout-cols"><div class="scout-box"><h4>Pontos fortes</h4><ul>${strengths}</ul></div><div class="scout-box"><h4>Pontos fracos</h4><ul>${weaknesses}</ul></div><div class="scout-box"><h4>Estratégia sugerida</h4><p>${escapeAttr(o.strategy || '')}</p></div></div>
       </div>`;
   }).join('');
