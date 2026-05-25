@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-
+﻿# -*- coding: utf-8 -*-
 """
 Scout Clubs Pro v2 - Análise Profissional EA FC
 Inspirado no app Scout Clubs original
@@ -21,7 +21,7 @@ from typing import Optional, Dict, List, Any
 from contextlib import asynccontextmanager
 from statistics import mean, pstdev
 
-from fastapi import FastAPI, HTTPException, Query, Depends, Header
+from fastapi import FastAPI, HTTPException, Query, Depends, Header, File, UploadFile
 from pydantic import BaseModel
 from typing import Optional
 from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
@@ -53,6 +53,7 @@ OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
 JWT_ALGORITHM = "HS256"
 JWT_EXPIRE_DAYS = int(os.getenv("JWT_EXPIRE_DAYS", "7") or "7")
+SUPABASE_LOGO_BUCKET = os.getenv("SUPABASE_LOGO_BUCKET", "club-logos").strip() or "club-logos"
 
 MATCH_TYPE_CANDIDATES = [
     "leagueMatch",
@@ -711,12 +712,25 @@ def save_club_supabase(club_data: dict):
     club_id = str(club.get("id") or "").strip()
     if not club_id:
         return False
+    logo_url = str(club.get("logo_url") or club.get("image_url") or "").strip() or None
+    logo_path = str(club.get("logo_path") or "").strip() or None
+    logo_updated_at = club.get("logo_updated_at") or None
+    if logo_url:
+        club["logo_url"] = logo_url
+        club["image_url"] = logo_url
+    if logo_path:
+        club["logo_path"] = logo_path
+    if logo_updated_at:
+        club["logo_updated_at"] = logo_updated_at
     row = {
         "club_id": club_id,
         "name": club.get("name") or club_data.get("name") or "Clube",
         "platform": club.get("platform") or "common-gen5",
         "data": club_data,
         "synced_at": club.get("synced_at") or _now_iso(),
+        "logo_url": logo_url,
+        "logo_path": logo_path,
+        "logo_updated_at": logo_updated_at,
         "updated_at": _now_iso(),
     }
     try:
@@ -724,9 +738,20 @@ def save_club_supabase(club_data: dict):
         print(f"[SUPABASE] Clube salvo: {club_id}")
         return True
     except Exception as e:
+        msg = str(e).lower()
+        if any(col in msg for col in ("logo_url", "logo_path", "logo_updated_at")):
+            try:
+                fallback = dict(row)
+                fallback.pop("logo_url", None)
+                fallback.pop("logo_path", None)
+                fallback.pop("logo_updated_at", None)
+                sb.table("clubs").upsert(fallback, on_conflict="club_id").execute()
+                print(f"[SUPABASE] Clube salvo sem colunas de logo: {club_id}")
+                return True
+            except Exception as ee:
+                print(f"[SUPABASE] Aviso ao salvar clube fallback {club_id}: {type(ee).__name__}: {ee}")
         print(f"[SUPABASE] Aviso ao salvar clube {club_id}: {type(e).__name__}: {e}")
         return False
-
 
 def save_players_supabase(club_id: str, players: list):
     sb = get_supabase()
@@ -886,28 +911,59 @@ def load_latest_club_data_supabase(club_id: Optional[str] = None):
     if not sb:
         return None
     try:
-        q = sb.table("clubs").select("data,synced_at,updated_at")
-        if club_id:
-            q = q.eq("club_id", str(club_id))
-        resp = q.order("synced_at", desc=True).limit(1).execute()
+        try:
+            q = sb.table("clubs").select("data,synced_at,updated_at,logo_url,logo_path,logo_updated_at")
+            if club_id:
+                q = q.eq("club_id", str(club_id))
+            resp = q.order("synced_at", desc=True).limit(1).execute()
+        except Exception as select_err:
+            print(f"[SUPABASE] Aviso ao carregar colunas de logo: {type(select_err).__name__}: {select_err}")
+            q = sb.table("clubs").select("data,synced_at,updated_at")
+            if club_id:
+                q = q.eq("club_id", str(club_id))
+            resp = q.order("synced_at", desc=True).limit(1).execute()
         rows = getattr(resp, "data", None) or []
         if rows and isinstance(rows[0], dict) and isinstance(rows[0].get("data"), dict):
+            row = rows[0]
+            data = row["data"]
+            club = data.setdefault("club", {})
+            logo_url = str(row.get("logo_url") or club.get("logo_url") or club.get("image_url") or "").strip()
+            if logo_url:
+                club["logo_url"] = logo_url
+                club["image_url"] = logo_url
+            logo_path = str(row.get("logo_path") or club.get("logo_path") or "").strip()
+            if logo_path:
+                club["logo_path"] = logo_path
+            logo_updated_at = row.get("logo_updated_at") or club.get("logo_updated_at")
+            if logo_updated_at:
+                club["logo_updated_at"] = logo_updated_at
             print("[SUPABASE] Dashboard carregado de clubs.data")
-            return rows[0]["data"]
+            return data
     except Exception as e:
         print(f"[SUPABASE] Aviso ao carregar club_data: {type(e).__name__}: {e}")
     return None
 
-
-def existing_club_image_url(club_id: str) -> str:
-    """Busca URL de escudo ja salva para preservar em novas sincronizacoes."""
+def existing_club_logo_meta(club_id: str) -> dict:
+    """Busca metadados de logo ja salvos para preservar em novas sincronizacoes."""
     try:
         old = load_latest_club_data_supabase(str(club_id)) or {}
         club = old.get("club") if isinstance(old, dict) else {}
-        return str((club or {}).get("image_url") or "").strip()
+        if not isinstance(club, dict):
+            club = {}
+        logo_url = str(club.get("logo_url") or club.get("image_url") or "").strip()
+        return {
+            "logo_url": logo_url,
+            "image_url": logo_url,
+            "logo_path": str(club.get("logo_path") or "").strip(),
+            "logo_updated_at": club.get("logo_updated_at"),
+        }
     except Exception as e:
-        print(f"[club-settings] Aviso ao carregar imagem antiga: {e}")
-        return ""
+        print(f"[club-settings] Aviso ao carregar logo antigo: {e}")
+        return {}
+
+
+def existing_club_image_url(club_id: str) -> str:
+    return str(existing_club_logo_meta(club_id).get("logo_url") or "").strip()
 
 
 def preserve_club_settings(club_data: dict) -> dict:
@@ -915,12 +971,20 @@ def preserve_club_settings(club_data: dict) -> dict:
         return club_data
     club = club_data.setdefault("club", {})
     club_id = str(club.get("id") or "").strip()
-    if club_id and not str(club.get("image_url") or "").strip():
-        image_url = existing_club_image_url(club_id)
-        if image_url:
-            club["image_url"] = image_url
+    if not club_id:
+        return club_data
+    meta = existing_club_logo_meta(club_id)
+    logo_url = str(club.get("logo_url") or club.get("image_url") or meta.get("logo_url") or "").strip()
+    if logo_url:
+        club["logo_url"] = logo_url
+        club["image_url"] = logo_url
+    logo_path = str(club.get("logo_path") or meta.get("logo_path") or "").strip()
+    if logo_path:
+        club["logo_path"] = logo_path
+    logo_updated_at = club.get("logo_updated_at") or meta.get("logo_updated_at")
+    if logo_updated_at:
+        club["logo_updated_at"] = logo_updated_at
     return club_data
-
 
 def load_club_meta_supabase(club_id: str) -> dict:
     """Carrega nome/plataforma do clube salvo no Supabase para syncs automaticas."""
@@ -2148,30 +2212,168 @@ def get_dashboard(current_user: dict = Depends(get_current_user)):
         return cache
     return {"club": None, "stats": None, "players": [], "matches": [], "opponents": [], "ideal_team": None, "player_profiles": {}}
 
+
+def _load_club_data_for_settings(club_id: str, current_user: Optional[dict] = None) -> dict:
+    club_data = load_latest_club_data_supabase(club_id) or load_cache() or {}
+    if not isinstance(club_data, dict):
+        club_data = {}
+    club = club_data.setdefault("club", {})
+    club["id"] = str(club_id)
+    club["name"] = club.get("name") or (current_user or {}).get("clube") or "Clube"
+    club["platform"] = club.get("platform") or "common-gen5"
+    return club_data
+
+
+def _storage_bucket():
+    return SUPABASE_LOGO_BUCKET
+
+
+def _storage_public_url(storage, path: str) -> str:
+    raw = storage.get_public_url(path)
+    if isinstance(raw, str):
+        return raw
+    if isinstance(raw, dict):
+        return str(raw.get("publicUrl") or raw.get("public_url") or raw.get("signedURL") or "").strip()
+    return str(getattr(raw, "public_url", None) or getattr(raw, "publicUrl", None) or raw or "").strip()
+
+
+def _storage_upload_bytes(storage, path: str, content: bytes, content_type: str):
+    options = {"content-type": content_type, "upsert": "true"}
+    try:
+        return storage.upload(path=path, file=content, file_options=options)
+    except TypeError:
+        return storage.upload(path, content, options)
+
+
+def _storage_remove_path(storage, path: str):
+    if not path:
+        return
+    try:
+        storage.remove([path])
+    except Exception as e:
+        print(f"[club-logo] Aviso ao remover arquivo antigo {path}: {type(e).__name__}: {e}")
+
+
+def _persist_club_logo_state(club_id: str, club_data: dict, logo_url=None, logo_path=None, remove: bool = False):
+    now = _now_iso()
+    club = club_data.setdefault("club", {})
+    club["id"] = str(club_id)
+    if remove:
+        club.pop("logo_url", None)
+        club.pop("image_url", None)
+        club.pop("logo_path", None)
+        club["logo_updated_at"] = now
+    else:
+        if logo_url:
+            club["logo_url"] = logo_url
+            club["image_url"] = logo_url
+        if logo_path:
+            club["logo_path"] = logo_path
+        club["logo_updated_at"] = now
+    save_club_supabase(club_data)
+    sb = get_supabase()
+    if sb:
+        try:
+            update_row = {
+                "data": club_data,
+                "logo_url": None if remove else club.get("logo_url"),
+                "logo_path": None if remove else club.get("logo_path"),
+                "logo_updated_at": now,
+                "updated_at": now,
+            }
+            sb.table("clubs").update(update_row).eq("club_id", str(club_id)).execute()
+        except Exception as e:
+            print(f"[club-logo] Aviso ao atualizar colunas do clube: {type(e).__name__}: {e}")
+    try:
+        save_cache(club_data)
+        save_club_json_history(club_id, club_data)
+    except Exception as e:
+        print(f"[club-logo] Aviso ao salvar fallback local: {type(e).__name__}: {e}")
+    return club
+
+
 @app.put("/api/club-settings")
 def update_club_settings(payload: ClubSettingsPayload, current_user: dict = Depends(require_admin)):
+    """Compatibilidade: salva uma URL externa antiga como logo do clube."""
     club_id = str((current_user or {}).get("club_id") or "").strip()
     if not club_id:
         raise HTTPException(400, "Clube do usuario nao encontrado")
     image_url = str(payload.image_url or "").strip()
     if image_url and not (image_url.startswith("http://") or image_url.startswith("https://")):
         raise HTTPException(400, "A imagem precisa ser uma URL http ou https")
-
-    club_data = load_latest_club_data_supabase(club_id) or load_cache() or {}
-    club = club_data.setdefault("club", {})
-    club["id"] = club_id
-    club["name"] = club.get("name") or (current_user or {}).get("clube") or "Clube"
-    club["platform"] = club.get("platform") or "common-gen5"
-    club["image_url"] = image_url
-    club["settings_updated_at"] = _now_iso()
-
-    save_club_supabase(club_data)
-    try:
-        save_cache(club_data)
-        save_club_json_history(club_id, club_data)
-    except Exception as e:
-        print(f"[club-settings] Aviso ao salvar fallback local: {e}")
+    club_data = _load_club_data_for_settings(club_id, current_user)
+    club = _persist_club_logo_state(club_id, club_data, logo_url=image_url or None, logo_path=None, remove=not bool(image_url))
     return {"success": True, "club": club}
+
+
+@app.post("/api/club-logo")
+async def upload_club_logo(file: UploadFile = File(...), current_user: dict = Depends(require_admin)):
+    club_id = str((current_user or {}).get("club_id") or "").strip()
+    if not club_id:
+        raise HTTPException(400, "Clube do usuario nao encontrado")
+    sb = get_supabase()
+    if not sb:
+        raise HTTPException(503, "Supabase nao configurado para salvar imagem")
+
+    content_type = str(file.content_type or "").lower().strip()
+    allowed = {
+        "image/png": "png",
+        "image/jpeg": "jpg",
+        "image/jpg": "jpg",
+        "image/webp": "webp",
+    }
+    if content_type not in allowed:
+        raise HTTPException(400, "Formato invalido. Use PNG, JPG ou WEBP.")
+
+    content = await file.read()
+    if not content:
+        raise HTTPException(400, "Arquivo vazio")
+    if len(content) > 2 * 1024 * 1024:
+        raise HTTPException(400, "Imagem maior que 2MB")
+
+    club_data = _load_club_data_for_settings(club_id, current_user)
+    old_path = str((club_data.get("club") or {}).get("logo_path") or "").strip()
+    ext = allowed[content_type]
+    logo_path = f"clubs/{club_id}/logo_{int(time.time())}.{ext}"
+    bucket = _storage_bucket()
+    storage = sb.storage.from_(bucket)
+
+    try:
+        _storage_upload_bytes(storage, logo_path, content, content_type)
+        logo_url = _storage_public_url(storage, logo_path)
+        if not logo_url:
+            raise RuntimeError("Nao foi possivel gerar URL publica do logo")
+        club = _persist_club_logo_state(club_id, club_data, logo_url=logo_url, logo_path=logo_path, remove=False)
+        if old_path and old_path != logo_path:
+            _storage_remove_path(storage, old_path)
+        print(f"[club-logo] Logo salvo para clube {club_id}: {logo_path}")
+        return {"success": True, "logo_url": logo_url, "logo_path": logo_path, "club": club}
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"[club-logo] Erro ao salvar logo: {type(e).__name__}: {e}")
+        raise HTTPException(500, f"Erro ao salvar imagem do clube: {e}")
+
+
+@app.delete("/api/club-logo")
+def delete_club_logo(current_user: dict = Depends(require_admin)):
+    club_id = str((current_user or {}).get("club_id") or "").strip()
+    if not club_id:
+        raise HTTPException(400, "Clube do usuario nao encontrado")
+    sb = get_supabase()
+    if not sb:
+        raise HTTPException(503, "Supabase nao configurado para remover imagem")
+    club_data = _load_club_data_for_settings(club_id, current_user)
+    old_path = str((club_data.get("club") or {}).get("logo_path") or "").strip()
+    try:
+        if old_path:
+            _storage_remove_path(sb.storage.from_(_storage_bucket()), old_path)
+        club = _persist_club_logo_state(club_id, club_data, remove=True)
+        print(f"[club-logo] Logo removido para clube {club_id}")
+        return {"success": True, "club": club}
+    except Exception as e:
+        print(f"[club-logo] Erro ao remover logo: {type(e).__name__}: {e}")
+        raise HTTPException(500, f"Erro ao remover imagem do clube: {e}")
 
 @app.get("/api/ideal-team")
 def get_ideal_team(formation: str = Query("3-5-2"), current_user: dict = Depends(get_current_user)):
@@ -3842,34 +4044,71 @@ body {
   object-fit: cover;
   border-radius: 12px;
 }
-.club-image-editor {
-  display: grid;
-  grid-template-columns: minmax(220px, 1fr) auto;
-  gap: 8px;
-  margin-top: 10px;
-  max-width: 620px;
+.club-settings-panel {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+  max-width: 720px;
 }
-.club-image-editor input {
+.club-logo-config {
+  display: grid;
+  grid-template-columns: 82px minmax(0, 1fr);
+  gap: 14px;
+  align-items: center;
+}
+.club-logo-preview {
+  width: 82px;
+  height: 82px;
+  border-radius: 14px;
+  border: 1px solid var(--border-2);
   background: var(--bg);
-  color: var(--text);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 10px 12px;
-  font-family: inherit;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  color: var(--text-3);
+  font-size: 10px;
+  text-align: center;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+.club-logo-preview img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.club-logo-label {
+  color: var(--green);
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  margin-bottom: 4px;
+}
+.club-logo-hint {
+  color: var(--text-2);
+  font-size: 11px;
+  line-height: 1.45;
+  margin-bottom: 10px;
+}
+.club-logo-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
 }
 .club-image-status {
-  grid-column: 1 / -1;
   color: var(--green);
   font-size: 11px;
   font-weight: 800;
   letter-spacing: 1px;
   text-transform: uppercase;
   display: none;
+  margin-top: 8px;
 }
 @media (max-width: 760px) {
-  .club-image-editor { grid-template-columns: 1fr; }
+  .club-logo-config { grid-template-columns: 1fr; }
+  .club-logo-preview { width: 74px; height: 74px; }
 }
-
 .club-name {
   font-size: 22px;
   font-weight: 800;
@@ -5693,7 +5932,7 @@ html, body { max-width: 100%; }
       <div class="logo-icon">⚽</div>
       <div>
         <div class="logo-text">ClubScout <span>Pro</span></div>
-        <div class="logo-sub">Inteligência Esportiva</div>
+        <div class="logo-sub">Scout inteligente para Clubs</div>
       </div>
     </div>
     <div style="display:flex;gap:8px;align-items:center;">
@@ -6315,59 +6554,104 @@ async function loadData() {
 }
 
 function clubImageUrl() {
-  return String((DATA && DATA.club && DATA.club.image_url) || '').trim();
+  return String((DATA && DATA.club && (DATA.club.logo_url || DATA.club.image_url)) || '').trim();
+}
+
+function setClubImageStatus(msg, type='ok') {
+  const status = document.getElementById('clubImageStatus');
+  if (!status) return;
+  status.textContent = msg;
+  status.style.display = 'block';
+  status.style.color = type === 'error' ? 'var(--red)' : 'var(--green)';
+  if (type !== 'loading') setTimeout(() => { status.style.display = 'none'; }, type === 'error' ? 3200 : 2200);
 }
 
 function renderClubShield() {
   const url = clubImageUrl();
   if (!url) return '<div class="club-shield">&#128737;</div>';
-  return `<div class="club-shield"><img src="${escapeAttr(url)}" alt="Escudo do clube" onerror="this.parentElement.innerHTML='&#128737;'"></div>`;
+  return `<div class="club-shield"><img src="${escapeAttr(url)}" alt="Foto do clube" onerror="this.parentElement.innerHTML='&#128737;'"></div>`;
 }
 
 function renderClubImageEditor() {
   if (!isAdmin()) return '';
+  const url = clubImageUrl();
   return `
-    <div class="club-image-editor">
-      <input id="clubImageInput" type="url" placeholder="URL da imagem/escudo do clube" value="${escapeAttr(clubImageUrl())}">
-      <button class="btn-mini" type="button" onclick="saveClubImage()">Salvar escudo</button>
-      <div id="clubImageStatus" class="club-image-status">Escudo salvo</div>
+    <div class="club-settings-panel">
+      <div class="club-logo-label">Configurações do Clube</div>
+      <div class="club-logo-config">
+        <div class="club-logo-preview">${url ? `<img src="${escapeAttr(url)}" alt="Foto atual do clube">` : '<span>Sem foto</span>'}</div>
+        <div>
+          <div class="club-logo-label" style="margin-bottom:6px;">Foto atual do clube</div>
+          <div class="club-logo-hint">Formatos aceitos: PNG, JPG ou WEBP<br>Tamanho máximo: 2MB</div>
+          <div class="club-logo-actions">
+            <input id="clubLogoFile" type="file" accept="image/png,image/jpeg,image/webp" style="display:none" onchange="uploadClubLogo(this.files && this.files[0])">
+            <button class="btn-mini" type="button" onclick="document.getElementById('clubLogoFile').click()">Alterar foto</button>
+            <button class="btn-mini danger" type="button" onclick="removeClubLogo()">Remover foto</button>
+          </div>
+          <div id="clubImageStatus" class="club-image-status"></div>
+        </div>
+      </div>
     </div>
   `;
 }
 
-async function saveClubImage() {
-  const input = document.getElementById('clubImageInput');
-  const status = document.getElementById('clubImageStatus');
-  const imageUrl = (input && input.value ? input.value : '').trim();
+async function uploadClubLogo(file) {
+  if (!file) return;
+  const allowed = ['image/png', 'image/jpeg', 'image/webp'];
+  if (!allowed.includes(file.type)) {
+    setClubImageStatus('Use PNG, JPG ou WEBP', 'error');
+    return;
+  }
+  if (file.size > 2 * 1024 * 1024) {
+    setClubImageStatus('Imagem maior que 2MB', 'error');
+    return;
+  }
+  const fd = new FormData();
+  fd.append('file', file);
   try {
-    const r = await authFetch('/api/club-settings', {
-      method: 'PUT',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({image_url: imageUrl})
-    });
+    setClubImageStatus('Enviando imagem...', 'loading');
+    const r = await authFetch('/api/club-logo', { method: 'POST', body: fd });
     const data = await r.json().catch(() => ({}));
-    if (!r.ok) throw new Error(data.detail || 'Erro ao salvar escudo');
-    if (DATA && DATA.club) DATA.club.image_url = imageUrl;
-    if (status) {
-      status.textContent = 'Escudo salvo';
-      status.style.display = 'block';
-      status.style.color = 'var(--green)';
-      setTimeout(() => { status.style.display = 'none'; }, 1800);
+    if (!r.ok) throw new Error(data.detail || 'Erro ao enviar imagem');
+    if (DATA && DATA.club) {
+      DATA.club.logo_url = data.logo_url || (data.club && data.club.logo_url) || '';
+      DATA.club.image_url = DATA.club.logo_url;
+      DATA.club.logo_path = data.logo_path || (data.club && data.club.logo_path) || '';
+      DATA.club.logo_updated_at = (data.club && data.club.logo_updated_at) || DATA.club.logo_updated_at;
     }
-    const shield = document.querySelector('.club-shield');
-    if (shield) shield.outerHTML = renderClubShield();
+    render();
+    setTimeout(() => setClubImageStatus('Foto do clube salva', 'ok'), 50);
   } catch (e) {
-    if (status) {
-      status.textContent = e.message || 'Erro ao salvar';
-      status.style.display = 'block';
-      status.style.color = 'var(--red)';
-      setTimeout(() => { status.style.display = 'none'; status.style.color = 'var(--green)'; }, 2600);
-    } else {
-      alert(e.message || 'Erro ao salvar escudo');
-    }
+    setClubImageStatus(e.message || 'Erro ao enviar imagem', 'error');
+  } finally {
+    const input = document.getElementById('clubLogoFile');
+    if (input) input.value = '';
   }
 }
 
+async function removeClubLogo() {
+  if (!clubImageUrl()) {
+    setClubImageStatus('O clube ainda não tem foto', 'error');
+    return;
+  }
+  if (!confirm('Remover a foto atual do clube?')) return;
+  try {
+    setClubImageStatus('Removendo imagem...', 'loading');
+    const r = await authFetch('/api/club-logo', { method: 'DELETE' });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(data.detail || 'Erro ao remover imagem');
+    if (DATA && DATA.club) {
+      DATA.club.logo_url = '';
+      DATA.club.image_url = '';
+      DATA.club.logo_path = '';
+      DATA.club.logo_updated_at = data.club && data.club.logo_updated_at;
+    }
+    render();
+    setTimeout(() => setClubImageStatus('Foto removida', 'ok'), 50);
+  } catch (e) {
+    setClubImageStatus(e.message || 'Erro ao remover imagem', 'error');
+  }
+}
 function render() {
   const c = document.getElementById('content');
   
@@ -8644,6 +8928,12 @@ if __name__ == "__main__":
     print("="*60 + "\n")
     
     uvicorn.run(app, host="0.0.0.0", port=8000)
+
+
+
+
+
+
 
 
 
