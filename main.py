@@ -5462,6 +5462,60 @@ html, body { max-width: 100%; }
 }
 
 
+
+/* RANKINGS */
+.rankings-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 14px;
+}
+.ranking-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 16px;
+}
+.ranking-title {
+  color: var(--green);
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  margin-bottom: 12px;
+}
+.ranking-list { display: grid; gap: 8px; }
+.ranking-row {
+  display: grid;
+  grid-template-columns: 34px 1fr auto;
+  gap: 10px;
+  align-items: center;
+  padding: 10px;
+  border: 1px solid rgba(255,255,255,0.06);
+  border-radius: 8px;
+  background: rgba(0,255,115,0.035);
+  cursor: pointer;
+}
+.ranking-row:hover { border-color: var(--green); background: rgba(0,255,115,0.08); }
+.ranking-pos {
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--green-dim);
+  color: var(--green);
+  font-weight: 900;
+}
+.ranking-name { font-weight: 800; overflow-wrap: anywhere; }
+.ranking-meta { color: var(--text-2); font-size: 11px; margin-top: 2px; }
+.ranking-value { color: var(--green); font-size: 22px; font-weight: 900; text-align: right; }
+@media (max-width: 760px) {
+  .rankings-grid { grid-template-columns: 1fr; }
+  .ranking-card { padding: 12px; }
+  .ranking-value { font-size: 18px; }
+}
+
 /* FINAL LAYOUT FIXES */
 .header-inner,
 .tabs,
@@ -6173,6 +6227,7 @@ function render() {
       <div class="tab ${CURRENT_TAB==='visao'?'active':''}" onclick="setTab('visao')">VISÃO</div>
       <div class="tab ${CURRENT_TAB==='meu-scout'?'active':''}" onclick="setTab('meu-scout')">MEU SCOUT</div>
       <div class="tab ${CURRENT_TAB==='jogadores'?'active':''}" onclick="setTab('jogadores')">JOGADORES</div>
+      <div class="tab ${CURRENT_TAB==='rankings'?'active':''}" onclick="setTab('rankings')">RANKINGS</div>
       <div class="tab ${CURRENT_TAB==='comparar'?'active':''}" onclick="setTab('comparar')">COMPARAR</div>
       <div class="tab ${CURRENT_TAB==='confrontos'?'active':''}" onclick="setTab('confrontos')">CONFRONTOS</div>
       <div class="tab ${CURRENT_TAB==='time-ideal'?'active':''}" onclick="setTab('time-ideal')">TIME IDEAL</div>
@@ -6230,6 +6285,7 @@ function renderTab() {
   if (CURRENT_TAB === 'visao') tc.innerHTML = renderVisao();
   else if (CURRENT_TAB === 'meu-scout') tc.innerHTML = renderMeuScout();
   else if (CURRENT_TAB === 'jogadores') tc.innerHTML = renderJogadores();
+  else if (CURRENT_TAB === 'rankings') tc.innerHTML = renderRankings();
   else if (CURRENT_TAB === 'comparar') { tc.innerHTML = renderComparar(); renderCompareBars(); }
   else if (CURRENT_TAB === 'confrontos') tc.innerHTML = renderConfrontos();
   else if (CURRENT_TAB === 'time-ideal') tc.innerHTML = renderTimeIdeal();
@@ -6742,6 +6798,88 @@ function renderJogadores() {
   });
   html += '</div>';
   return html;
+}
+
+
+function renderRankings() {
+  const matches = filteredMatches();
+  const players = computePlayersForMatches(matches).filter(p => Number(p.games || 0) > 0);
+  const typeLabel = {
+    todos: 'todas as partidas',
+    liga: 'liga',
+    copa: 'copa',
+    amistoso: 'amistosos'
+  }[CURRENT_MATCH_TYPE] || 'filtro de tipo atual';
+  const periodLabel = {
+    todos: 'todo o hist?rico salvo',
+    ult5: '?ltimas 5 partidas',
+    ult10: '?ltimas 10 partidas',
+    semana: '?ltimos 7 dias',
+    mes: '?ltimos 30 dias'
+  }[CURRENT_PERIOD] || 'filtro atual';
+
+  if (!players.length) {
+    return '<div class="empty-state">Nenhum jogador encontrado neste filtro</div>';
+  }
+
+  const rankValue = (p, key) => {
+    if (key === 'rating') return Number(p.rating || 0);
+    if (key === 'goals') return Number(p.goals || 0);
+    if (key === 'assists') return Number(p.assists || 0);
+    if (key === 'pass_pct') return Number(p.pass_pct || 0);
+    if (key === 'tackle_pct') return Number(p.tackle_pct || 0);
+    if (key === 'mom') return Number(p.mom || 0);
+    return 0;
+  };
+
+  const formatRankValue = (value, suffix='') => {
+    const n = Number(value || 0);
+    if (!Number.isFinite(n)) return '0' + suffix;
+    const rounded = Math.abs(n % 1) > 0
+      ? n.toFixed(n >= 10 ? 1 : 2).replace(/\.00$/, '').replace(/\.0$/, '')
+      : String(n);
+    return rounded + suffix;
+  };
+
+  const topList = (title, key, suffix='', minGames=1, requirePositive=false) => {
+    const rows = players
+      .filter(p => Number(p.games || 0) >= minGames)
+      .map(p => ({...p, _rank_value: rankValue(p, key)}))
+      .filter(p => requirePositive ? p._rank_value > 0 : p._rank_value >= 0)
+      .sort((a,b) => (b._rank_value - a._rank_value) || Number(b.games || 0) - Number(a.games || 0))
+      .slice(0, 5);
+    return `
+      <div class="ranking-card">
+        <div class="ranking-title">${title}</div>
+        <div class="ranking-list">
+          ${rows.map((p, idx) => `
+            <div class="ranking-row" onclick="showPlayerDetail('${p.name.replace(/'/g, "\\'")}')">
+              <div class="ranking-pos">${idx + 1}</div>
+              <div class="ranking-main">
+                <div class="ranking-name">${p.name}</div>
+                <div class="ranking-meta">${p.position || '-'} ? ${p.games || 0} jogos no filtro</div>
+              </div>
+              <div class="ranking-value">${formatRankValue(p._rank_value, suffix)}</div>
+            </div>
+          `).join('') || '<div class="empty-state" style="padding:24px 10px;">Sem dados neste filtro</div>'}
+        </div>
+      </div>`;
+  };
+
+  return `
+    <div class="section-title">Rankings ? ${typeLabel} ? ${periodLabel}</div>
+    <div style="color:var(--text-2);font-size:12px;margin-bottom:14px;line-height:1.5;">
+      Top 5 calculado somente com partidas do clube atual e respeitando per?odo + tipo de partida selecionados.
+    </div>
+    <div class="rankings-grid">
+      ${topList('Top 5 Nota M?dia EA', 'rating')}
+      ${topList('Top 5 Gols', 'goals', '', 1, true)}
+      ${topList('Top 5 Assist?ncias', 'assists', '', 1, true)}
+      ${topList('Top 5 % Passes Certos', 'pass_pct', '%', 1, true)}
+      ${topList('Top 5 % Divididas', 'tackle_pct', '%', 1, true)}
+      ${topList('Top 5 MOM', 'mom', '', 1, true)}
+    </div>
+  `;
 }
 
 function renderComparar() {
