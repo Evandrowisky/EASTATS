@@ -5411,6 +5411,7 @@ function render() {
     
     <div class="tabs">
       <div class="tab ${CURRENT_TAB==='visao'?'active':''}" onclick="setTab('visao')">VISÃO</div>
+      <div class="tab ${CURRENT_TAB==='meu-scout'?'active':''}" onclick="setTab('meu-scout')">MEU SCOUT</div>
       <div class="tab ${CURRENT_TAB==='jogadores'?'active':''}" onclick="setTab('jogadores')">JOGADORES</div>
       <div class="tab ${CURRENT_TAB==='comparar'?'active':''}" onclick="setTab('comparar')">COMPARAR</div>
       <div class="tab ${CURRENT_TAB==='confrontos'?'active':''}" onclick="setTab('confrontos')">CONFRONTOS</div>
@@ -5467,6 +5468,7 @@ function renderTab() {
   if (!tc) return;
   
   if (CURRENT_TAB === 'visao') tc.innerHTML = renderVisao();
+  else if (CURRENT_TAB === 'meu-scout') tc.innerHTML = renderMeuScout();
   else if (CURRENT_TAB === 'jogadores') tc.innerHTML = renderJogadores();
   else if (CURRENT_TAB === 'comparar') { tc.innerHTML = renderComparar(); renderCompareBars(); }
   else if (CURRENT_TAB === 'confrontos') tc.innerHTML = renderConfrontos();
@@ -5792,6 +5794,100 @@ function playerStatLine(label, value, suffix = '') {
   return `<div class="player-stat"><span class="player-stat-label">${label}</span><span class="player-stat-val">${fmtStat(value, suffix)}</span></div>`;
 }
 
+function normalizePlayerLookup(value) {
+  return String(value || '').trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9_ -]/g, '').replace(/\s+/g, ' ');
+}
+
+function findPlayerByTypedName(name, players) {
+  const q = normalizePlayerLookup(name);
+  if (!q) return null;
+  const list = players || [];
+  return list.find(p => normalizePlayerLookup(p.name) === q)
+    || list.find(p => normalizePlayerLookup(p.name).replace(/\s+/g, '') === q.replace(/\s+/g, ''))
+    || list.find(p => normalizePlayerLookup(p.name).includes(q) || q.includes(normalizePlayerLookup(p.name)));
+}
+
+function currentMyScoutName() {
+  return localStorage.getItem('scout_my_player_name') || (AUTH_USER && (AUTH_USER.nome || AUTH_USER.usuario)) || '';
+}
+
+function saveMyScoutName(ev) {
+  ev.preventDefault();
+  const input = document.getElementById('myScoutName');
+  const name = (input && input.value ? input.value : '').trim();
+  if (!name) return;
+  localStorage.setItem('scout_my_player_name', name);
+  renderTab();
+}
+
+function clearMyScoutName() {
+  localStorage.removeItem('scout_my_player_name');
+  renderTab();
+}
+
+function renderMeuScout() {
+  const players = scopedPlayers();
+  const savedName = currentMyScoutName();
+  const found = findPlayerByTypedName(savedName, players);
+  const options = players.map(p => `<option value="${escapeAttr(p.name)}"></option>`).join('');
+  const scopeLabel = CURRENT_MATCH_TYPE === 'todos' ? 'todos os jogos do clube' : 'partidas detalhadas salvas de ' + CURRENT_MATCH_TYPE;
+
+  let html = `
+    <div class="section-title">Meu Scout · ${scopeLabel}</div>
+    <form class="agenda-form" onsubmit="saveMyScoutName(event)" style="grid-template-columns: 1fr auto auto; align-items:end;">
+      <div style="grid-column:auto;">
+        <div style="font-size:10px;color:var(--text-2);letter-spacing:2px;text-transform:uppercase;margin-bottom:8px;">Nome no Pro Clubs</div>
+        <input id="myScoutName" list="myScoutPlayers" type="text" placeholder="Digite exatamente seu nome no EA FC" value="${escapeAttr(savedName)}">
+        <datalist id="myScoutPlayers">${options}</datalist>
+      </div>
+      <button type="submit" class="btn-primary" style="padding:10px 18px;">Buscar</button>
+      <button type="button" class="btn-mini" onclick="clearMyScoutName()">Limpar</button>
+    </form>
+  `;
+
+  if (!savedName) {
+    html += `<div class="empty-state" style="padding:40px 20px;"><div class="empty-title">Digite seu nome de jogador</div><div class="empty-text">Use o mesmo nome que aparece no Pro Clubs para abrir seu scout individual.</div></div>`;
+    return html;
+  }
+
+  if (!found) {
+    html += `<div class="empty-state" style="padding:40px 20px;"><div class="empty-title">Jogador não encontrado neste filtro</div><div class="empty-text">Confira o nome digitado ou mude o filtro de tipo de partida para TODAS PARTIDAS.</div></div>`;
+    return html;
+  }
+
+  const safeName = found.name.replace(/'/g, "\\'");
+  html += `
+    <div class="players-grid" style="grid-template-columns:minmax(260px, 420px);">
+      <div class="player-card" onclick="showPlayerDetail('${safeName}')">
+        <div class="player-rating-big">${found.rating}</div>
+        <div class="player-pos"><span class="player-pos-badge">${found.position} · ${found.games}J ${CURRENT_MATCH_TYPE === 'todos' ? 'no clube' : 'detalhadas salvas'}</span></div>
+        <div class="player-name">${found.name}</div>
+        <div class="player-stats">
+          ${playerStatLine('Sofi', found.sofi_rating)}
+          ${playerStatLine('Gols', found.goals)}
+          ${playerStatLine('Assist', found.assists)}
+          ${playerStatLine('G+A', found.goal_involvements)}
+          ${playerStatLine('G/J', found.goals_per_game)}
+          ${playerStatLine('A/J', found.assists_per_game)}
+          ${playerStatLine('Chutes', found.shots)}
+          ${playerStatLine('Chu/J', found.shots_per_game)}
+          ${playerStatLine('Pass%', found.pass_pct, '%')}
+          ${playerStatLine('Passes', found.passes_made)}
+          ${playerStatLine('Des%', found.tackle_pct, '%')}
+          ${playerStatLine('Desarmes', found.tackles_made)}
+          ${playerStatLine('Defesas', found.saves)}
+          ${playerStatLine('SG', found.clean_sheet)}
+          ${playerStatLine('MOM', found.mom)}
+          ${playerStatLine('V/E/D', `${found.wins}/${found.draws}/${found.losses}`)}
+          ${playerStatLine('Win%', found.win_rate, '%')}
+          ${playerStatLine('Verm.', found.reds)}
+        </div>
+        <button class="btn-primary" style="width:100%;margin-top:14px;padding:10px 16px;" onclick="event.stopPropagation();showPlayerDetail('${safeName}')">Abrir análise completa</button>
+      </div>
+    </div>
+  `;
+  return html;
+}
 function renderJogadores() {
   const players = scopedPlayers();
   if (!players.length) {
@@ -7105,6 +7201,7 @@ if __name__ == "__main__":
     print("="*60 + "\n")
     
     uvicorn.run(app, host="0.0.0.0", port=8000)
+
 
 
 
