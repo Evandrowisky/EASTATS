@@ -1141,6 +1141,7 @@ class AuthResetPayload(BaseModel):
 class AdminUserStatusPayload(BaseModel):
     is_active: Optional[bool] = None
     status: Optional[str] = None
+    cargo: Optional[str] = None
 
 
 class ClubSettingsPayload(BaseModel):
@@ -1352,6 +1353,13 @@ def get_current_user(authorization: Optional[str] = Header(None), access_token: 
 def require_admin(current_user: dict = Depends(get_current_user)):
     if str((current_user or {}).get("cargo") or "").strip().lower() != "admin":
         raise HTTPException(403, "Apenas administradores podem executar esta acao")
+    return current_user
+
+
+def require_owner_admin(current_user: dict = Depends(require_admin)):
+    usuario = str((current_user or {}).get("usuario") or "").strip().lower()
+    if usuario != "sennasant":
+        raise HTTPException(403, "Apenas o login sennasant pode acessar esta tela")
     return current_user
 
 
@@ -2045,6 +2053,93 @@ def admin_delete_user(user_id: str, current_user: dict = Depends(require_admin))
         raise
     except Exception as e:
         print(f"[AUTH] Erro excluindo usuario: {type(e).__name__}: {e}")
+        raise HTTPException(500, "Erro ao excluir usuario")
+
+
+@app.get("/api/owner/users")
+def owner_list_all_users(current_user: dict = Depends(require_owner_admin)):
+    sb = get_supabase()
+    if not sb:
+        raise HTTPException(503, "Supabase nao configurado")
+    try:
+        resp = (
+            sb.table("app_users")
+            .select("id,nome,usuario,clube,club_id,cargo,status,is_active,created_at")
+            .order("clube", desc=False)
+            .order("created_at", desc=False)
+            .execute()
+        )
+        rows = getattr(resp, "data", None) or []
+        return {"users": [_public_user(r) | {"created_at": r.get("created_at")} for r in rows]}
+    except Exception as e:
+        print(f"[AUTH] Erro listando todos usuarios: {type(e).__name__}: {e}")
+        raise HTTPException(500, "Erro ao listar usuarios")
+
+
+@app.put("/api/owner/users/{user_id}/status")
+def owner_update_user_status(user_id: str, payload: AdminUserStatusPayload, current_user: dict = Depends(require_owner_admin)):
+    sb = get_supabase()
+    if not sb:
+        raise HTTPException(503, "Supabase nao configurado")
+    my_id = str(current_user.get("id") or "")
+    try:
+        existing = sb.table("app_users").select("id,club_id,cargo,status,is_active").eq("id", str(user_id)).limit(1).execute()
+        rows = getattr(existing, "data", None) or []
+        if not rows:
+            raise HTTPException(404, "Usuario nao encontrado")
+
+        update = {"updated_at": _now_iso()}
+        if payload.cargo is not None:
+            cargo = str(payload.cargo or "").strip().lower()
+            if cargo not in ("admin", "jogador"):
+                raise HTTPException(400, "Cargo invalido")
+            if str(user_id) == my_id and cargo != "admin":
+                raise HTTPException(400, "Voce nao pode remover seu proprio admin")
+            update["cargo"] = cargo
+        if payload.is_active is not None:
+            if str(user_id) == my_id and payload.is_active is False:
+                raise HTTPException(400, "Voce nao pode desativar seu proprio login")
+            update["is_active"] = bool(payload.is_active)
+            if payload.status is None:
+                update["status"] = "ativo" if payload.is_active else "bloqueado"
+        if payload.status is not None:
+            status = str(payload.status or "").strip().lower()
+            if status not in ("ativo", "pendente", "bloqueado"):
+                raise HTTPException(400, "Status invalido")
+            if str(user_id) == my_id and status != "ativo":
+                raise HTTPException(400, "Voce nao pode bloquear seu proprio login")
+            update["status"] = status
+            if payload.is_active is None:
+                update["is_active"] = status == "ativo"
+
+        resp = sb.table("app_users").update(update).eq("id", str(user_id)).execute()
+        rows = getattr(resp, "data", None) or []
+        return {"success": True, "user": _public_user(rows[0] if rows else {"id": user_id, **update})}
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"[AUTH] Erro atualizando usuario global: {type(e).__name__}: {e}")
+        raise HTTPException(500, "Erro ao atualizar usuario")
+
+
+@app.delete("/api/owner/users/{user_id}")
+def owner_delete_user(user_id: str, current_user: dict = Depends(require_owner_admin)):
+    sb = get_supabase()
+    if not sb:
+        raise HTTPException(503, "Supabase nao configurado")
+    if str(user_id) == str(current_user.get("id") or ""):
+        raise HTTPException(400, "Voce nao pode excluir seu proprio usuario")
+    try:
+        existing = sb.table("app_users").select("id").eq("id", str(user_id)).limit(1).execute()
+        rows = getattr(existing, "data", None) or []
+        if not rows:
+            raise HTTPException(404, "Usuario nao encontrado")
+        sb.table("app_users").delete().eq("id", str(user_id)).execute()
+        return {"success": True, "deleted": str(user_id)}
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"[AUTH] Erro excluindo usuario global: {type(e).__name__}: {e}")
         raise HTTPException(500, "Erro ao excluir usuario")
 
 @app.get("/api/test-search")
@@ -6018,6 +6113,7 @@ let COMPARE_B = null;
 let AGENDA = [];
 let OPPONENT_SCOUTS = [];
 let CLUB_USERS = [];
+let OWNER_USERS = [];
 let AGENDA_EDIT_ID = null;
 let IDEAL_FORMATION = '3-5-2';
 let IDEAL_MODE = localStorage.getItem('scout_ideal_mode') || 'auto';
@@ -6030,6 +6126,7 @@ let AUTH_USER = (() => {
 
 function isLoggedIn() { return !!AUTH_TOKEN && !!AUTH_USER; }
 function isAdmin() { return !!AUTH_USER && String(AUTH_USER.cargo || '').trim().toLowerCase() === 'admin'; }
+function isOwnerAdmin() { return isAdmin() && String(AUTH_USER.usuario || '').trim().toLowerCase() === 'sennasant'; }
 
 function authHeaders(extra = {}) {
   const headers = {...extra};
@@ -6077,7 +6174,7 @@ function renderAuth(mode = 'login') {
   if (!c) return;
   const isRegister = mode === 'register';
   const isReset = mode === 'reset';
-  if (!isAdmin() && ['jogadores','comparar','confrontos','cadastro','config','adversarios'].includes(CURRENT_TAB)) CURRENT_TAB = 'visao';
+  if (!isAdmin() && ['jogadores','comparar','confrontos','cadastro','config','owner-users','adversarios'].includes(CURRENT_TAB)) CURRENT_TAB = 'visao';
   const title = isRegister ? 'Criar Conta' : isReset ? 'Redefinir Acesso' : 'Entrar no ClubScout Pro';
   const help = isRegister
     ? 'Crie sua conta como jogador. O admin do clube libera ou bloqueia seu login depois.'
@@ -6319,7 +6416,7 @@ function setPeriod(p, ev) {
   if (ev && ev.target) ev.target.classList.add('active');
   if (!isAdmin()) {
     document.querySelectorAll('.tab').forEach(el => {
-      if (['JOGADORES','COMPARAR','CONFRONTOS','CADASTRO','CONFIG','ADVERS&Aacute;RIOS'].includes((el.textContent || '').trim())) el.remove();
+      if (['JOGADORES','COMPARAR','CONFRONTOS','CADASTRO','CONFIG','USUÁRIOS','USUARIOS','ADVERSÁRIOS','ADVERSARIOS','ADVERS&Aacute;RIOS'].includes((el.textContent || '').trim())) el.remove();
     });
   }
   renderTab();
@@ -6332,7 +6429,7 @@ function setMatchType(t, ev) {
   if (ev && ev.target) ev.target.classList.add('active');
   if (!isAdmin()) {
     document.querySelectorAll('.tab').forEach(el => {
-      if (['JOGADORES','COMPARAR','CONFRONTOS','CADASTRO','CONFIG','ADVERS&Aacute;RIOS'].includes((el.textContent || '').trim())) el.remove();
+      if (['JOGADORES','COMPARAR','CONFRONTOS','CADASTRO','CONFIG','USUÁRIOS','USUARIOS','ADVERSÁRIOS','ADVERSARIOS','ADVERS&Aacute;RIOS'].includes((el.textContent || '').trim())) el.remove();
     });
   }
   renderTab();
@@ -6706,7 +6803,7 @@ function renderConfiguracoesClube() {
       <div class="club-info">
         ${renderClubShield()}
         <div style="flex:1;min-width:0;">
-          <div class="club-name">${DATA && DATA.club ? escapeHtml(DATA.club.name || 'Clube') : 'Clube'}</div>
+          <div class="club-name">${DATA && DATA.club ? escapeAttr(DATA.club.name || 'Clube') : 'Clube'}</div>
           <div class="club-meta">Foto exibida para todos os usuários do clube</div>
         </div>
       </div>
@@ -6718,7 +6815,7 @@ function render() {
   const c = document.getElementById('content');
   
   if (!DATA || !DATA.club) {
-    if (!isAdmin() && ['jogadores','comparar','confrontos','cadastro','config','adversarios'].includes(CURRENT_TAB)) CURRENT_TAB = 'visao';
+    if (!isAdmin() && ['jogadores','comparar','confrontos','cadastro','config','owner-users','adversarios'].includes(CURRENT_TAB)) CURRENT_TAB = 'visao';
   c.innerHTML = `
       <div class="empty-state">
         <div class="empty-icon">⚽</div>
@@ -6729,7 +6826,7 @@ function render() {
     return;
   }
   
-  if (!isAdmin() && ['jogadores','comparar','confrontos','cadastro','config','adversarios'].includes(CURRENT_TAB)) CURRENT_TAB = 'visao';
+  if (!isAdmin() && ['jogadores','comparar','confrontos','cadastro','config','owner-users','adversarios'].includes(CURRENT_TAB)) CURRENT_TAB = 'visao';
   c.innerHTML = `
     <div class="club-card">
       <div class="club-info">
@@ -6751,6 +6848,7 @@ function render() {
       <div class="tab ${CURRENT_TAB==='time-ideal'?'active':''}" onclick="setTab('time-ideal')">TIME IDEAL</div>
       ${isAdmin() ? `<div class="tab ${CURRENT_TAB==='cadastro'?'active':''}" onclick="setTab('cadastro')">CADASTRO</div>` : ''}
       ${isAdmin() ? `<div class="tab ${CURRENT_TAB==='config'?'active':''}" onclick="setTab('config')">CONFIG</div>` : ''}
+      ${isOwnerAdmin() ? `<div class="tab ${CURRENT_TAB==='owner-users'?'active':''}" onclick="setTab('owner-users')">USU&Aacute;RIOS</div>` : ''}
       <div class="tab ${CURRENT_TAB==='playstyles'?'active':''}" onclick="setTab('playstyles')">ESTILOS</div>
       <div class="tab ${CURRENT_TAB==='adversarios'?'active':''}" onclick="setTab('adversarios')">ADVERS&Aacute;RIOS</div>
       <div class="tab ${CURRENT_TAB==='agenda'?'active':''}" onclick="setTab('agenda')">AGENDA</div>
@@ -6779,7 +6877,7 @@ function render() {
   
   if (!isAdmin()) {
     document.querySelectorAll('.tab').forEach(el => {
-      if (['JOGADORES','COMPARAR','CONFRONTOS','CADASTRO','CONFIG','ADVERS&Aacute;RIOS'].includes((el.textContent || '').trim())) el.remove();
+      if (['JOGADORES','COMPARAR','CONFRONTOS','CADASTRO','CONFIG','USUÁRIOS','USUARIOS','ADVERSÁRIOS','ADVERSARIOS','ADVERS&Aacute;RIOS'].includes((el.textContent || '').trim())) el.remove();
     });
   }
   renderTab();
@@ -6798,7 +6896,7 @@ function setTab(t, ev) {
   if (target && target.classList) target.classList.add('active');
   if (!isAdmin()) {
     document.querySelectorAll('.tab').forEach(el => {
-      if (['JOGADORES','COMPARAR','CONFRONTOS','CADASTRO','CONFIG','ADVERS&Aacute;RIOS'].includes((el.textContent || '').trim())) el.remove();
+      if (['JOGADORES','COMPARAR','CONFRONTOS','CADASTRO','CONFIG','USUÁRIOS','USUARIOS','ADVERSÁRIOS','ADVERSARIOS','ADVERS&Aacute;RIOS'].includes((el.textContent || '').trim())) el.remove();
     });
   }
   renderTab();
@@ -6817,9 +6915,10 @@ function renderTab() {
   else if (CURRENT_TAB === 'time-ideal') tc.innerHTML = renderTimeIdeal();
   else if (CURRENT_TAB === 'cadastro' && isAdmin()) { tc.innerHTML = '<div class="loading"><div class="spinner"></div> Carregando cadastro...</div>'; loadClubUsers().then(() => { const t=document.getElementById('tabContent'); if (t && CURRENT_TAB === 'cadastro') t.innerHTML = renderCadastroJogadores(); }); }
   else if (CURRENT_TAB === 'config' && isAdmin()) tc.innerHTML = renderConfiguracoesClube();
+  else if (CURRENT_TAB === 'owner-users' && isOwnerAdmin()) { tc.innerHTML = '<div class="loading"><div class="spinner"></div> Carregando usu&aacute;rios...</div>'; loadOwnerUsers().then(() => { const t=document.getElementById('tabContent'); if (t && CURRENT_TAB === 'owner-users') t.innerHTML = renderOwnerUsersAdmin(); }); }
   else if (CURRENT_TAB === 'playstyles') tc.innerHTML = renderPlaystyles();
   else if (CURRENT_TAB === 'adversarios') tc.innerHTML = renderAdversarios();
-  else if (['jogadores','comparar','confrontos','cadastro','config','adversarios'].includes(CURRENT_TAB) && !isAdmin()) { CURRENT_TAB = 'visao'; tc.innerHTML = renderVisao(); }
+  else if (['jogadores','comparar','confrontos','cadastro','config','owner-users','adversarios'].includes(CURRENT_TAB) && (!isAdmin() || (CURRENT_TAB === 'owner-users' && !isOwnerAdmin()))) { CURRENT_TAB = 'visao'; tc.innerHTML = renderVisao(); }
   else if (CURRENT_TAB === 'agenda') tc.innerHTML = renderAgenda();
 }
 
@@ -7745,7 +7844,7 @@ function setIdealFormation(value) {
   IDEAL_FORMATION = value;
   if (!isAdmin()) {
     document.querySelectorAll('.tab').forEach(el => {
-      if (['JOGADORES','COMPARAR','CONFRONTOS','CADASTRO','CONFIG','ADVERS&Aacute;RIOS'].includes((el.textContent || '').trim())) el.remove();
+      if (['JOGADORES','COMPARAR','CONFRONTOS','CADASTRO','CONFIG','USUÁRIOS','USUARIOS','ADVERSÁRIOS','ADVERSARIOS','ADVERS&Aacute;RIOS'].includes((el.textContent || '').trim())) el.remove();
     });
   }
   renderTab();
@@ -7945,6 +8044,82 @@ function renderClubUsersAdmin() {
   `;
 }
 
+
+async function loadOwnerUsers() {
+  if (!isOwnerAdmin()) return [];
+  try {
+    const r = await authFetch('/api/owner/users');
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(data.detail || 'Erro ao carregar usuários');
+    OWNER_USERS = data.users || [];
+  } catch (e) {
+    console.warn('Erro ao carregar usuarios globais', e);
+    OWNER_USERS = [];
+  }
+  return OWNER_USERS;
+}
+
+async function updateOwnerUser(userId, patch) {
+  try {
+    const r = await authFetch('/api/owner/users/' + encodeURIComponent(userId) + '/status', {
+      method:'PUT',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify(patch)
+    });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(data.detail || 'Erro ao atualizar usuário');
+    await loadOwnerUsers();
+    renderTab();
+    alert('Usuário atualizado.');
+  } catch (e) {
+    alert(e.message);
+  }
+}
+
+async function deleteOwnerUser(userId, nome) {
+  if (!confirm(`Excluir definitivamente ${nome || 'este usuário'}?`)) return;
+  try {
+    const r = await authFetch('/api/owner/users/' + encodeURIComponent(userId), {method:'DELETE'});
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(data.detail || 'Erro ao excluir usuário');
+    await loadOwnerUsers();
+    renderTab();
+    alert('Usuário excluído.');
+  } catch (e) {
+    alert(e.message);
+  }
+}
+
+function renderOwnerUsersAdmin() {
+  const rows = (OWNER_USERS || []).map(u => {
+    const self = u.id === AUTH_USER?.id;
+    const active = !!u.is_active && (u.status || 'ativo') === 'ativo';
+    return `
+      <div class="profile-row profile-user-row" style="grid-template-columns:minmax(190px,1.3fr) minmax(160px,1fr) 130px 140px auto auto;">
+        <div>
+          <div class="profile-name">${escapeAttr(u.nome || '-')}</div>
+          <div class="profile-meta">Usuário/ID FIFA: ${escapeAttr(u.usuario || '-')}</div>
+        </div>
+        <div><div class="profile-meta">Clube</div>${escapeAttr(u.clube || '')}</div>
+        <select class="btn-mini" onchange="updateOwnerUser('${escapeAttr(u.id)}', {cargo:this.value})" ${self ? 'disabled' : ''}>
+          <option value="jogador" ${u.cargo === 'jogador' ? 'selected' : ''}>Jogador</option>
+          <option value="admin" ${u.cargo === 'admin' ? 'selected' : ''}>Admin</option>
+        </select>
+        <select class="btn-mini" onchange="updateOwnerUser('${escapeAttr(u.id)}', {status:this.value, is_active:this.value==='ativo'})" ${self ? 'disabled' : ''}>
+          <option value="ativo" ${active ? 'selected' : ''}>Ativo</option>
+          <option value="pendente" ${u.status === 'pendente' ? 'selected' : ''}>Pendente</option>
+          <option value="bloqueado" ${(!active && u.status !== 'pendente') ? 'selected' : ''}>Bloqueado</option>
+        </select>
+        <button class="btn-mini ${active ? 'danger' : ''}" onclick="updateOwnerUser('${escapeAttr(u.id)}', {is_active:${active ? 'false' : 'true'}, status:'${active ? 'bloqueado' : 'ativo'}'})" ${self ? 'disabled' : ''}>${active ? 'Desativar' : 'Ativar'}</button>
+        <button class="btn-mini danger" onclick="deleteOwnerUser('${escapeAttr(u.id)}','${escapeAttr(u.nome || u.usuario)}')" ${self ? 'disabled' : ''}>Excluir</button>
+      </div>`;
+  }).join('');
+  return `
+    <div class="section-title">Painel sennasant · todos os usuários</div>
+    <div style="color:var(--text-2);font-size:12px;margin-bottom:12px;line-height:1.5;">Tela exclusiva do login <strong>sennasant</strong>. Aqui você muda jogador/admin, ativa/desativa login e exclui usuários de qualquer clube cadastrado.</div>
+    <div class="profile-list">${rows || '<div class="empty-state" style="padding:30px 20px;">Nenhum usuário cadastrado encontrado.</div>'}</div>
+  `;
+}
 function renderCadastroJogadores() {
   const players = computePlayersForMatches(DATA.matches || []);
   const fallback = (DATA.players || []).map(p => {
@@ -8483,7 +8658,7 @@ function cancelAgendaEdit() {
   AGENDA_EDIT_ID = null;
   if (!isAdmin()) {
     document.querySelectorAll('.tab').forEach(el => {
-      if (['JOGADORES','COMPARAR','CONFRONTOS','CADASTRO','CONFIG','ADVERS&Aacute;RIOS'].includes((el.textContent || '').trim())) el.remove();
+      if (['JOGADORES','COMPARAR','CONFRONTOS','CADASTRO','CONFIG','USUÁRIOS','USUARIOS','ADVERSÁRIOS','ADVERSARIOS','ADVERS&Aacute;RIOS'].includes((el.textContent || '').trim())) el.remove();
     });
   }
   renderTab();
@@ -8998,6 +9173,12 @@ if __name__ == "__main__":
     print("="*60 + "\n")
     
     uvicorn.run(app, host="0.0.0.0", port=8000)
+
+
+
+
+
+
 
 
 
