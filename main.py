@@ -2245,6 +2245,52 @@ def _storage_upload_bytes(storage, path: str, content: bytes, content_type: str)
         return storage.upload(path, content, options)
 
 
+def _is_bucket_missing_error(exc: Exception) -> bool:
+    msg = str(exc).lower()
+    return "bucket not found" in msg or "statuscode': 404" in msg or 'statuscode": 404' in msg or "404" in msg and "bucket" in msg
+
+
+def _ensure_storage_bucket(sb, bucket: str) -> bool:
+    """Garante bucket publico para logos. Com service_role isso pode criar automaticamente."""
+    if not sb or not bucket:
+        return False
+    try:
+        try:
+            buckets = sb.storage.list_buckets()
+            for b in buckets or []:
+                bid = getattr(b, "id", None) or getattr(b, "name", None)
+                if isinstance(b, dict):
+                    bid = b.get("id") or b.get("name")
+                if str(bid or "") == bucket:
+                    return True
+        except Exception as list_err:
+            print(f"[club-logo] Aviso ao listar buckets: {type(list_err).__name__}: {list_err}")
+        try:
+            sb.storage.create_bucket(bucket, options={"public": True, "file_size_limit": 2097152, "allowed_mime_types": ["image/png", "image/jpeg", "image/webp"]})
+        except TypeError:
+            sb.storage.create_bucket(bucket, {"public": True})
+        print(f"[club-logo] Bucket criado automaticamente: {bucket}")
+        return True
+    except Exception as e:
+        print(f"[club-logo] Aviso ao garantir bucket {bucket}: {type(e).__name__}: {e}")
+        return False
+
+
+def _upload_logo_with_bucket_retry(sb, bucket: str, path: str, content: bytes, content_type: str):
+    storage = sb.storage.from_(bucket)
+    try:
+        _storage_upload_bytes(storage, path, content, content_type)
+        return storage
+    except Exception as e:
+        if not _is_bucket_missing_error(e):
+            raise
+        print(f"[club-logo] Bucket {bucket} nao encontrado; tentando criar e reenviar")
+        _ensure_storage_bucket(sb, bucket)
+        storage = sb.storage.from_(bucket)
+        _storage_upload_bytes(storage, path, content, content_type)
+        return storage
+
+
 def _storage_remove_path(storage, path: str):
     if not path:
         return
@@ -2339,7 +2385,7 @@ async def upload_club_logo(file: UploadFile = File(...), current_user: dict = De
     storage = sb.storage.from_(bucket)
 
     try:
-        _storage_upload_bytes(storage, logo_path, content, content_type)
+        storage = _upload_logo_with_bucket_retry(sb, bucket, logo_path, content, content_type)
         logo_url = _storage_public_url(storage, logo_path)
         if not logo_url:
             raise RuntimeError("Nao foi possivel gerar URL publica do logo")
@@ -6031,7 +6077,7 @@ function renderAuth(mode = 'login') {
   if (!c) return;
   const isRegister = mode === 'register';
   const isReset = mode === 'reset';
-  if (!isAdmin() && ['jogadores','comparar','confrontos','cadastro','adversarios'].includes(CURRENT_TAB)) CURRENT_TAB = 'visao';
+  if (!isAdmin() && ['jogadores','comparar','confrontos','cadastro','config','adversarios'].includes(CURRENT_TAB)) CURRENT_TAB = 'visao';
   const title = isRegister ? 'Criar Conta' : isReset ? 'Redefinir Acesso' : 'Entrar no ClubScout Pro';
   const help = isRegister
     ? 'Crie sua conta como jogador. O admin do clube libera ou bloqueia seu login depois.'
@@ -6273,7 +6319,7 @@ function setPeriod(p, ev) {
   if (ev && ev.target) ev.target.classList.add('active');
   if (!isAdmin()) {
     document.querySelectorAll('.tab').forEach(el => {
-      if (['JOGADORES','COMPARAR','CONFRONTOS','CADASTRO','ADVERS&Aacute;RIOS'].includes((el.textContent || '').trim())) el.remove();
+      if (['JOGADORES','COMPARAR','CONFRONTOS','CADASTRO','CONFIG','ADVERS&Aacute;RIOS'].includes((el.textContent || '').trim())) el.remove();
     });
   }
   renderTab();
@@ -6286,7 +6332,7 @@ function setMatchType(t, ev) {
   if (ev && ev.target) ev.target.classList.add('active');
   if (!isAdmin()) {
     document.querySelectorAll('.tab').forEach(el => {
-      if (['JOGADORES','COMPARAR','CONFRONTOS','CADASTRO','ADVERS&Aacute;RIOS'].includes((el.textContent || '').trim())) el.remove();
+      if (['JOGADORES','COMPARAR','CONFRONTOS','CADASTRO','CONFIG','ADVERS&Aacute;RIOS'].includes((el.textContent || '').trim())) el.remove();
     });
   }
   renderTab();
@@ -6652,11 +6698,27 @@ async function removeClubLogo() {
     setClubImageStatus(e.message || 'Erro ao remover imagem', 'error');
   }
 }
+function renderConfiguracoesClube() {
+  return `
+    <div class="section-title">Configurações do Clube</div>
+    <div style="color:var(--text-2);font-size:12px;line-height:1.5;margin-bottom:14px;">Somente administradores podem alterar a foto do clube. Jogadores apenas visualizam a imagem nas telas do scout.</div>
+    <div class="club-card" style="padding:0;margin:0 0 18px;">
+      <div class="club-info">
+        ${renderClubShield()}
+        <div style="flex:1;min-width:0;">
+          <div class="club-name">${DATA && DATA.club ? escapeHtml(DATA.club.name || 'Clube') : 'Clube'}</div>
+          <div class="club-meta">Foto exibida para todos os usuários do clube</div>
+        </div>
+      </div>
+    </div>
+    ${renderClubImageEditor()}
+  `;
+}
 function render() {
   const c = document.getElementById('content');
   
   if (!DATA || !DATA.club) {
-    if (!isAdmin() && ['jogadores','comparar','confrontos','cadastro','adversarios'].includes(CURRENT_TAB)) CURRENT_TAB = 'visao';
+    if (!isAdmin() && ['jogadores','comparar','confrontos','cadastro','config','adversarios'].includes(CURRENT_TAB)) CURRENT_TAB = 'visao';
   c.innerHTML = `
       <div class="empty-state">
         <div class="empty-icon">⚽</div>
@@ -6667,7 +6729,7 @@ function render() {
     return;
   }
   
-  if (!isAdmin() && ['jogadores','comparar','confrontos','cadastro','adversarios'].includes(CURRENT_TAB)) CURRENT_TAB = 'visao';
+  if (!isAdmin() && ['jogadores','comparar','confrontos','cadastro','config','adversarios'].includes(CURRENT_TAB)) CURRENT_TAB = 'visao';
   c.innerHTML = `
     <div class="club-card">
       <div class="club-info">
@@ -6675,7 +6737,6 @@ function render() {
         <div style="flex:1;min-width:0;">
           <div class="club-name">${DATA.club.name}</div>
           <div class="club-meta">${computePlayersForMatches(DATA.matches || []).length} jogadores com partidas no clube &middot; ${DATA.matches?.length || 0} partidas</div>
-          ${renderClubImageEditor()}
         </div>
       </div>
     </div>
@@ -6689,6 +6750,7 @@ function render() {
       <div class="tab ${CURRENT_TAB==='confrontos'?'active':''}" onclick="setTab('confrontos')">CONFRONTOS</div>
       <div class="tab ${CURRENT_TAB==='time-ideal'?'active':''}" onclick="setTab('time-ideal')">TIME IDEAL</div>
       ${isAdmin() ? `<div class="tab ${CURRENT_TAB==='cadastro'?'active':''}" onclick="setTab('cadastro')">CADASTRO</div>` : ''}
+      ${isAdmin() ? `<div class="tab ${CURRENT_TAB==='config'?'active':''}" onclick="setTab('config')">CONFIG</div>` : ''}
       <div class="tab ${CURRENT_TAB==='playstyles'?'active':''}" onclick="setTab('playstyles')">ESTILOS</div>
       <div class="tab ${CURRENT_TAB==='adversarios'?'active':''}" onclick="setTab('adversarios')">ADVERS&Aacute;RIOS</div>
       <div class="tab ${CURRENT_TAB==='agenda'?'active':''}" onclick="setTab('agenda')">AGENDA</div>
@@ -6717,7 +6779,7 @@ function render() {
   
   if (!isAdmin()) {
     document.querySelectorAll('.tab').forEach(el => {
-      if (['JOGADORES','COMPARAR','CONFRONTOS','CADASTRO','ADVERS&Aacute;RIOS'].includes((el.textContent || '').trim())) el.remove();
+      if (['JOGADORES','COMPARAR','CONFRONTOS','CADASTRO','CONFIG','ADVERS&Aacute;RIOS'].includes((el.textContent || '').trim())) el.remove();
     });
   }
   renderTab();
@@ -6729,7 +6791,7 @@ function setTab(t) {
   event.target.classList.add('active');
   if (!isAdmin()) {
     document.querySelectorAll('.tab').forEach(el => {
-      if (['JOGADORES','COMPARAR','CONFRONTOS','CADASTRO','ADVERS&Aacute;RIOS'].includes((el.textContent || '').trim())) el.remove();
+      if (['JOGADORES','COMPARAR','CONFRONTOS','CADASTRO','CONFIG','ADVERS&Aacute;RIOS'].includes((el.textContent || '').trim())) el.remove();
     });
   }
   renderTab();
@@ -6747,9 +6809,10 @@ function renderTab() {
   else if (CURRENT_TAB === 'confrontos') tc.innerHTML = renderConfrontos();
   else if (CURRENT_TAB === 'time-ideal') tc.innerHTML = renderTimeIdeal();
   else if (CURRENT_TAB === 'cadastro' && isAdmin()) { tc.innerHTML = '<div class="loading"><div class="spinner"></div> Carregando cadastro...</div>'; loadClubUsers().then(() => { const t=document.getElementById('tabContent'); if (t && CURRENT_TAB === 'cadastro') t.innerHTML = renderCadastroJogadores(); }); }
+  else if (CURRENT_TAB === 'config' && isAdmin()) tc.innerHTML = renderConfiguracoesClube();
   else if (CURRENT_TAB === 'playstyles') tc.innerHTML = renderPlaystyles();
   else if (CURRENT_TAB === 'adversarios') tc.innerHTML = renderAdversarios();
-  else if (['jogadores','comparar','confrontos','cadastro','adversarios'].includes(CURRENT_TAB) && !isAdmin()) { CURRENT_TAB = 'visao'; tc.innerHTML = renderVisao(); }
+  else if (['jogadores','comparar','confrontos','cadastro','config','adversarios'].includes(CURRENT_TAB) && !isAdmin()) { CURRENT_TAB = 'visao'; tc.innerHTML = renderVisao(); }
   else if (CURRENT_TAB === 'agenda') tc.innerHTML = renderAgenda();
 }
 
@@ -7675,7 +7738,7 @@ function setIdealFormation(value) {
   IDEAL_FORMATION = value;
   if (!isAdmin()) {
     document.querySelectorAll('.tab').forEach(el => {
-      if (['JOGADORES','COMPARAR','CONFRONTOS','CADASTRO','ADVERS&Aacute;RIOS'].includes((el.textContent || '').trim())) el.remove();
+      if (['JOGADORES','COMPARAR','CONFRONTOS','CADASTRO','CONFIG','ADVERS&Aacute;RIOS'].includes((el.textContent || '').trim())) el.remove();
     });
   }
   renderTab();
@@ -8413,7 +8476,7 @@ function cancelAgendaEdit() {
   AGENDA_EDIT_ID = null;
   if (!isAdmin()) {
     document.querySelectorAll('.tab').forEach(el => {
-      if (['JOGADORES','COMPARAR','CONFRONTOS','CADASTRO','ADVERS&Aacute;RIOS'].includes((el.textContent || '').trim())) el.remove();
+      if (['JOGADORES','COMPARAR','CONFRONTOS','CADASTRO','CONFIG','ADVERS&Aacute;RIOS'].includes((el.textContent || '').trim())) el.remove();
     });
   }
   renderTab();
@@ -8928,6 +8991,9 @@ if __name__ == "__main__":
     print("="*60 + "\n")
     
     uvicorn.run(app, host="0.0.0.0", port=8000)
+
+
+
 
 
 
