@@ -3256,8 +3256,13 @@ def update_player_profile(player_name: str, item: PlayerProfileUpdate, current_u
     """Salva ajuste manual. Admin edita tudo; jogador edita apenas proprio arquetipo/playstyles."""
     club_id = str((current_user or {}).get("club_id") or _current_club_id_from_cache())
     is_admin_user = str((current_user or {}).get("cargo") or "").strip().lower() == "admin"
-    current_names = {str((current_user or {}).get("usuario") or "").strip().lower(), str((current_user or {}).get("nome") or "").strip().lower()}
-    if not is_admin_user and str(player_name or "").strip().lower() not in current_names:
+    def _profile_owner_key(value):
+        return _strip_accents(str(value or "").strip().lower()).replace(" ", "")
+    current_names = {
+        _profile_owner_key((current_user or {}).get("usuario")),
+        _profile_owner_key((current_user or {}).get("nome")),
+    }
+    if not is_admin_user and _profile_owner_key(player_name) not in current_names:
         raise HTTPException(403, "Jogador so pode editar o proprio scout")
     field_set = set(getattr(item, "model_fields_set", None) or getattr(item, "__fields_set__", set()) or set())
     existing = (load_player_profiles(club_id) or {}).get(player_name, {}) or {}
@@ -6693,6 +6698,7 @@ function renderMeuScout() {
         <button class="btn-primary" style="width:100%;margin-top:14px;padding:10px 16px;" onclick="event.stopPropagation();showPlayerDetail('${safeName}')">Abrir análise completa</button>
       </div>
     </div>
+    ${renderMyScoutProfileEditor(found.name)}
   `;
   return html;
 }
