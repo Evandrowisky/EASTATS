@@ -1,4 +1,4 @@
-﻿# -*- coding: utf-8 -*-
+# -*- coding: utf-8 -*-
 """
 Scout Clubs Pro v2 - Análise Profissional EA FC
 Inspirado no app Scout Clubs original
@@ -1042,6 +1042,11 @@ class AuthLoginPayload(BaseModel):
     senha: str
 
 
+class AdminUserStatusPayload(BaseModel):
+    is_active: Optional[bool] = None
+    status: Optional[str] = None
+
+
 def _get_pwd_context():
     global _pwd_context
     if _pwd_context is None:
@@ -1748,8 +1753,8 @@ def auth_register(payload: AuthRegisterPayload):
         "usuario": usuario,
         "password_hash": hash_password(senha),
         "cargo": "jogador",
-        "status": "ativo",
-        "is_active": True,
+        "status": "pendente",
+        "is_active": False,
         "updated_at": _now_iso(),
     }
     try:
@@ -1824,6 +1829,48 @@ def admin_list_users(current_user: dict = Depends(require_admin)):
     except Exception as e:
         print(f"[AUTH] Erro listando usuarios do clube: {type(e).__name__}: {e}")
         raise HTTPException(500, "Erro ao listar usuarios")
+
+
+@app.put("/api/admin/users/{user_id}/status")
+def admin_update_user_status(user_id: str, payload: AdminUserStatusPayload, current_user: dict = Depends(require_admin)):
+    sb = get_supabase()
+    if not sb:
+        raise HTTPException(503, "Supabase nao configurado")
+    club_id = str(current_user.get("club_id") or "")
+    my_id = str(current_user.get("id") or "")
+    if str(user_id) == my_id and payload.is_active is False:
+        raise HTTPException(400, "Voce nao pode desativar seu proprio login")
+
+    try:
+        existing = sb.table("app_users").select("id,club_id,cargo,status,is_active").eq("id", str(user_id)).limit(1).execute()
+        rows = getattr(existing, "data", None) or []
+        if not rows:
+            raise HTTPException(404, "Usuario nao encontrado")
+        if str(rows[0].get("club_id") or "") != club_id:
+            raise HTTPException(403, "Usuario pertence a outro clube")
+
+        update = {"updated_at": _now_iso()}
+        if payload.is_active is not None:
+            update["is_active"] = bool(payload.is_active)
+            if payload.status is None:
+                update["status"] = "ativo" if payload.is_active else "bloqueado"
+        if payload.status is not None:
+            status = str(payload.status or "").strip().lower()
+            if status not in ("ativo", "pendente", "bloqueado"):
+                raise HTTPException(400, "Status invalido")
+            update["status"] = status
+            if payload.is_active is None:
+                update["is_active"] = status == "ativo"
+
+        resp = sb.table("app_users").update(update).eq("id", str(user_id)).eq("club_id", club_id).execute()
+        rows = getattr(resp, "data", None) or []
+        user = _public_user(rows[0] if rows else {"id": user_id, "club_id": club_id, **update})
+        return {"success": True, "user": user}
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"[AUTH] Erro atualizando status do usuario: {type(e).__name__}: {e}")
+        raise HTTPException(500, "Erro ao atualizar status do usuario")
 
 
 @app.delete("/api/admin/users/{user_id}")
@@ -5346,6 +5393,55 @@ html, body { max-width: 100%; }
   .player-role-label { font-size: 7px; }
 }
 
+
+/* FINAL LAYOUT FIXES */
+.header-inner,
+.tabs,
+.period-filter,
+.container {
+  width: min(1400px, calc(100% - 32px));
+  max-width: 1400px;
+  margin-left: auto;
+  margin-right: auto;
+}
+.club-card {
+  max-width: 1400px;
+  margin: 20px auto;
+  padding-left: 16px;
+  padding-right: 16px;
+}
+.tabs {
+  margin-top: 20px;
+  margin-bottom: 20px;
+  padding-left: 10px;
+  padding-right: 10px;
+}
+.period-filter {
+  padding-left: 0;
+  padding-right: 0;
+}
+.container {
+  padding-left: 0;
+  padding-right: 0;
+}
+.profile-user-row {
+  grid-template-columns: minmax(180px,1.3fr) minmax(130px,.9fr) 90px 100px minmax(130px,auto) auto;
+}
+@media (max-width: 760px) {
+  .header-inner,
+  .tabs,
+  .period-filter,
+  .container {
+    width: calc(100% - 20px);
+  }
+  .club-card { padding-left: 10px; padding-right: 10px; }
+  .tabs { margin: 12px auto; }
+  .period-filter { padding-left: 0; padding-right: 0; }
+  .profile-user-row { grid-template-columns: 1fr; }
+  .my-scout-self { grid-template-columns: 1fr !important; }
+  .field { height: min(680px, 150vw); }
+}
+
 </style>
 </head>
 <body>
@@ -5518,7 +5614,7 @@ async function submitRegister(ev) {
     const data = await r.json().catch(() => ({}));
     if (!r.ok) throw new Error(data.detail || data.message || 'Erro ao criar conta');
 
-    showAuthMessage('Conta criada com sucesso. Indo para o login...', 'success');
+    showAuthMessage('Conta criada. Aguarde o admin liberar seu login.', 'success');
     setTimeout(() => {
       renderAuth('login');
       setTimeout(() => {
@@ -6381,19 +6477,29 @@ function renderMeuScout() {
   const found = findPlayerByTypedName(savedName, players);
   const options = players.map(p => `<option value="${escapeAttr(p.name)}"></option>`).join('');
   const scopeLabel = CURRENT_MATCH_TYPE === 'todos' ? 'todos os jogos do clube' : 'partidas detalhadas salvas de ' + CURRENT_MATCH_TYPE;
-
-  let html = `
-    <div class="section-title">Meu Scout · ${scopeLabel}</div>
+  const scoutControls = isAdmin() ? `
     <form class="agenda-form" onsubmit="saveMyScoutName(event)" style="grid-template-columns: 1fr auto auto auto; align-items:end;">
       <div style="grid-column:auto;">
         <div style="font-size:10px;color:var(--text-2);letter-spacing:2px;text-transform:uppercase;margin-bottom:8px;">Nome no Pro Clubs</div>
-        <input id="myScoutName" list="myScoutPlayers" type="text" placeholder="Digite exatamente seu nome no EA FC" value="${escapeAttr(savedName)}" ${!isAdmin() ? 'readonly' : ''}>
+        <input id="myScoutName" list="myScoutPlayers" type="text" placeholder="Digite exatamente seu nome no EA FC" value="${escapeAttr(savedName)}">
         <datalist id="myScoutPlayers">${options}</datalist>
       </div>
       <button type="submit" class="btn-primary" style="padding:10px 18px;">Buscar</button>
       <button type="button" class="btn-mini" onclick="clearMyScoutName()">Limpar</button>
       <button type="button" id="myScoutSyncBtn" class="btn-primary" style="padding:10px 18px;" onclick="startSilentSync()">Sincronizar</button>
-    </form>
+    </form>` : `
+    <div class="agenda-form my-scout-self" style="grid-template-columns: 1fr auto; align-items:center;">
+      <div>
+        <div style="font-size:10px;color:var(--text-2);letter-spacing:2px;text-transform:uppercase;margin-bottom:6px;">Seu ID FIFA / usu?rio cadastrado</div>
+        <div style="font-size:18px;font-weight:800;color:var(--green);overflow-wrap:anywhere;">${escapeAttr(savedName || '-')}</div>
+        <div style="font-size:12px;color:var(--text-2);margin-top:4px;">O Meu Scout busca automaticamente pelo usu?rio da sua conta.</div>
+      </div>
+      <button type="button" id="myScoutSyncBtn" class="btn-primary" style="padding:10px 18px;" onclick="startSilentSync()">Sincronizar</button>
+    </div>`;
+
+  let html = `
+    <div class="section-title">Meu Scout ? ${scopeLabel}</div>
+    ${scoutControls}
   `;
 
   if (!savedName) {
@@ -6974,16 +7080,41 @@ async function deleteClubUser(userId, nome) {
   }
 }
 
+async function toggleClubUserLogin(userId, enable, nome) {
+  const label = nome || 'este usu?rio';
+  const msg = enable ? `Ativar o login de ${label}?` : `Desativar o login de ${label}?`;
+  if (!confirm(msg)) return;
+  try {
+    const r = await authFetch('/api/admin/users/' + encodeURIComponent(userId) + '/status', {
+      method:'PUT',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({is_active: !!enable, status: enable ? 'ativo' : 'bloqueado'})
+    });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(data.detail || 'Erro ao atualizar login');
+    await loadClubUsers();
+    renderTab();
+    alert(enable ? 'Login ativado.' : 'Login desativado.');
+  } catch (e) {
+    alert(e.message);
+  }
+}
+
+
 function renderClubUsersAdmin() {
-  const rows = (CLUB_USERS || []).map(u => `
-    <div class="profile-row" style="grid-template-columns:1.2fr 1fr 90px 90px auto;">
-      <div><div class="profile-name">${escapeAttr(u.nome || '-')}</div><div class="profile-meta">Usuário/ID FIFA: ${escapeAttr(u.usuario || '-')}</div></div>
+  const rows = (CLUB_USERS || []).map(u => {
+    const self = u.id === AUTH_USER?.id;
+    const active = !!u.is_active && (u.status || 'ativo') === 'ativo';
+    return `
+    <div class="profile-row profile-user-row">
+      <div><div class="profile-name">${escapeAttr(u.nome || '-')}</div><div class="profile-meta">Usu?rio/ID FIFA: ${escapeAttr(u.usuario || '-')}</div></div>
       <div>${escapeAttr(u.clube || '')}</div>
       <div><span class="tag ${u.cargo === 'admin' ? 'liga' : 'amistoso'}">${escapeAttr(u.cargo || 'jogador')}</span></div>
-      <div><span class="tag ${u.is_active ? 'liga' : 'd'}">${u.is_active ? 'ativo' : 'inativo'}</span></div>
-      <button class="btn-mini danger" onclick="deleteClubUser('${escapeAttr(u.id)}','${escapeAttr(u.nome || u.usuario)}')" ${u.id === AUTH_USER?.id ? 'disabled' : ''}>Excluir</button>
-    </div>
-  `).join('');
+      <div><span class="tag ${active ? 'liga' : (u.status === 'pendente' ? 'e' : 'd')}">${active ? 'ativo' : (u.status || 'inativo')}</span></div>
+      <button class="btn-mini ${active ? 'danger' : ''}" onclick="toggleClubUserLogin('${escapeAttr(u.id)}', ${active ? 'false' : 'true'}, '${escapeAttr(u.nome || u.usuario)}')" ${self ? 'disabled' : ''}>${active ? 'Desativar login' : 'Ativar login'}</button>
+      <button class="btn-mini danger" onclick="deleteClubUser('${escapeAttr(u.id)}','${escapeAttr(u.nome || u.usuario)}')" ${self ? 'disabled' : ''}>Excluir</button>
+    </div>`;
+  }).join('');
   return `
     <div class="section-title">Usuários cadastrados no clube</div>
     <div style="color:var(--text-2);font-size:12px;margin-bottom:12px;line-height:1.5;">Aqui o admin vê todos os acessos cadastrados no clube. O ideal é o usuário ser igual ao ID/nome do FIFA/EA FC para o Meu Scout puxar automaticamente as estatísticas certas.</div>
