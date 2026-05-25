@@ -1769,8 +1769,7 @@ async def sync_stream(
 ):
     """Sincronização com progresso em tempo real (SSE)"""
     current_user = get_current_user(authorization=None, access_token=access_token)
-    if current_user.get("cargo") != "admin":
-        raise HTTPException(403, "Apenas administradores podem sincronizar o clube")
+    # Qualquer usuario ativo pode sincronizar o proprio clube; _assert_same_club bloqueia clube diferente.
     initial_platform = platform
     
     async def event_generator():
@@ -5834,7 +5833,7 @@ function renderMeuScout() {
 
   let html = `
     <div class="section-title">Meu Scout · ${scopeLabel}</div>
-    <form class="agenda-form" onsubmit="saveMyScoutName(event)" style="grid-template-columns: 1fr auto auto; align-items:end;">
+    <form class="agenda-form" onsubmit="saveMyScoutName(event)" style="grid-template-columns: 1fr auto auto auto; align-items:end;">
       <div style="grid-column:auto;">
         <div style="font-size:10px;color:var(--text-2);letter-spacing:2px;text-transform:uppercase;margin-bottom:8px;">Nome no Pro Clubs</div>
         <input id="myScoutName" list="myScoutPlayers" type="text" placeholder="Digite exatamente seu nome no EA FC" value="${escapeAttr(savedName)}">
@@ -5842,6 +5841,7 @@ function renderMeuScout() {
       </div>
       <button type="submit" class="btn-primary" style="padding:10px 18px;">Buscar</button>
       <button type="button" class="btn-mini" onclick="clearMyScoutName()">Limpar</button>
+      <button type="button" id="myScoutSyncBtn" class="btn-primary" style="padding:10px 18px;" onclick="startSilentSync()">Sincronizar</button>
     </form>
   `;
 
@@ -7114,7 +7114,6 @@ async function importLocalHistoryToServer() {
   }
 }
 async function startSync() {
-  if (!isAdmin()) { alert('Apenas administradores podem sincronizar o clube.'); return; }
   const progress = document.getElementById('syncProgress');
   const log = document.getElementById('syncLog');
   const fill = document.getElementById('syncFill');
@@ -7175,6 +7174,54 @@ async function startSync() {
   };
 }
 
+async function startSilentSync() {
+  const btn = document.getElementById('myScoutSyncBtn');
+  const oldText = btn ? btn.textContent : '';
+  try {
+    if (btn) { btn.disabled = true; btn.textContent = 'Sincronizando...'; }
+    if (DATA && DATA.club && DATA.matches) saveLocalMatchHistory(DATA.club, DATA.matches);
+    await importLocalHistoryToServer();
+    const clubName = ((DATA && DATA.club && DATA.club.name) || (AUTH_USER && AUTH_USER.clube) || document.getElementById('clubInput')?.value || '').trim();
+    if (!clubName) throw new Error('Clube não encontrado para sincronizar');
+    await new Promise((resolve, reject) => {
+      const evt = new EventSource('/api/sync-stream?club_name=' + encodeURIComponent(clubName) + '&access_token=' + encodeURIComponent(AUTH_TOKEN));
+      evt.onmessage = (e) => {
+        try {
+          const data = JSON.parse(e.data);
+          if (data.done) {
+            evt.close();
+            if (data.success) resolve(data);
+            else reject(new Error(data.error || 'Erro ao sincronizar'));
+          }
+        } catch (err) {
+          evt.close();
+          reject(err);
+        }
+      };
+      evt.onerror = () => {
+        evt.close();
+        reject(new Error('Conexão perdida durante a sincronização'));
+      };
+    });
+    const profileBackup = {...(PLAYER_PROFILES || {})};
+    try { saveLocalPlayerProfiles(); } catch (e) {}
+    await loadData();
+    protectDataMatchHistory();
+    PLAYER_PROFILES = {...(DATA?.player_profiles || {}), ...profileBackup, ...loadLocalPlayerProfiles()};
+    if (DATA) DATA.player_profiles = {...PLAYER_PROFILES};
+    saveLocalPlayerProfiles();
+    render();
+    setTimeout(() => {
+      CURRENT_TAB = 'meu-scout';
+      render();
+    }, 50);
+  } catch (e) {
+    alert('Erro ao sincronizar: ' + e.message);
+  } finally {
+    const btn2 = document.getElementById('myScoutSyncBtn');
+    if (btn2) { btn2.disabled = false; btn2.textContent = oldText || 'Sincronizar'; }
+  }
+}
 document.addEventListener('keydown', e => {
   if (e.key === 'Escape') closeModal();
 });
@@ -7201,6 +7248,7 @@ if __name__ == "__main__":
     print("="*60 + "\n")
     
     uvicorn.run(app, host="0.0.0.0", port=8000)
+
 
 
 
