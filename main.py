@@ -5078,7 +5078,6 @@ html, body { max-width: 100%; }
   .header { padding: 12px; }
   .header-inner { align-items: stretch; flex-direction: column; gap: 12px; }
   .header-inner > div:last-child { width: 100%; }
-  #clubInput { width: 100% !important; min-width: 0; }
   .btn-sync { justify-content: center; }
   .tabs { margin: 12px; padding: 8px; gap: 6px; }
   .tab { flex: 1 1 calc(50% - 6px); text-align: center; padding: 9px 8px; font-size: 10px; }
@@ -5297,11 +5296,7 @@ html, body { max-width: 100%; }
         <div class="logo-sub">Inteligência Esportiva</div>
       </div>
     </div>
-    <div style="display:flex;gap:8px;align-items:center;">
-      <input id="clubInput" type="text" placeholder="Nome do clube" value=""
-        style="background:var(--bg-3);border:1px solid var(--border-2);color:var(--text);padding:8px 12px;border-radius:8px;font-size:13px;outline:none;width:180px;font-family:inherit;"
-        onkeydown="if(event.key==='Enter') startSync()">
-      <button id="syncButton" class="btn-sync" onclick="startSync()">↻ Sincronizar</button>
+    <div style="display:flex;gap:8px;align-items:center;">`r`n      <button id="syncButton" class="btn-sync" onclick="startSync()">↻ Sincronizar</button>
       <div id="authBox" class="auth-user-box"></div>
     </div>
   </div>
@@ -5325,6 +5320,7 @@ html, body { max-width: 100%; }
   </div>
 </div>
 
+<script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
 <script>
 let DATA = null;
 let CURRENT_TAB = 'visao';
@@ -5337,6 +5333,8 @@ let AGENDA = [];
 let OPPONENT_SCOUTS = [];
 let AGENDA_EDIT_ID = null;
 let IDEAL_FORMATION = '3-5-2';
+let IDEAL_MODE = localStorage.getItem('scout_ideal_mode') || 'auto';
+let MANUAL_LINEUPS = {};
 let AUTH_TOKEN = localStorage.getItem('scout_auth_token') || '';
 let AUTH_USER = (() => {
   try { return JSON.parse(localStorage.getItem('scout_auth_user') || 'null'); }
@@ -5365,9 +5363,7 @@ async function authFetch(url, opts = {}) {
 function updateAuthHeader() {
   const box = document.getElementById('authBox');
   const syncBtn = document.getElementById('syncButton');
-  const clubInput = document.getElementById('clubInput');
   if (syncBtn) syncBtn.style.display = isAdmin() ? 'flex' : 'none';
-  if (clubInput) clubInput.style.display = isLoggedIn() ? 'block' : 'none';
   if (!box) return;
   if (!isLoggedIn()) {
     box.innerHTML = '';
@@ -5535,7 +5531,6 @@ const PLAYSTYLE_CATALOG = [
   {name:'Incansável', code:'Relentless', group:'Físico', desc:'Fôlego, recomposição e pressão por mais tempo.'},
   {name:'Lateral longo', code:'Long Throw', group:'Físico', desc:'Laterais longos para área ou profundidade.'},
   {name:'Xerife', code:'Bruiser', group:'Físico', desc:'Duelos físicos e disputas de corpo mais fortes.'},
-  {name:'Impositor', code:'Enforcer', group:'Físico', desc:'Contato físico, proteção e imposição corporal com mais eficiência.'},
   {name:'Arremesso longo', code:'Far Throw', group:'Goleiro', desc:'Reposição longa com as mãos.'},
   {name:'Defesa com os pés', code:'Footwork', group:'Goleiro', desc:'Defesas com os pés e ajustes curtos.'},
   {name:'Saída aérea', code:'Cross Claimer', group:'Goleiro', desc:'Saídas em cruzamentos.'},
@@ -6353,6 +6348,8 @@ function renderMeuScout() {
         <div class="player-rating-big">${found.rating}</div>
         <div class="player-pos"><span class="player-pos-badge">${found.position} · ${found.games}J ${CURRENT_MATCH_TYPE === 'todos' ? 'no clube' : 'detalhadas salvas'}</span></div>
         <div class="player-name">${found.name}</div>
+        <div style="color:var(--text-2);font-size:11px;text-align:center;margin:4px 0 8px;">Posição cadastrada: <strong style="color:var(--green);">${profileForPlayer(found.name).manual_position || found.position}</strong></div>
+        <div style="text-align:center;margin-bottom:10px;">${profilePlaystyleBadges(found.name)}</div>
         <div class="player-stats">
           ${playerStatLine('Sofi', found.sofi_rating)}
           ${playerStatLine('Gols', found.goals)}
@@ -6647,6 +6644,77 @@ function roleScore(p, targetFamily) {
   return rating;
 }
 
+
+function lineupStorageKey() {
+  const clubId = (DATA && DATA.club && DATA.club.id) || (AUTH_USER && AUTH_USER.club_id) || 'default';
+  return 'scout_manual_lineups_' + clubId;
+}
+function loadManualLineups() {
+  try { MANUAL_LINEUPS = JSON.parse(localStorage.getItem(lineupStorageKey()) || '{}') || {}; } catch (e) { MANUAL_LINEUPS = {}; }
+  return MANUAL_LINEUPS;
+}
+function saveManualLineups() { try { localStorage.setItem(lineupStorageKey(), JSON.stringify(MANUAL_LINEUPS || {})); } catch (e) {} }
+function setIdealMode(mode) {
+  IDEAL_MODE = mode === 'manual' ? 'manual' : 'auto';
+  localStorage.setItem('scout_ideal_mode', IDEAL_MODE);
+  renderTab();
+}
+function setManualLineupPlayer(slot, name) {
+  loadManualLineups();
+  if (!MANUAL_LINEUPS[IDEAL_FORMATION]) MANUAL_LINEUPS[IDEAL_FORMATION] = {};
+  if (name) MANUAL_LINEUPS[IDEAL_FORMATION][slot] = name;
+  else delete MANUAL_LINEUPS[IDEAL_FORMATION][slot];
+  saveManualLineups();
+  renderTab();
+}
+function selectedManualName(slot) {
+  loadManualLineups();
+  return ((MANUAL_LINEUPS[IDEAL_FORMATION] || {})[slot] || '');
+}
+function applyManualLineup(team) {
+  if (IDEAL_MODE !== 'manual') return team;
+  loadManualLineups();
+  const slots = FORMATION_SLOTS[IDEAL_FORMATION] || FORMATION_SLOTS['3-5-2'];
+  const byName = {};
+  scopedPlayers().forEach(p => {
+    const intel = inferPlayerPositionIntel(p);
+    byName[p.name] = {...p, family:intel.family, position:intel.label, position_source:intel.source, position_counts:intel.counts, history_apps:intel.apps};
+  });
+  const used = new Set();
+  const picked = [];
+  const manual = MANUAL_LINEUPS[IDEAL_FORMATION] || {};
+  slots.forEach(slot => {
+    const name = manual[slot];
+    const p = name ? byName[name] : null;
+    if (!p || used.has(p.name)) return;
+    used.add(p.name);
+    const [x,y] = ROLE_COORDS[slot] || [50,50];
+    const wanted = ROLE_PREF[slot] || ['MID'];
+    const fit = p.family === wanted[0] ? 'natural' : wanted.includes(p.family) ? 'adaptado' : 'manual';
+    picked.push({...p, role:slot, field_pos:slot, x, y, fit, role_description: ROLE_DESC[slot], selection_score: Math.round(roleScore(p, wanted[0]) * 10) / 10});
+  });
+  return {formation: IDEAL_FORMATION, formation_name:`Formação ${IDEAL_FORMATION}`, slots, players:picked, missing_slots:slots.filter(s => !picked.some(p => p.role === s)), manual:true};
+}
+function profilePlaystyleBadges(name, limit=3) {
+  const profile = profileForPlayer(name);
+  const list = (profile.playstyles || []).slice(0, limit);
+  if (!list.length) return '<span style="color:var(--text-3);font-size:10px;">Sem PlayStyles cadastradas</span>';
+  return list.map(x => `<span class="tag liga" style="margin:2px 4px 2px 0;">${playstyleIcon(x)} ${playstyleLabel(x)}</span>`).join('');
+}
+async function exportIdealJpeg() {
+  const target = document.getElementById('idealExportArea');
+  if (!target) return;
+  try {
+    if (typeof html2canvas === 'undefined') throw new Error('Biblioteca de exportação ainda não carregou');
+    const canvas = await html2canvas(target, {backgroundColor:'#050805', scale:2, useCORS:true});
+    const a = document.createElement('a');
+    a.href = canvas.toDataURL('image/jpeg', 0.92);
+    a.download = `time-ideal-${IDEAL_FORMATION}.jpg`;
+    a.click();
+  } catch (e) { alert('Erro ao exportar JPEG: ' + e.message); }
+}
+
+
 function buildIdealTeamClient(formation) {
   const slots = FORMATION_SLOTS[formation] || FORMATION_SLOTS['3-5-2'];
   const pool = scopedPlayers().map(p => { const intel = inferPlayerPositionIntel(p); return {...p, family: intel.family, position: intel.label, position_source: intel.source, position_counts: intel.counts, history_apps: intel.apps}; }).sort((a,b) => Number(b.rating || 0) - Number(a.rating || 0));
@@ -6675,7 +6743,8 @@ function buildIdealTeamClient(formation) {
       picked.push({...best, role:slot, field_pos:slot, x, y, fit, role_description: ROLE_DESC[slot], selection_score: Math.round(bestScore * 10) / 10});
     }
   });
-  return {formation, formation_name:`Formação ${formation}`, slots, players:picked, missing_slots:slots.filter(s => !picked.some(p => p.role === s))};
+  const autoTeam = {formation, formation_name:`Formação ${formation}`, slots, players:picked, missing_slots:slots.filter(s => !picked.some(p => p.role === s))};
+  return IDEAL_MODE === 'manual' ? applyManualLineup(autoTeam) : autoTeam;
 }
 
 function setIdealFormation(value) {
@@ -6720,8 +6789,7 @@ function playstyleIcon(nameOrCode) {
     'relentless':'♾', 'incansável':'♾',
     'long throw':'🙌', 'arremesso longo':'🙌',
     'bruiser':'💪', 'brigador':'💪',
-    'enforcer':'🥊', 'protetor':'🥊',
-    'far throw':'🎯', 'reposição longa':'🎯',
+        'far throw':'🎯', 'reposição longa':'🎯',
     'footwork':'🦶', 'defesa com os pés':'🦶',
     'cross claimer':'🧤', 'pegador de cruzamento':'🧤',
     'rush out':'🏃', 'saída rápida':'🏃',
@@ -6764,7 +6832,7 @@ function normalizePlaystyleName(value) {
     'Domínio':'First Touch', 'Dominio':'First Touch', 'Primeiro toque':'First Touch', 'First Touch':'First Touch', 'Ilusionista':'Trickster', 'Malabarista':'Trickster', 'Trickster':'Trickster',
     'Cabeça fria':'Press Proven', 'Cabeca fria':'Press Proven', 'Resistente à pressão':'Press Proven', 'Resistente a pressao':'Press Proven', 'Press Proven':'Press Proven',
     'Impulso':'Quick Step', 'Passo rápido':'Quick Step', 'Passo rapido':'Quick Step', 'Quick Step':'Quick Step', 'Incansável':'Relentless', 'Incansavel':'Relentless', 'Relentless':'Relentless',
-    'Lateral longo':'Long Throw', 'Arremesso lateral longo':'Long Throw', 'Long Throw':'Long Throw', 'Xerife':'Bruiser', 'Brigador':'Bruiser', 'Bruiser':'Bruiser', 'Impositor':'Enforcer', 'Enforcer':'Enforcer',
+    'Lateral longo':'Long Throw', 'Arremesso lateral longo':'Long Throw', 'Long Throw':'Long Throw', 'Xerife':'Bruiser', 'Brigador':'Bruiser', 'Bruiser':'Bruiser',
     'Arremesso longo':'Far Throw', 'Far Throw':'Far Throw', 'Defesa com os pés':'Footwork', 'Defesa com os pes':'Footwork', 'Footwork':'Footwork',
     'Saída aérea':'Cross Claimer', 'Saida aerea':'Cross Claimer', 'Pegador de cruzamento':'Cross Claimer', 'Cross Claimer':'Cross Claimer', 'Saída mano a mano':'Rush Out', 'Saida mano a mano':'Rush Out', 'Saída rápida':'Rush Out', 'Saida rapida':'Rush Out', 'Rush Out':'Rush Out',
     'Joga luva':'Far Reach', 'Alcance longo':'Far Reach', 'Far Reach':'Far Reach', 'Espalma':'Deflector', 'Espalmador':'Deflector', 'Deflector':'Deflector'
@@ -6822,7 +6890,7 @@ function renderCadastroJogadores() {
   });
   const rows = (players.length ? players : fallback);
   const opts = [
-    ['', 'AUTO'], ['GK','GK - Goleiro'], ['CB','CB - Zagueiro'], ['LB','LB - Lateral Esq.'], ['RB','RB - Lateral Dir.'],
+    ['', 'AUTO'], ['GK','GK - Goleiro'], ['CB','CB - Zagueiro Central'], ['LB','LB - Lateral Esq.'], ['RB','RB - Lateral Dir.'],
     ['CDM','CDM - Volante'], ['CM','CM - Meia'], ['CAM','CAM - Meia Ofensivo'], ['LM','LM - Ala/Meia Esq.'], ['RM','RM - Ala/Meia Dir.'],
     ['LW','LW - Ponta Esq.'], ['RW','RW - Ponta Dir.'], ['ST','ST - Atacante']
   ];
@@ -7151,6 +7219,15 @@ function renderTimeIdeal() {
       </div>
     `;
   });
+  const manualControls = team.slots.map(slot => `
+    <div class="profile-row" style="grid-template-columns:80px 1fr;">
+      <div><span class="tag liga">${slot}</span></div>
+      <select onchange="setManualLineupPlayer('${slot}', this.value)">
+        <option value="">Escolher jogador</option>
+        ${scopedPlayers().map(p => `<option value="${escapeAttr(p.name)}" ${selectedManualName(slot) === p.name ? 'selected' : ''}>${p.name} · ${p.position} · ${p.rating}</option>`).join('')}
+      </select>
+    </div>
+  `).join('');
 
   const listHtml = players.map((p, idx) => `
     <div class="ideal-row" style="display:grid;grid-template-columns:42px 70px 1fr 90px;gap:10px;align-items:center;padding:10px 12px;border-bottom:1px solid var(--border);">
@@ -7159,7 +7236,7 @@ function renderTimeIdeal() {
       <div>
         <div style="font-weight:800;">${p.name} <span style="color:var(--green);font-weight:800;">${p.rating}</span></div>
         <div style="color:var(--text-2);font-size:11px;line-height:1.4;">${p.role_description}</div>
-        <div style="color:var(--text-3);font-size:10px;margin-top:2px;">Origem: ${p.position} · encaixe: ${p.fit}</div>
+        <div style="color:var(--text-3);font-size:10px;margin-top:2px;">Origem: ${p.position} · encaixe: ${p.fit}</div><div style="margin-top:5px;">${profilePlaystyleBadges(p.name)}</div>
       </div>
       <div style="text-align:right;color:var(--text-2);font-size:11px;">score<br><strong style="color:var(--green);">${p.selection_score}</strong></div>
     </div>
@@ -7171,10 +7248,16 @@ function renderTimeIdeal() {
       <select onchange="setIdealFormation(this.value)" style="background:var(--bg-card);color:var(--text);border:1px solid var(--green-dim);border-radius:8px;padding:10px 12px;font-weight:700;">
         ${formations.map(f => `<option value="${f}" ${f === formation ? 'selected' : ''}>${f}</option>`).join('')}
       </select>
+      <select onchange="setIdealMode(this.value)" style="background:var(--bg-card);color:var(--text);border:1px solid var(--green-dim);border-radius:8px;padding:10px 12px;font-weight:700;">
+        <option value="auto" ${IDEAL_MODE === 'auto' ? 'selected' : ''}>Automática</option>
+        <option value="manual" ${IDEAL_MODE === 'manual' ? 'selected' : ''}>Manual do treinador</option>
+      </select>
       <button class="btn-primary" style="padding:10px 16px;" onclick="renderTab()">Ajustar Melhor 11</button>
+      <button class="btn-mini" style="padding:10px 16px;" onclick="exportIdealJpeg()">Exportar JPEG</button>
     </div>
+    ${IDEAL_MODE === 'manual' ? `<div class="section-title">Escalação manual do treinador</div><div class="profile-list" style="margin-bottom:18px;">${manualControls}</div>` : ''}
 
-    <div class="formation-wrapper">
+    <div id="idealExportArea" class="formation-wrapper">
       <div class="formation-title">${team.formation_name} · ${players.length}/11 jogadores</div>
       <div class="field">
         <div class="field-line"></div>
@@ -7183,7 +7266,7 @@ function renderTimeIdeal() {
         <div class="field-spot bottom"></div>
         ${fieldHtml}
       </div>
-      <div class="formation-label">Escolha automática por função, nota e encaixe posicional</div>
+      <div class="formation-label">${IDEAL_MODE === 'manual' ? 'Escalação manual do treinador' : 'Escolha automática por função, nota e encaixe posicional'}</div>
     </div>
 
     <div class="section-title">Escalação e Função Tática</div>
@@ -7726,7 +7809,8 @@ async function startSync() {
   
   if (DATA && DATA.club && DATA.matches) saveLocalMatchHistory(DATA.club, DATA.matches);
   await importLocalHistoryToServer();
-  const clubName = (document.getElementById('clubInput')?.value || 'DESAGREGADOS SC').trim();
+  const clubName = ((AUTH_USER && AUTH_USER.clube) || (DATA && DATA.club && DATA.club.name) || '').trim();
+  if (!clubName) { stepEl.textContent = 'Clube do usuário não encontrado'; return; }
   const evt = new EventSource('/api/sync-stream?club_name=' + encodeURIComponent(clubName) + '&access_token=' + encodeURIComponent(AUTH_TOKEN));
   
   evt.onmessage = (e) => {
@@ -7782,7 +7866,7 @@ async function startSilentSync() {
     if (btn) { btn.disabled = true; btn.textContent = 'Sincronizando...'; }
     if (DATA && DATA.club && DATA.matches) saveLocalMatchHistory(DATA.club, DATA.matches);
     await importLocalHistoryToServer();
-    const clubName = ((DATA && DATA.club && DATA.club.name) || (AUTH_USER && AUTH_USER.clube) || document.getElementById('clubInput')?.value || '').trim();
+    const clubName = ((DATA && DATA.club && DATA.club.name) || (AUTH_USER && AUTH_USER.clube) || '').trim();
     if (!clubName) throw new Error('Clube não encontrado para sincronizar');
     await new Promise((resolve, reject) => {
       const evt = new EventSource('/api/sync-stream?club_name=' + encodeURIComponent(clubName) + '&access_token=' + encodeURIComponent(AUTH_TOKEN));
@@ -7849,6 +7933,8 @@ if __name__ == "__main__":
     print("="*60 + "\n")
     
     uvicorn.run(app, host="0.0.0.0", port=8000)
+
+
 
 
 
