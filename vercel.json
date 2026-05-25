@@ -14,7 +14,7 @@
                ],
     "crons":  [
                   {
-                      "path":  "/api/cron/auto-sync?secret=scoutclubs_auto_sync_2026_seguro",
+                      "path":  "/api/cron/auto-sync",
                       "schedule":  "*/30 * * * *"
                   }
               ]
