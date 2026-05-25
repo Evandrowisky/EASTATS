@@ -1,21 +1,21 @@
-﻿{
-    "version":  2,
-    "builds":  [
-                   {
-                       "src":  "main.py",
-                       "use":  "@vercel/python"
-                   }
-               ],
-    "routes":  [
-                   {
-                       "src":  "/(.*)",
-                       "dest":  "main.py"
-                   }
-               ],
-    "crons":  [
-                  {
-                      "path":  "/api/cron/auto-sync",
-                      "schedule":  "0 3 * * *"
-                  }
-              ]
+{
+  "version": 2,
+  "builds": [
+    {
+      "src": "main.py",
+      "use": "@vercel/python"
+    }
+  ],
+  "routes": [
+    {
+      "src": "/(.*)",
+      "dest": "main.py"
+    }
+  ],
+  "crons": [
+    {
+      "path": "/api/cron/auto-sync",
+      "schedule": "0 3 * * *"
+    }
+  ]
 }
