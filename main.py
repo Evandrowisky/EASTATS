@@ -1054,13 +1054,30 @@ def _get_pwd_context():
     return _pwd_context
 
 
+def _bcrypt_secret_bytes(senha: str) -> bytes:
+    # bcrypt aceita no maximo 72 bytes; truncar evita erro em ambientes serverless.
+    return str(senha or "").encode("utf-8")[:72]
+
+
 def hash_password(senha: str) -> str:
-    return _get_pwd_context().hash(str(senha or ""))
+    try:
+        import bcrypt
+        return bcrypt.hashpw(_bcrypt_secret_bytes(senha), bcrypt.gensalt()).decode("utf-8")
+    except Exception as e:
+        print(f"[AUTH] bcrypt direto indisponivel, usando passlib: {type(e).__name__}: {e}")
+        return _get_pwd_context().hash(str(senha or ""))
 
 
 def verify_password(senha: str, password_hash: str) -> bool:
+    stored = str(password_hash or "")
     try:
-        return _get_pwd_context().verify(str(senha or ""), str(password_hash or ""))
+        if stored.startswith(("$2a$", "$2b$", "$2y$")):
+            import bcrypt
+            return bool(bcrypt.checkpw(_bcrypt_secret_bytes(senha), stored.encode("utf-8")))
+    except Exception as e:
+        print(f"[AUTH] bcrypt direto falhou, tentando passlib: {type(e).__name__}: {e}")
+    try:
+        return _get_pwd_context().verify(str(senha or ""), stored)
     except Exception:
         return False
 
@@ -1103,7 +1120,7 @@ def _public_user(row: dict) -> dict:
         "usuario": row.get("usuario") or "",
         "club_id": str(row.get("club_id") or ""),
         "clube": row.get("clube") or "",
-        "cargo": row.get("cargo") or "jogador",
+        "cargo": str(row.get("cargo") or "jogador").strip().lower(),
         "status": row.get("status") or "ativo",
         "is_active": bool(row.get("is_active", True)),
     }
@@ -1224,7 +1241,7 @@ def get_current_user(authorization: Optional[str] = Header(None), access_token: 
 
 
 def require_admin(current_user: dict = Depends(get_current_user)):
-    if (current_user or {}).get("cargo") != "admin":
+    if str((current_user or {}).get("cargo") or "").strip().lower() != "admin":
         raise HTTPException(403, "Apenas administradores podem executar esta acao")
     return current_user
 
@@ -5327,7 +5344,7 @@ let AUTH_USER = (() => {
 })();
 
 function isLoggedIn() { return !!AUTH_TOKEN && !!AUTH_USER; }
-function isAdmin() { return !!AUTH_USER && AUTH_USER.cargo === 'admin'; }
+function isAdmin() { return !!AUTH_USER && String(AUTH_USER.cargo || '').trim().toLowerCase() === 'admin'; }
 
 function authHeaders(extra = {}) {
   const headers = {...extra};
@@ -7821,6 +7838,7 @@ if __name__ == "__main__":
     print("="*60 + "\n")
     
     uvicorn.run(app, host="0.0.0.0", port=8000)
+
 
 
 
