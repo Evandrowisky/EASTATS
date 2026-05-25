@@ -1,15 +1,21 @@
-{
-  "version": 2,
-  "builds": [
-    {
-      "src": "main.py",
-      "use": "@vercel/python"
-    }
-  ],
-  "routes": [
-    {
-      "src": "/(.*)",
-      "dest": "main.py"
-    }
-  ]
+﻿{
+    "version":  2,
+    "builds":  [
+                   {
+                       "src":  "main.py",
+                       "use":  "@vercel/python"
+                   }
+               ],
+    "routes":  [
+                   {
+                       "src":  "/(.*)",
+                       "dest":  "main.py"
+                   }
+               ],
+    "crons":  [
+                  {
+                      "path":  "/api/cron/auto-sync?secret=scoutclubs_auto_sync_2026_seguro",
+                      "schedule":  "*/30 * * * *"
+                  }
+              ]
 }

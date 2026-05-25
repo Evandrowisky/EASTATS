@@ -784,6 +784,87 @@ def load_latest_club_data_supabase(club_id: Optional[str] = None):
     return None
 
 
+def load_club_meta_supabase(club_id: str) -> dict:
+    """Carrega nome/plataforma do clube salvo no Supabase para syncs automaticas."""
+    sb = get_supabase()
+    if not sb or not club_id:
+        return {}
+    try:
+        resp = (
+            sb.table("clubs")
+            .select("club_id,name,platform,data,synced_at,updated_at")
+            .eq("club_id", str(club_id))
+            .limit(1)
+            .execute()
+        )
+        rows = getattr(resp, "data", None) or []
+        if not rows:
+            return {}
+        row = rows[0] or {}
+        data = row.get("data") if isinstance(row.get("data"), dict) else {}
+        club = data.get("club") if isinstance(data, dict) else {}
+        return {
+            "club_id": str(row.get("club_id") or club_id),
+            "name": row.get("name") or club.get("name") or "Clube",
+            "platform": row.get("platform") or club.get("platform") or "common-gen5",
+            "data": data,
+        }
+    except Exception as e:
+        print(f"[SUPABASE] Aviso ao carregar meta do clube: {type(e).__name__}: {e}")
+        return {}
+
+
+def load_admin_clubs_for_cron(limit: int = 10) -> List[dict]:
+    """Lista clubes que tem pelo menos um admin ativo para sincronizacao automatica."""
+    sb = get_supabase()
+    if not sb:
+        return []
+    try:
+        q = (
+            sb.table("app_users")
+            .select("club_id,clube,cargo,status,is_active")
+            .eq("cargo", "admin")
+            .eq("status", "ativo")
+            .eq("is_active", True)
+            .limit(int(limit))
+        )
+        resp = q.execute()
+    except Exception as e:
+        print(f"[SUPABASE] Aviso ao listar admins com status/is_active: {type(e).__name__}: {e}")
+        try:
+            resp = (
+                sb.table("app_users")
+                .select("club_id,clube,cargo")
+                .eq("cargo", "admin")
+                .limit(int(limit))
+                .execute()
+            )
+        except Exception as ee:
+            print(f"[SUPABASE] Aviso ao listar admins: {type(ee).__name__}: {ee}")
+            return []
+
+    rows = getattr(resp, "data", None) or []
+    seen = set()
+    clubs = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        club_id = str(row.get("club_id") or "").strip()
+        if not club_id or club_id in seen:
+            continue
+        seen.add(club_id)
+        meta = load_club_meta_supabase(club_id)
+        clubs.append({
+            "club_id": club_id,
+            "clube": row.get("clube") or meta.get("name") or "Clube",
+            "name": meta.get("name") or row.get("clube") or "Clube",
+            "platform": meta.get("platform") or "common-gen5",
+            "cached_data": meta.get("data") or {},
+        })
+    print(f"[CRON] Clubes com admin ativo encontrados: {len(clubs)}")
+    return clubs
+
+
 def load_player_profiles_supabase(club_id: str) -> Dict[str, Dict[str, Any]]:
     sb = get_supabase()
     if not sb or not club_id:
@@ -2026,6 +2107,239 @@ async def sync_stream(
     
     return StreamingResponse(event_generator(), media_type="text/event-stream")
 
+
+def _save_matches_sqlite_best_effort(club_id: str, matches: List[dict]):
+    if not matches:
+        return 0
+    try:
+        conn = sqlite3.connect(DB_FILE)
+        c = conn.cursor()
+        saved = 0
+        for i, m in enumerate(matches):
+            mid = stable_match_id_for_storage(m, club_id, i)
+            c.execute(
+                "INSERT OR REPLACE INTO matches (match_id, club_id, opponent, score, result, match_type, timestamp, data) VALUES (?,?,?,?,?,?,?,?)",
+                (
+                    mid,
+                    str(club_id),
+                    m.get("opponent", ""),
+                    m.get("score", ""),
+                    m.get("result", ""),
+                    m.get("match_type", ""),
+                    int(m.get("timestamp", 0) or 0),
+                    json.dumps({**m, "match_id": mid}, default=str),
+                ),
+            )
+            saved += 1
+        conn.commit()
+        conn.close()
+        return saved
+    except Exception as e:
+        print(f"[DB] Aviso ao salvar partidas no SQLite pelo cron: {type(e).__name__}: {e}")
+        return 0
+
+
+def _save_club_sqlite_best_effort(club_id: str, name: str, platform: str, club_data: dict):
+    try:
+        conn = sqlite3.connect(DB_FILE)
+        c = conn.cursor()
+        c.execute(
+            "INSERT OR REPLACE INTO clubs (club_id, name, platform, data) VALUES (?, ?, ?, ?)",
+            (str(club_id), name, platform, json.dumps(club_data, default=str)),
+        )
+        conn.commit()
+        conn.close()
+        return True
+    except Exception as e:
+        print(f"[DB] Aviso ao salvar clube no SQLite pelo cron: {type(e).__name__}: {e}")
+        return False
+
+
+def sync_club_for_auto_update(club_ref: dict) -> dict:
+    """Sincroniza um clube sem SSE para cron/background, preservando historico Supabase/local."""
+    club_id = str(club_ref.get("club_id") or "").strip()
+    if not club_id:
+        raise ValueError("club_id ausente")
+
+    club_name_hint = club_ref.get("name") or club_ref.get("clube") or "Clube"
+    plat = club_ref.get("platform") or "common-gen5"
+    cached_data = club_ref.get("cached_data") if isinstance(club_ref.get("cached_data"), dict) else {}
+    cached_club = cached_data.get("club") if isinstance(cached_data.get("club"), dict) else {}
+    club_name_real = cached_club.get("name") or club_name_hint
+
+    print(f"[CRON] Sincronizando clube {club_name_real} ({club_id}) em {plat}")
+
+    overall = ea_client.overall_stats(club_id, plat)
+    info = ea_client.club_info(club_id, plat)
+    members = ea_client.members(club_id, plat)
+    players = parse_players(members)
+
+    previous_cache = load_cache() or {}
+    club_json_cache = load_club_json_history(club_id) or {}
+    previous_matches = []
+    previous_players = []
+
+    if str((previous_cache.get("club") or {}).get("id") or "") == club_id:
+        previous_matches = previous_cache.get("matches") or []
+        previous_players = previous_cache.get("players") or []
+    if str((club_json_cache.get("club") or {}).get("id") or club_id) == club_id:
+        previous_matches = merge_match_lists_for_storage(club_id, club_json_cache.get("matches") or [], previous_matches)
+        if not previous_players:
+            previous_players = club_json_cache.get("players") or []
+    if not previous_matches and isinstance(cached_data, dict):
+        previous_matches = cached_data.get("matches") or []
+    if not previous_players and isinstance(cached_data, dict):
+        previous_players = cached_data.get("players") or []
+    if not players and previous_players:
+        players = previous_players
+        print(f"[CRON] EA nao retornou jogadores; mantendo {len(previous_players)} jogadores salvos")
+
+    all_matches_raw, debug_matchtypes = fetch_all_match_types(ea_client, club_id, plat, max_count=100)
+    new_matches = parse_matches(all_matches_raw, club_id)
+    sync_summary = summarize_matches_by_type(new_matches)
+    print(
+        f"[CRON] {club_name_real}: baixadas={len(new_matches)} "
+        f"liga={sync_summary.get('liga', 0)} copa={sync_summary.get('copa', 0)} amistoso={sync_summary.get('amistoso', 0)}"
+    )
+
+    supabase_matches = load_matches_supabase(club_id, limit=5000)
+    matches = merge_match_lists_for_storage(club_id, supabase_matches, previous_matches, new_matches)
+
+    stats = calc_club_stats(overall, info, matches)
+    opponents = calc_opponent_avg(matches)
+    ideal_team = build_ideal_team(players, "3-5-2")
+    mvp = max(players, key=lambda p: (_safe_int(p.get("mom")), _safe_float(p.get("rating")))) if players else None
+
+    club_data = {
+        "club": {
+            "id": club_id,
+            "name": club_name_real,
+            "platform": plat,
+            "synced_at": datetime.now().isoformat(),
+        },
+        "stats": stats,
+        "players": players,
+        "matches": matches,
+        "opponents": opponents,
+        "ideal_team": ideal_team,
+        "mvp": mvp,
+        "debug_matchtypes": debug_matchtypes,
+        "matchtype_summary": summarize_matches_by_type(matches),
+    }
+
+    save_club_supabase(club_data)
+    save_players_supabase(club_id, players)
+    save_matches_supabase(club_id, matches)
+
+    supabase_after = load_matches_supabase(club_id, limit=5000)
+    if supabase_after:
+        matches = merge_match_lists_for_storage(club_id, supabase_after, matches)
+        club_data["matches"] = matches
+        club_data["stats"] = calc_club_stats(overall, info, matches)
+        club_data["opponents"] = calc_opponent_avg(matches)
+        club_data["ideal_team"] = build_ideal_team(players, "3-5-2")
+        club_data["matchtype_summary"] = summarize_matches_by_type(matches)
+        save_club_supabase(club_data)
+
+    save_cache(club_data)
+    save_club_json_history(club_id, club_data)
+    _save_matches_sqlite_best_effort(club_id, matches)
+    _save_club_sqlite_best_effort(club_id, club_name_real, plat, club_data)
+
+    log_sync_supabase(
+        club_id=club_id,
+        platform=plat,
+        status="success",
+        total_matches=len(matches),
+        new_matches=len(new_matches),
+        message="Sincronizacao automatica concluida",
+        debug=debug_matchtypes,
+    )
+
+    return {
+        "club_id": club_id,
+        "club": club_name_real,
+        "platform": plat,
+        "success": True,
+        "new_matches": len(new_matches),
+        "total_matches": len(matches),
+        "summary_new": sync_summary,
+        "summary_total": summarize_matches_by_type(matches),
+    }
+
+
+def _extract_bearer_token(authorization: Optional[str]) -> str:
+    auth = (authorization or "").strip()
+    if auth.lower().startswith("bearer "):
+        return auth.split(" ", 1)[1].strip()
+    return auth
+
+
+def _authorize_cron(secret: str = "", authorization: Optional[str] = None):
+    expected = os.getenv("CRON_SECRET", "").strip()
+    if not expected:
+        raise HTTPException(503, "CRON_SECRET nao configurado no servidor")
+    provided = (secret or _extract_bearer_token(authorization)).strip()
+    if provided != expected:
+        raise HTTPException(401, "Chave do cron invalida")
+
+
+def run_auto_sync_for_admin_clubs(secret: str = "", authorization: Optional[str] = None, limit: int = 10):
+    _authorize_cron(secret, authorization)
+    if not get_supabase():
+        raise HTTPException(503, "Supabase nao configurado")
+
+    clubs = load_admin_clubs_for_cron(limit=limit)
+    results = []
+    for club in clubs:
+        try:
+            results.append(sync_club_for_auto_update(club))
+        except Exception as e:
+            club_id = str(club.get("club_id") or "")
+            msg = f"Erro na sync automatica: {type(e).__name__}: {e}"
+            print(f"[CRON] {club_id} {msg}")
+            log_sync_supabase(
+                club_id=club_id,
+                platform=club.get("platform") or "common-gen5",
+                status="error",
+                total_matches=0,
+                new_matches=0,
+                message=msg,
+                debug={"club": club},
+            )
+            results.append({
+                "club_id": club_id,
+                "club": club.get("name") or club.get("clube"),
+                "success": False,
+                "error": msg,
+            })
+
+    return {
+        "success": True,
+        "clubs_found": len(clubs),
+        "clubs_synced": sum(1 for r in results if r.get("success")),
+        "results": results,
+    }
+
+
+@app.get("/api/cron/auto-sync")
+def cron_auto_sync_get(
+    secret: str = Query(""),
+    limit: int = Query(10, ge=1, le=25),
+    authorization: Optional[str] = Header(None),
+):
+    """Sincroniza automaticamente apenas clubes que possuem admin ativo no Supabase."""
+    return run_auto_sync_for_admin_clubs(secret=secret, authorization=authorization, limit=limit)
+
+
+@app.post("/api/cron/auto-sync")
+def cron_auto_sync_post(
+    secret: str = Query(""),
+    limit: int = Query(10, ge=1, le=25),
+    authorization: Optional[str] = Header(None),
+):
+    """Versao POST do cron para chamadas manuais/externas."""
+    return run_auto_sync_for_admin_clubs(secret=secret, authorization=authorization, limit=limit)
 
 def _position_profile(position: str) -> str:
     pos = (position or "").lower()
@@ -7248,6 +7562,8 @@ if __name__ == "__main__":
     print("="*60 + "\n")
     
     uvicorn.run(app, host="0.0.0.0", port=8000)
+
+
 
 
 
