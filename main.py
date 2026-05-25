@@ -6785,10 +6785,17 @@ function render() {
   renderTab();
 }
 
-function setTab(t) {
+function setTab(t, ev) {
   CURRENT_TAB = t;
-  document.querySelectorAll('.tab').forEach(el => el.classList.remove('active'));
-  event.target.classList.add('active');
+  document.querySelectorAll('.tab').forEach(el => {
+    el.classList.remove('active');
+    const click = el.getAttribute('onclick') || '';
+    if (click.includes(`setTab('${t}')`) || click.includes(`setTab('${t}',`)) {
+      el.classList.add('active');
+    }
+  });
+  const target = ev && ev.target ? ev.target : (typeof event !== 'undefined' && event && event.target ? event.target : null);
+  if (target && target.classList) target.classList.add('active');
   if (!isAdmin()) {
     document.querySelectorAll('.tab').forEach(el => {
       if (['JOGADORES','COMPARAR','CONFRONTOS','CADASTRO','CONFIG','ADVERS&Aacute;RIOS'].includes((el.textContent || '').trim())) el.remove();
@@ -8991,6 +8998,7 @@ if __name__ == "__main__":
     print("="*60 + "\n")
     
     uvicorn.run(app, host="0.0.0.0", port=8000)
+
 
 
 
