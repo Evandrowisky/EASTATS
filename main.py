@@ -1437,6 +1437,27 @@ def calc_opponent_avg(matches_list):
     return sorted(result, key=lambda x: x["avg_gf"], reverse=True)[:10]
 
 
+def apply_player_profiles_to_players(players_list, club_id: Optional[str] = None):
+    """Aplica cadastro manual salvo sem apagar estatisticas vindas da EA/cache."""
+    profiles = load_player_profiles(club_id) if club_id else load_player_profiles()
+    out = []
+    for p in players_list or []:
+        if not isinstance(p, dict):
+            continue
+        item = dict(p)
+        prof = profiles.get(str(item.get("name", "")), {}) or {}
+        manual_position = prof.get("manual_position")
+        if manual_position:
+            item["position"] = manual_position
+            item["manual_position"] = manual_position
+            item["position_source"] = "cadastro admin"
+        if prof.get("archetype"):
+            item["archetype"] = prof.get("archetype")
+        if prof.get("playstyles"):
+            item["playstyles"] = prof.get("playstyles")
+        out.append(item)
+    return out
+
 def build_ideal_team(players_list, formation="3-5-2"):
     """Monta 11 ideal por formacao, funcao e melhor encaixe disponivel."""
     formation_slots = {
@@ -1853,7 +1874,8 @@ def get_ideal_team(formation: str = Query("3-5-2"), current_user: dict = Depends
     cache = load_cache()
     if not cache or not cache.get("players"):
         raise HTTPException(404, "Sincronize um clube primeiro")
-    return build_ideal_team(cache.get("players", []), formation)
+    players = apply_player_profiles_to_players(cache.get("players", []), (cache.get("club") or {}).get("id"))
+    return build_ideal_team(players, formation)
 
 
 @app.get("/api/test-matchtypes")
@@ -2829,7 +2851,8 @@ async def ai_team(formation: str = Query("3-5-2")):
     if not cache or not cache.get("players"):
         raise HTTPException(404, "Sincronize um clube primeiro")
     
-    ideal = build_ideal_team(cache.get("players", []), formation)
+    players = apply_player_profiles_to_players(cache.get("players", []), (cache.get("club") or {}).get("id"))
+    ideal = build_ideal_team(players, formation)
     
     text = f"""## 🏆 Time Ideal — Formação {ideal['formation']}
 
@@ -2977,12 +3000,20 @@ def list_player_profiles(current_user: dict = Depends(get_current_user)):
 
 @app.put("/api/player-profiles/{player_name}")
 def update_player_profile(player_name: str, item: PlayerProfileUpdate, current_user: dict = Depends(require_admin)):
-    """Salva ajuste manual para um jogador sem depender de banco externo."""
+    """Salva ajuste manual do admin e preserva campos que nao foram reenviados."""
     club_id = str((current_user or {}).get("club_id") or _current_club_id_from_cache())
-    manual_position = (item.manual_position or "").strip() or None
-    archetype = (item.archetype or "").strip() or None
-    playstyles = [str(x).strip() for x in (item.playstyles or []) if str(x).strip()][:3]
-    notes = (item.notes or "").strip() or None
+    field_set = set(getattr(item, "model_fields_set", None) or getattr(item, "__fields_set__", set()) or set())
+    existing = (load_player_profiles(club_id) or {}).get(player_name, {}) or {}
+
+    raw_manual_position = item.manual_position if "manual_position" in field_set else existing.get("manual_position")
+    raw_archetype = item.archetype if "archetype" in field_set else existing.get("archetype")
+    raw_playstyles = item.playstyles if "playstyles" in field_set else existing.get("playstyles")
+    raw_notes = item.notes if "notes" in field_set else existing.get("notes")
+
+    manual_position = (raw_manual_position or "").strip() or None
+    archetype = (raw_archetype or "").strip() or None
+    playstyles = [str(x).strip() for x in (raw_playstyles or []) if str(x).strip()][:3]
+    notes = (raw_notes or "").strip() or None
     try:
         conn = sqlite3.connect(DB_FILE)
         if manual_position or archetype or playstyles or notes:
@@ -5693,7 +5724,7 @@ async function loadPlayerProfiles() {
     const r = await authFetch('/api/player-profiles');
     const data = await r.json();
     // Ordem importa: o ajuste manual salvo no navegador e na sessão atual vence o cache/API da EA após sincronizar.
-    PLAYER_PROFILES = {...dashboardProfiles, ...(data.profiles || {}), ...localProfiles, ...(PLAYER_PROFILES || {})};
+    PLAYER_PROFILES = {...dashboardProfiles, ...localProfiles, ...(PLAYER_PROFILES || {}), ...(data.profiles || {})};
   } catch (e) {
     PLAYER_PROFILES = {...dashboardProfiles, ...localProfiles, ...(PLAYER_PROFILES || {})};
     console.warn('Perfis manuais via API indisponiveis; usando cache local/dashboard', e);
@@ -6432,15 +6463,7 @@ function inferPlayerPositionIntel(player) {
   if (profile.manual_position) {
     const fam = normalizePlayerFamily(profile.manual_position);
     const totalApps = Number(player.games || player.history_apps || 0);
-    const gkApps = Number(counts.GK || 0);
-    const outfieldApps = Number(counts.DEF || 0) + Number(counts.MID || 0) + Number(counts.FWD || 0);
-    // Protecao anti-erro: nao deixa um atacante virar GK por cadastro/localStorage antigo
-    // se ele nunca jogou como goleiro no historico do clube.
-    if (fam === 'GK' && totalApps > 0 && gkApps === 0 && outfieldApps > 0) {
-      console.warn('Cadastro manual GK ignorado por ausencia de jogos como goleiro:', player.name);
-    } else {
-      return {family: fam, label: familyToPositionLabel(fam), source: 'manual', apps: totalApps, counts};
-    }
+    return {family: fam, label: familyToPositionLabel(fam), source: 'cadastro admin', apps: totalApps, counts};
   }
 
   let apps = Number(player.games || player.history_apps || 0);
@@ -6643,7 +6666,8 @@ function renderCadastroJogadores() {
     const profile = profileForPlayer(p.name);
     const intel = inferPlayerPositionIntel(p);
     const selectHtml = opts.map(([v,l]) => `<option value="${v}" ${String(profile.manual_position || '') === v ? 'selected' : ''}>${l}</option>`).join('');
-    const selectedStyles = profile.playstyles || [];
+    const selectedStyles = (profile.playstyles || []).map(normalizePlaystyleName);
+    const selectedArchetype = normalizeArchetypeName(profile.archetype || "");
     return `
       <div class="profile-row">
         <div>
@@ -6651,11 +6675,10 @@ function renderCadastroJogadores() {
           <div class="profile-meta">EA favorita: ${p.favorite_position || p.position || '?'} - ultimo: ${p.last_match_position || '-'} - sugerida: ${intel.label} (${intel.source}) - ${p.games || 0}j no clube</div>
         </div>
         <select id="prof-pos-${cssSafeId(p.name)}">${selectHtml}</select>
-        <input id="prof-arch-${cssSafeId(p.name)}" placeholder="Arquétipo" value="${escapeAttr(profile.archetype || '')}">
+        <select id="prof-arch-${cssSafeId(p.name)}">${archetypeSelectOptions(selectedArchetype)}</select>
         <select id="prof-ps-1-${cssSafeId(p.name)}">${playstyleSelectOptions(selectedStyles[0] || '')}</select>
         <select id="prof-ps-2-${cssSafeId(p.name)}">${playstyleSelectOptions(selectedStyles[1] || '')}</select>
         <select id="prof-ps-3-${cssSafeId(p.name)}">${playstyleSelectOptions(selectedStyles[2] || '')}</select>
-        <input id="prof-notes-${cssSafeId(p.name)}" placeholder="Notas" value="${escapeAttr(profile.notes || '')}">
         <button class="btn-mini" onclick="saveProfileFromRow('${p.name.replace(/'/g, "\'")}')">Salvar</button>
       </div>
     `;
@@ -6679,10 +6702,11 @@ function escapeAttr(value) {
 
 async function saveProfileFromRow(name) {
   const id = cssSafeId(name);
+  const profile = profileForPlayer(name);
   const pos = document.getElementById('prof-pos-' + id)?.value || '';
-  const arch = document.getElementById('prof-arch-' + id)?.value || '';
-  const notes = document.getElementById('prof-notes-' + id)?.value || '';
-  const playstyles = [1,2,3].map(i => document.getElementById(`prof-ps-${i}-` + id)?.value || '').filter(Boolean);
+  const arch = normalizeArchetypeName(document.getElementById('prof-arch-' + id)?.value || '');
+  const notes = profile.notes || '';
+  const playstyles = [1,2,3].map(i => normalizePlaystyleName(document.getElementById(`prof-ps-${i}-` + id)?.value || '')).filter(Boolean);
   try {
     await savePlayerProfile(name, pos, arch, notes, playstyles);
     renderTab();
@@ -7554,7 +7578,7 @@ async function startSync() {
             try { saveLocalPlayerProfiles(); } catch (e) {}
             await loadData();
             protectDataMatchHistory();
-            PLAYER_PROFILES = {...(DATA?.player_profiles || {}), ...profileBackup, ...loadLocalPlayerProfiles()};
+            PLAYER_PROFILES = {...loadLocalPlayerProfiles(), ...profileBackup, ...(DATA?.player_profiles || {}), ...(PLAYER_PROFILES || {})};
             if (DATA) DATA.player_profiles = {...PLAYER_PROFILES};
             saveLocalPlayerProfiles();
             render();
@@ -7607,7 +7631,7 @@ async function startSilentSync() {
     try { saveLocalPlayerProfiles(); } catch (e) {}
     await loadData();
     protectDataMatchHistory();
-    PLAYER_PROFILES = {...(DATA?.player_profiles || {}), ...profileBackup, ...loadLocalPlayerProfiles()};
+    PLAYER_PROFILES = {...loadLocalPlayerProfiles(), ...profileBackup, ...(DATA?.player_profiles || {}), ...(PLAYER_PROFILES || {})};
     if (DATA) DATA.player_profiles = {...PLAYER_PROFILES};
     saveLocalPlayerProfiles();
     render();
@@ -7648,6 +7672,10 @@ if __name__ == "__main__":
     print("="*60 + "\n")
     
     uvicorn.run(app, host="0.0.0.0", port=8000)
+
+
+
+
 
 
 
