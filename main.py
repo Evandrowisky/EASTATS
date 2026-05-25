@@ -331,7 +331,7 @@ def _fix_mojibake(value: str) -> str:
         "Ã¡": "á", "ÃÁ": "Á", "Ã©": "é", "Ã‰": "É", "Ãª": "ê", "ÃŠ": "Ê",
         "Ã­": "í", "ÃÍ": "Í", "Ã³": "ó", "Ã“": "Ó", "Ã´": "ô", "Ã”": "Ô",
         "Ãº": "ú", "Ãš": "Ú", "Ã£": "ã", "Ãƒ": "Ã", "Ãµ": "õ", "Ã•": "Õ",
-        "Ã§": "ç", "Ã‡": "Ç", "Âº": "º", "Âª": "ª", "Â·": "·", "Â": "",
+        "Ã§": "ç", "Ã‡": "Ç", "Âº": "º", "Âª": "ª", "Â&middot;": "&middot;", "Â": "",
         "â€“": "-", "â€”": "-", "â€˜": "'", "â€™": "'", "â€œ": '"', "â€": '"',
         "Ã�M": "ÉM", "Ã�S": "ÓS", "NÃ�O": "NÃO", "GANÃ�S": "GANÓS", "IRMÃ�OS": "IRMÃOS",
     }
@@ -501,7 +501,7 @@ def fallback_search_from_local(club_name: str = "", platform: str = "auto") -> O
 # ============================================================
 
 def calc_club_stats(overall_data, club_info_data, matches_list):
-    """Calcula estatísticas agregadas do clube"""
+    """Calcula estat&iacute;sticas agregadas do clube"""
     stats = {
         "win_rate": 0, "goals_for": 0, "goals_against": 0, "goal_diff": 0,
         "wins": 0, "draws": 0, "losses": 0, "matches_played": 0,
@@ -2213,7 +2213,7 @@ async def sync_stream(
             plat = search.get("platform", plat) or "common-gen5"
             yield f"data: {log(f'✓ Clube: {club_name_real} (ID: {club_id}, plat: {plat})', 3, 8)}\n\n"
             
-            yield f"data: {log('📊 Carregando estatísticas gerais...', 4, 8)}\n\n"
+            yield f"data: {log('📊 Carregando estat&iacute;sticas gerais...', 4, 8)}\n\n"
             overall = ea_client.overall_stats(club_id, plat)
             info = ea_client.club_info(club_id, plat)
             
@@ -2324,7 +2324,7 @@ async def sync_stream(
                 print(f"[DB] Aviso ao acumular partidas: {e}")
                 matches = merge_match_lists(previous_matches, new_matches)
                 yield f"data: {log(f'Historico via cache: {len(matches)} partidas totais', 8, 8)}\n\n"
-            yield f"data: {log('🧮 Calculando estatísticas...', 8, 8)}\n\n"
+            yield f"data: {log('🧮 Calculando estat&iacute;sticas...', 8, 8)}\n\n"
             stats = calc_club_stats(overall, info, matches)
             opponents = calc_opponent_avg(matches)
             ideal_team = build_ideal_team(players, "3-5-2")
@@ -3055,7 +3055,7 @@ Responda em markdown com:
     return {"player": player, "analytics": analytics, "analysis": analysis}
 
 def generate_player_analysis_offline(p):
-    """Análise offline baseada em estatísticas"""
+    """Análise offline baseada em estat&iacute;sticas"""
     rating = p['rating']
     
     if rating >= 8: nivel = "EXCELENTE ⭐⭐⭐⭐⭐"
@@ -5683,7 +5683,7 @@ function updateAuthHeader() {
     box.innerHTML = '';
     return;
   }
-  box.innerHTML = `<div class="auth-user-pill">${AUTH_USER.nome || AUTH_USER.usuario} · <span class="auth-role">${AUTH_USER.cargo}</span></div><button class="btn-mini" onclick="logout()">Sair</button>`;
+  box.innerHTML = `<div class="auth-user-pill">${AUTH_USER.nome || AUTH_USER.usuario} &middot; <span class="auth-role">${AUTH_USER.cargo}</span></div><button class="btn-mini" onclick="logout()">Sair</button>`;
 }
 
 function showAuthMessage(msg, type = 'error') {
@@ -5710,7 +5710,7 @@ function renderAuth(mode = 'login') {
     ? 'Crie sua conta como jogador. O admin do clube libera ou bloqueia seu login depois.'
     : isReset
       ? 'Use sua senha atual para trocar senha ou mudar o clube vinculado. Se mudar de clube, o admin do novo clube precisa liberar seu acesso.'
-      : 'Use seu usu?rio, senha e nome do clube exatamente como aparece no Pro Clubs.';
+      : 'Use seu usu&aacute;rio, senha e nome do clube exatamente como aparece no Pro Clubs.';
   c.innerHTML = `
     <div class="auth-shell">
       <div class="auth-card">
@@ -5718,14 +5718,14 @@ function renderAuth(mode = 'login') {
         <p>${help}</p>
         <form onsubmit="${isRegister ? 'submitRegister(event)' : isReset ? 'submitResetAccess(event)' : 'submitLogin(event)'}">
           ${isRegister ? `<div class="auth-field"><label>Nome</label><input id="authNome" autocomplete="name" required></div>` : ''}
-          <div class="auth-field"><label>Usuário / ID FIFA</label><input id="authUsuario" autocomplete="username" required><div style="color:var(--text-2);font-size:11px;line-height:1.4;">Use o mesmo ID/nome do jogador no FIFA/EA FC, igual aparece no Pro Clubs. É assim que o Meu Scout encontra suas estatísticas.</div></div>
+          <div class="auth-field"><label>Usu&aacute;rio / ID FIFA</label><input id="authUsuario" autocomplete="username" required><div style="color:var(--text-2);font-size:11px;line-height:1.4;">Use o mesmo ID/nome do jogador no FIFA/EA FC, igual aparece no Pro Clubs. &Eacute; assim que o Meu Scout encontra suas estat&iacute;sticas.</div></div>
           <div class="auth-field"><label>${isReset ? 'Senha atual' : 'Senha'}</label><input id="authSenha" type="password" autocomplete="${isRegister ? 'new-password' : 'current-password'}" required></div>
-          ${isReset ? `<div class="auth-field"><label>Nova senha (opcional)</label><input id="authNovaSenha" type="password" autocomplete="new-password" placeholder="Preencha s? se quiser trocar a senha"></div>` : ''}
-          <div class="auth-field"><label>${isReset ? 'Clube atual' : 'Nome do Clube'}</label><input id="authClube" placeholder="Nome do clube igual ao Pro Clubs" required><div style="color:var(--text-2);font-size:11px;line-height:1.4;">Digite o nome do clube como est? no EA FC Pro Clubs, incluindo acentos e espa?os quando houver.</div></div>
-          ${isReset ? `<div class="auth-field"><label>Novo clube (opcional)</label><input id="authNovoClube" placeholder="Preencha s? se quiser trocar de clube"></div>` : ''}
+          ${isReset ? `<div class="auth-field"><label>Nova senha (opcional)</label><input id="authNovaSenha" type="password" autocomplete="new-password" placeholder="Preencha s&oacute; se quiser trocar a senha"></div>` : ''}
+          <div class="auth-field"><label>${isReset ? 'Clube atual' : 'Nome do Clube'}</label><input id="authClube" placeholder="Nome do clube igual ao Pro Clubs" required><div style="color:var(--text-2);font-size:11px;line-height:1.4;">Digite o nome do clube como est&aacute; no EA FC Pro Clubs, incluindo acentos e espa&ccedil;os quando houver.</div></div>
+          ${isReset ? `<div class="auth-field"><label>Novo clube (opcional)</label><input id="authNovoClube" placeholder="Preencha s&oacute; se quiser trocar de clube"></div>` : ''}
           <div class="auth-actions">
-            <button class="btn-primary" type="submit">${isRegister ? 'Criar Conta' : isReset ? 'Salvar Alteração' : 'Entrar'}</button>
-            <button class="auth-link" type="button" onclick="renderAuth('${isRegister || isReset ? 'login' : 'register'}')">${isRegister || isReset ? 'Já tenho conta' : 'Criar conta'}</button>
+            <button class="btn-primary" type="submit">${isRegister ? 'Criar Conta' : isReset ? 'Salvar Altera&ccedil;&atilde;o' : 'Entrar'}</button>
+            <button class="auth-link" type="button" onclick="renderAuth('${isRegister || isReset ? 'login' : 'register'}')">${isRegister || isReset ? 'J&aacute; tenho conta' : 'Criar conta'}</button>
             ${!isRegister && !isReset ? `<button class="auth-link" type="button" onclick="renderAuth('reset')">Redefinir senha/clube</button>` : ''}
           </div>
           <div id="authError" class="auth-error"></div>
@@ -5946,7 +5946,7 @@ function setPeriod(p, ev) {
   if (ev && ev.target) ev.target.classList.add('active');
   if (!isAdmin()) {
     document.querySelectorAll('.tab').forEach(el => {
-      if (['JOGADORES','COMPARAR','CONFRONTOS','CADASTRO','ADVERSÁRIOS'].includes((el.textContent || '').trim())) el.remove();
+      if (['JOGADORES','COMPARAR','CONFRONTOS','CADASTRO','ADVERS&Aacute;RIOS'].includes((el.textContent || '').trim())) el.remove();
     });
   }
   renderTab();
@@ -5959,7 +5959,7 @@ function setMatchType(t, ev) {
   if (ev && ev.target) ev.target.classList.add('active');
   if (!isAdmin()) {
     document.querySelectorAll('.tab').forEach(el => {
-      if (['JOGADORES','COMPARAR','CONFRONTOS','CADASTRO','ADVERSÁRIOS'].includes((el.textContent || '').trim())) el.remove();
+      if (['JOGADORES','COMPARAR','CONFRONTOS','CADASTRO','ADVERS&Aacute;RIOS'].includes((el.textContent || '').trim())) el.remove();
     });
   }
   renderTab();
@@ -6248,13 +6248,13 @@ function render() {
         <div class="club-shield">🛡️</div>
         <div>
           <div class="club-name">${DATA.club.name}</div>
-          <div class="club-meta">${computePlayersForMatches(DATA.matches || []).length} jogadores com partidas no clube · ${DATA.matches?.length || 0} partidas</div>
+          <div class="club-meta">${computePlayersForMatches(DATA.matches || []).length} jogadores com partidas no clube &middot; ${DATA.matches?.length || 0} partidas</div>
         </div>
       </div>
     </div>
     
     <div class="tabs">
-      <div class="tab ${CURRENT_TAB==='visao'?'active':''}" onclick="setTab('visao')">VISÃO</div>
+      <div class="tab ${CURRENT_TAB==='visao'?'active':''}" onclick="setTab('visao')">VIS&Atilde;O</div>
       <div class="tab ${CURRENT_TAB==='meu-scout'?'active':''}" onclick="setTab('meu-scout')">MEU SCOUT</div>
       <div class="tab ${CURRENT_TAB==='jogadores'?'active':''}" onclick="setTab('jogadores')">JOGADORES</div>
       <div class="tab ${CURRENT_TAB==='rankings'?'active':''}" onclick="setTab('rankings')">RANKINGS</div>
@@ -6263,7 +6263,7 @@ function render() {
       <div class="tab ${CURRENT_TAB==='time-ideal'?'active':''}" onclick="setTab('time-ideal')">TIME IDEAL</div>
       ${isAdmin() ? `<div class="tab ${CURRENT_TAB==='cadastro'?'active':''}" onclick="setTab('cadastro')">CADASTRO</div>` : ''}
       <div class="tab ${CURRENT_TAB==='playstyles'?'active':''}" onclick="setTab('playstyles')">ESTILOS</div>
-      <div class="tab ${CURRENT_TAB==='adversarios'?'active':''}" onclick="setTab('adversarios')">ADVERSÁRIOS</div>
+      <div class="tab ${CURRENT_TAB==='adversarios'?'active':''}" onclick="setTab('adversarios')">ADVERS&Aacute;RIOS</div>
       <div class="tab ${CURRENT_TAB==='agenda'?'active':''}" onclick="setTab('agenda')">AGENDA</div>
     </div>
     
@@ -6290,7 +6290,7 @@ function render() {
   
   if (!isAdmin()) {
     document.querySelectorAll('.tab').forEach(el => {
-      if (['JOGADORES','COMPARAR','CONFRONTOS','CADASTRO','ADVERSÁRIOS'].includes((el.textContent || '').trim())) el.remove();
+      if (['JOGADORES','COMPARAR','CONFRONTOS','CADASTRO','ADVERS&Aacute;RIOS'].includes((el.textContent || '').trim())) el.remove();
     });
   }
   renderTab();
@@ -6302,7 +6302,7 @@ function setTab(t) {
   event.target.classList.add('active');
   if (!isAdmin()) {
     document.querySelectorAll('.tab').forEach(el => {
-      if (['JOGADORES','COMPARAR','CONFRONTOS','CADASTRO','ADVERSÁRIOS'].includes((el.textContent || '').trim())) el.remove();
+      if (['JOGADORES','COMPARAR','CONFRONTOS','CADASTRO','ADVERS&Aacute;RIOS'].includes((el.textContent || '').trim())) el.remove();
     });
   }
   renderTab();
@@ -6534,7 +6534,7 @@ function renderVisao() {
         <div class="mvp-rating">${m.rating}</div>
         <div class="mvp-info">
           <div class="mvp-name">${m.name}</div>
-          <div class="mvp-meta">${m.position} · ${m.games} jogos no clube/filtro</div>
+          <div class="mvp-meta">${m.position} &middot; ${m.games} jogos no clube/filtro</div>
           <div class="mvp-stats">
             <div class="mvp-stat"><div class="mvp-stat-value">${m.goals}</div><div class="mvp-stat-label">Gols</div></div>
             <div class="mvp-stat"><div class="mvp-stat-value">${m.assists}</div><div class="mvp-stat-label">Assist</div></div>
@@ -6676,7 +6676,7 @@ function renderMyScoutProfileEditor(name) {
   const profile = profileForPlayer(name);
   const selected = (profile.playstyles || []).map(normalizePlaystyleName);
   return `
-    <div class="section-title" style="margin-top:20px;">Meu cadastro de arqu?tipo e PlayStyles</div>
+    <div class="section-title" style="margin-top:20px;">Meu cadastro de arqu&eacute;tipo e PlayStyles</div>
     <div class="agenda-form my-scout-profile-editor" style="grid-template-columns: repeat(4, minmax(0,1fr)); align-items:end;">
       <select id="my-arch-${id}" style="grid-column:span 1;">${archetypeSelectOptions(profile.archetype || '')}</select>
       <select id="my-ps-1-${id}" style="grid-column:span 1;">${playstyleSelectOptions(selected[0] || '')}</select>
@@ -6730,15 +6730,15 @@ function renderMeuScout() {
     </form>` : `
     <div class="agenda-form my-scout-self" style="grid-template-columns: 1fr auto; align-items:center;">
       <div>
-        <div style="font-size:10px;color:var(--text-2);letter-spacing:2px;text-transform:uppercase;margin-bottom:6px;">Seu ID FIFA / usu?rio cadastrado</div>
+        <div style="font-size:10px;color:var(--text-2);letter-spacing:2px;text-transform:uppercase;margin-bottom:6px;">Seu ID FIFA / usu&aacute;rio cadastrado</div>
         <div style="font-size:18px;font-weight:800;color:var(--green);overflow-wrap:anywhere;">${escapeAttr(savedName || '-')}</div>
-        <div style="font-size:12px;color:var(--text-2);margin-top:4px;">O Meu Scout busca automaticamente pelo usu?rio da sua conta.</div>
+        <div style="font-size:12px;color:var(--text-2);margin-top:4px;">O Meu Scout busca automaticamente pelo usu&aacute;rio da sua conta.</div>
       </div>
       <button type="button" id="myScoutSyncBtn" class="btn-primary" style="padding:10px 18px;" onclick="startSilentSync()">Sincronizar</button>
     </div>`;
 
   let html = `
-    <div class="section-title">Meu Scout · ${scopeLabel}</div>
+    <div class="section-title">Meu Scout &middot; ${scopeLabel}</div>
     ${scoutControls}
   `;
 
@@ -6757,7 +6757,7 @@ function renderMeuScout() {
     <div class="players-grid" style="grid-template-columns:minmax(260px, 420px);">
       <div class="player-card" onclick="showPlayerDetail('${safeName}')">
         <div class="player-rating-big">${found.rating}</div>
-        <div class="player-pos"><span class="player-pos-badge">${found.position} · ${found.games}J ${CURRENT_MATCH_TYPE === 'todos' ? 'no clube' : 'detalhadas salvas'}</span></div>
+        <div class="player-pos"><span class="player-pos-badge">${found.position} &middot; ${found.games}J ${CURRENT_MATCH_TYPE === 'todos' ? 'no clube' : 'detalhadas salvas'}</span></div>
         <div class="player-name">${found.name}</div>
         <div style="color:var(--text-2);font-size:11px;text-align:center;margin:4px 0 8px;">Posição cadastrada: <strong style="color:var(--green);">${profileForPlayer(found.name).manual_position || found.position}</strong></div>
         <div style="text-align:center;margin-bottom:10px;">${profilePlaystyleBadges(found.name)}</div>
@@ -6794,13 +6794,13 @@ function renderJogadores() {
     return '<div class="empty-state">Nenhum jogador encontrado neste filtro</div>';
   }
   const scopeLabel = CURRENT_MATCH_TYPE === 'todos' ? 'todos os jogos do clube' : 'partidas detalhadas salvas de ' + CURRENT_MATCH_TYPE;
-  let html = `<div class="section-title">Jogadores · ${scopeLabel}</div><div class="players-grid">`;
+  let html = `<div class="section-title">Jogadores &middot; ${scopeLabel}</div><div class="players-grid">`;
   players.forEach(p => {
     html += `
       <div class="player-card" onclick="showPlayerDetail('${p.name.replace(/'/g, "\\'")}')">
         <div class="player-rating-big">${p.rating}</div>
         <div class="player-pos">
-          <span class="player-pos-badge">${p.position} · ${p.games}J ${CURRENT_MATCH_TYPE === 'todos' ? 'no clube' : 'detalhadas salvas'} · ${p.position_source || 'auto'}</span>
+          <span class="player-pos-badge">${p.position} &middot; ${p.games}J ${CURRENT_MATCH_TYPE === 'todos' ? 'no clube' : 'detalhadas salvas'} &middot; ${p.position_source || 'auto'}</span>
         </div>
         <div class="player-name">${p.name}</div>
         <div class="player-stats">
@@ -6871,7 +6871,7 @@ function renderRankings() {
     return rounded + suffix;
   };
 
-  const podiumIcon = (idx) => idx === 0 ? '??' : idx === 1 ? '??' : idx === 2 ? '??' : String(idx + 1);
+  const podiumIcon = (idx) => String(idx + 1);
   const podiumClass = (idx) => idx === 0 ? 'top1' : idx === 1 ? 'top2' : idx === 2 ? 'top3' : '';
 
   const topList = (title, icon, key, suffix='', minGames=1, requirePositive=false) => {
@@ -6890,7 +6890,7 @@ function renderRankings() {
               <div class="ranking-pos ${podiumClass(idx)}">${podiumIcon(idx)}</div>
               <div class="ranking-main">
                 <div class="ranking-name">${p.name}</div>
-                <div class="ranking-meta">${p.position || '-'} ? ${p.games || 0} jogos no filtro</div>
+                <div class="ranking-meta">${p.position || '-'} &middot; ${p.games || 0} jogos no filtro</div>
               </div>
               <div class="ranking-value">${formatRankValue(p._rank_value, suffix)}</div>
             </div>
@@ -6900,14 +6900,14 @@ function renderRankings() {
   };
 
   return `
-    <div class="section-title">Rankings · ${typeLabel} · ${periodLabel}</div>
+    <div class="section-title">Rankings &middot; ${typeLabel} &middot; ${periodLabel}</div>
     <div style="color:var(--text-2);font-size:12px;margin-bottom:14px;line-height:1.5;">
       Top 5 calculado somente com partidas do clube atual e respeitando período + tipo de partida selecionados.
     </div>
     <div class="rankings-grid">
-      ${topList('Top 5 Nota Média EA', '&#9733;', 'rating')}
+      ${topList('Top 5 Nota M&eacute;dia EA', '&#9733;', 'rating')}
       ${topList('Top 5 Gols', '&#9917;', 'goals', '', 1, true)}
-      ${topList('Top 5 Assistências', '&#9673;', 'assists', '', 1, true)}
+      ${topList('Top 5 Assist&ecirc;ncias', '&#9673;', 'assists', '', 1, true)}
       ${topList('Top 5 % Passes Certos', '&#10148;', 'pass_pct', '%', 1, true)}
       ${topList('Top 5 % Divididas', '&#9635;', 'tackle_pct', '%', 1, true)}
       ${topList('Top 5 MOM', '&#9819;', 'mom', '', 1, true)}
@@ -6921,7 +6921,7 @@ function renderComparar() {
     return '<div class="empty-state">Nenhum jogador encontrado</div>';
   }
   const opts = players.map(p =>
-    `<option value="${p.name}">${p.name} · ${p.position} · ${p.rating}</option>`
+    `<option value="${p.name}">${p.name} &middot; ${p.position} &middot; ${p.rating}</option>`
   ).join('');
   if (!players.some(p => p.name === COMPARE_A)) COMPARE_A = players[0]?.name || null;
   if (!players.some(p => p.name === COMPARE_B)) COMPARE_B = players[1]?.name || players[0]?.name || null;
@@ -6962,7 +6962,7 @@ function renderCompareBars() {
     return `
       <div style="text-align:center;padding:14px 0;">
         <div style="font-size:38px;font-weight:800;color:var(--green);text-shadow:0 0 18px var(--green-glow);">${p.rating}</div>
-        <div style="margin-top:4px;color:var(--text-2);text-transform:uppercase;font-size:10px;letter-spacing:1px;">${p.position} · ${p.games}J ${CURRENT_MATCH_TYPE === 'todos' ? 'no clube' : 'detalhadas salvas'}</div>
+        <div style="margin-top:4px;color:var(--text-2);text-transform:uppercase;font-size:10px;letter-spacing:1px;">${p.position} &middot; ${p.games}J ${CURRENT_MATCH_TYPE === 'todos' ? 'no clube' : 'detalhadas salvas'}</div>
         <div style="font-weight:800;font-size:16px;margin-top:4px;">${p.name}</div>
       </div>
     `;
@@ -7014,14 +7014,14 @@ function renderConfrontos() {
     return '<div class="empty-state">Nenhuma partida salva para este tipo de partida</div>';
   }
   const scope = CURRENT_MATCH_TYPE === 'todos' ? 'todas as partidas salvas do clube' : 'todas as partidas salvas de ' + CURRENT_MATCH_TYPE;
-  let html = `<div class="section-title">Confrontos · ${scope}</div><div class="confronts-grid">`;
+  let html = `<div class="section-title">Confrontos &middot; ${scope}</div><div class="confronts-grid">`;
   matches.forEach(m => {
     const top = (m.players_ratings || [])[0];
     html += `
       <div class="confront-card" onclick="showMatchDetails('${m.match_id}')" style="cursor:pointer;">
         <div>
-          <div class="confront-name">${m.date} · VS ${String(m.opponent || '').toUpperCase()}</div>
-          <div style="font-size:11px;color:var(--text-2);margin-top:4px;">${m.match_type} · MOM ${m.mom || '-'} ${m.mom_rating ? '(' + m.mom_rating + ')' : ''}${top ? ' · Melhor Sofi: ' + top.name + ' ' + top.sofi_rating : ''}</div>
+          <div class="confront-name">${m.date} &middot; VS ${String(m.opponent || '').toUpperCase()}</div>
+          <div style="font-size:11px;color:var(--text-2);margin-top:4px;">${m.match_type} &middot; MOM ${m.mom || '-'} ${m.mom_rating ? '(' + m.mom_rating + ')' : ''}${top ? ' &middot; Melhor Sofi: ' + top.name + ' ' + top.sofi_rating : ''}</div>
         </div>
         <div class="confront-vs">
           <span class="vs-tag ${m.result.toLowerCase()}">${m.result}</span>
@@ -7248,7 +7248,7 @@ function setIdealFormation(value) {
   IDEAL_FORMATION = value;
   if (!isAdmin()) {
     document.querySelectorAll('.tab').forEach(el => {
-      if (['JOGADORES','COMPARAR','CONFRONTOS','CADASTRO','ADVERSÁRIOS'].includes((el.textContent || '').trim())) el.remove();
+      if (['JOGADORES','COMPARAR','CONFRONTOS','CADASTRO','ADVERS&Aacute;RIOS'].includes((el.textContent || '').trim())) el.remove();
     });
   }
   renderTab();
@@ -7374,7 +7374,7 @@ function playstyleSelectOptions(selected='') {
 function archetypeSelectOptions(selected='') {
   selected = normalizeArchetypeName(selected);
   return ['<option value="">Arquétipo</option>'].concat(
-    ARCHETYPE_CATALOG.map(a => `<option value="${a.code}" ${selected === a.code ? 'selected' : ''}>${archetypeIcon(a.code)} ${a.name} · ${a.group}</option>`)
+    ARCHETYPE_CATALOG.map(a => `<option value="${a.code}" ${selected === a.code ? 'selected' : ''}>${archetypeIcon(a.code)} ${a.name} &middot; ${a.group}</option>`)
   ).join('');
 }
 
@@ -7407,7 +7407,7 @@ async function deleteClubUser(userId, nome) {
 }
 
 async function toggleClubUserLogin(userId, enable, nome) {
-  const label = nome || 'este usu?rio';
+  const label = nome || 'este usu&aacute;rio';
   const msg = enable ? `Ativar o login de ${label}?` : `Desativar o login de ${label}?`;
   if (!confirm(msg)) return;
   try {
@@ -7433,7 +7433,7 @@ function renderClubUsersAdmin() {
     const active = !!u.is_active && (u.status || 'ativo') === 'ativo';
     return `
     <div class="profile-row profile-user-row">
-      <div><div class="profile-name">${escapeAttr(u.nome || '-')}</div><div class="profile-meta">Usuário/ID FIFA: ${escapeAttr(u.usuario || '-')}</div></div>
+      <div><div class="profile-name">${escapeAttr(u.nome || '-')}</div><div class="profile-meta">Usu&aacute;rio/ID FIFA: ${escapeAttr(u.usuario || '-')}</div></div>
       <div>${escapeAttr(u.clube || '')}</div>
       <div><span class="tag ${u.cargo === 'admin' ? 'liga' : 'amistoso'}">${escapeAttr(u.cargo || 'jogador')}</span></div>
       <div><span class="tag ${active ? 'liga' : (u.status === 'pendente' ? 'e' : 'd')}">${active ? 'ativo' : (u.status || 'inativo')}</span></div>
@@ -7442,8 +7442,8 @@ function renderClubUsersAdmin() {
     </div>`;
   }).join('');
   return `
-    <div class="section-title">Usuários cadastrados no clube</div>
-    <div style="color:var(--text-2);font-size:12px;margin-bottom:12px;line-height:1.5;">Aqui o admin vê todos os acessos cadastrados no clube. O ideal é o usuário ser igual ao ID/nome do FIFA/EA FC para o Meu Scout puxar automaticamente as estatísticas certas.</div>
+    <div class="section-title">Usu&aacute;rios cadastrados no clube</div>
+    <div style="color:var(--text-2);font-size:12px;margin-bottom:12px;line-height:1.5;">Aqui o admin vê todos os acessos cadastrados no clube. O ideal é o usuário ser igual ao ID/nome do FIFA/EA FC para o Meu Scout puxar automaticamente as estat&iacute;sticas certas.</div>
     <div class="profile-list">${rows || '<div class="empty-state" style="padding:30px 20px;">Nenhum usuário cadastrado encontrado.</div>'}</div>
   `;
 }
@@ -7485,7 +7485,7 @@ function renderCadastroJogadores() {
   return `
     <div class="section-title">Cadastro de Jogadores</div>
     <div style="color:var(--text-2);font-size:12px;margin-bottom:12px;line-height:1.5;">
-      O script sugere posição pela posição favorita da EA e pelas posições dos últimos jogos. Se errar, ajuste aqui uma vez e o Time Ideal passa a obedecer. As estatísticas continuam sempre só do clube pesquisado.
+      O script sugere posição pela posição favorita da EA e pelas posições dos últimos jogos. Se errar, ajuste aqui uma vez e o Time Ideal passa a obedecer. As estat&iacute;sticas continuam sempre só do clube pesquisado.
     </div>
     <div class="profile-list">${rowsHtml}</div>
     ${renderClubUsersAdmin()}
@@ -7690,11 +7690,11 @@ function runPlaystyleSimulator() {
   const txt = document.getElementById('sim-text')?.value || '';
   const build = suggestBuildRecipe('', txt);
   const mainHtml = build.main.map((p, i) => `<div class="build-card primary">
-    <div class="style-card-head">${styleIconHtml(playstyleIcon(p.code || p.name))}<div><div class="style-card-title">${i+1}. ${p.name}</div><div class="style-card-code">Principal/ouro · ${p.code || ''} · ${p.group}</div></div></div>
+    <div class="style-card-head">${styleIconHtml(playstyleIcon(p.code || p.name))}<div><div class="style-card-title">${i+1}. ${p.name}</div><div class="style-card-code">Principal/ouro &middot; ${p.code || ''} &middot; ${p.group}</div></div></div>
     <div class="build-card-desc">${p.desc}</div>
   </div>`).join('');
   const silverHtml = build.silver.map((p, i) => `<div class="build-card">
-    <div class="style-card-head">${styleIconHtml(playstyleIcon(p.code || p.name), true)}<div><div class="style-card-title">${i+1}. ${p.name}</div><div class="style-card-code">Complementar/prata · ${p.code || ''} · ${p.group}</div></div></div>
+    <div class="style-card-head">${styleIconHtml(playstyleIcon(p.code || p.name), true)}<div><div class="style-card-title">${i+1}. ${p.name}</div><div class="style-card-code">Complementar/prata &middot; ${p.code || ''} &middot; ${p.group}</div></div></div>
     <div class="build-card-desc">${p.desc}</div>
   </div>`).join('');
   const attrHtml = (build.attributes || []).map(a => `<tr>
@@ -7708,7 +7708,7 @@ function runPlaystyleSimulator() {
   document.getElementById('sim-result').innerHTML = `
     <div class="section-title" style="grid-column:1/-1;margin-top:8px;">Arquétipo recomendado</div>
     <div class="build-card primary" style="grid-column:1/-1;">
-      <div class="style-card-head">${styleIconHtml(archetypeIcon(build.archetype.code || build.archetype.name))}<div><div class="style-card-title">${build.archetype.name}</div><div class="style-card-code">${build.archetype.group} · função detectada: ${build.role}</div></div></div>
+      <div class="style-card-head">${styleIconHtml(archetypeIcon(build.archetype.code || build.archetype.name))}<div><div class="style-card-title">${build.archetype.name}</div><div class="style-card-code">${build.archetype.group} &middot; função detectada: ${build.role}</div></div></div>
       <div style="color:var(--text-2);font-size:13px;line-height:1.55;">${build.archetype.desc}</div>
       <div class="build-why">Por que: ${build.why}</div>
     </div>
@@ -7792,7 +7792,7 @@ function renderTimeIdeal() {
       <div><span class="tag liga">${slot}</span></div>
       <select onchange="setManualLineupPlayer('${slot}', this.value)">
         <option value="">Escolher jogador</option>
-        ${scopedPlayers().map(p => `<option value="${escapeAttr(p.name)}" ${selectedManualName(slot) === p.name ? 'selected' : ''}>${p.name} · ${p.position} · ${p.rating}</option>`).join('')}
+        ${scopedPlayers().map(p => `<option value="${escapeAttr(p.name)}" ${selectedManualName(slot) === p.name ? 'selected' : ''}>${p.name} &middot; ${p.position} &middot; ${p.rating}</option>`).join('')}
       </select>
     </div>
   `).join('');
@@ -7804,7 +7804,7 @@ function renderTimeIdeal() {
       <div>
         <div style="font-weight:800;">${p.name} <span style="color:var(--green);font-weight:800;">${p.rating}</span></div>
         <div style="color:var(--text-2);font-size:11px;line-height:1.4;">${p.role_description}</div>
-        <div style="color:var(--text-3);font-size:10px;margin-top:2px;">Origem: ${p.position} · encaixe: ${p.fit}</div><div style="margin-top:5px;">${profilePlaystyleBadges(p.name)}</div>
+        <div style="color:var(--text-3);font-size:10px;margin-top:2px;">Origem: ${p.position} &middot; encaixe: ${p.fit}</div><div style="margin-top:5px;">${profilePlaystyleBadges(p.name)}</div>
       </div>
       <div style="text-align:right;color:var(--text-2);font-size:11px;">score<br><strong style="color:var(--green);">${p.selection_score}</strong></div>
     </div>
@@ -7826,7 +7826,7 @@ function renderTimeIdeal() {
     ${IDEAL_MODE === 'manual' ? `<div class="section-title">Escalação manual do treinador</div><div class="profile-list" style="margin-bottom:18px;">${manualControls}</div>` : ''}
 
     <div id="idealExportArea" class="formation-wrapper">
-      <div class="formation-title">${team.formation_name} · ${players.length}/11 jogadores</div>
+      <div class="formation-title">${team.formation_name} &middot; ${players.length}/11 jogadores</div>
       <div class="field">
         <div class="field-line"></div>
         <div class="field-circle"></div>
@@ -7872,12 +7872,12 @@ function renderOpponentScouts() {
   return OPPONENT_SCOUTS.map(o => {
     if (!o.found) return `<div class="opponent-card"><div class="opponent-name">${escapeAttr(o.name || 'Clube')}</div><div class="empty-text" style="margin-top:6px;">${escapeAttr(o.error || 'Não encontrado')}</div></div>`;
     const s = o.stats || {};
-    const top = (o.top_players || []).slice(0, 5).map((p, i) => `${i+1}. ${escapeAttr(p.name)} (${escapeAttr(p.position || '-')}) · nota ${escapeAttr(p.rating)} · ${escapeAttr(p.goals || 0)}G/${escapeAttr(p.assists || 0)}A`).join('<br>') || 'Sem jogadores retornados pela EA';
+    const top = (o.top_players || []).slice(0, 5).map((p, i) => `${i+1}. ${escapeAttr(p.name)} (${escapeAttr(p.position || '-')}) &middot; nota ${escapeAttr(p.rating)} &middot; ${escapeAttr(p.goals || 0)}G/${escapeAttr(p.assists || 0)}A`).join('<br>') || 'Sem jogadores retornados pela EA';
     const strengths = (o.strengths || []).map(x => `<li>${escapeAttr(x)}</li>`).join('');
     const weaknesses = (o.weaknesses || []).map(x => `<li>${escapeAttr(x)}</li>`).join('');
     return `
       <div class="opponent-card">
-        <div class="opponent-head"><div><div class="opponent-name">${escapeAttr(o.name)}</div><div class="opponent-style"><span class="scout-pill">${escapeAttr(o.style)}</span> · ID ${escapeAttr(o.club_id)} · ${escapeAttr(o.platform)}</div></div><div class="opponent-grade"><div class="rank">${escapeAttr(o.rank)}</div><div class="score">${escapeAttr(o.grade)}/100</div></div></div>
+        <div class="opponent-head"><div><div class="opponent-name">${escapeAttr(o.name)}</div><div class="opponent-style"><span class="scout-pill">${escapeAttr(o.style)}</span> &middot; ID ${escapeAttr(o.club_id)} &middot; ${escapeAttr(o.platform)}</div></div><div class="opponent-grade"><div class="rank">${escapeAttr(o.rank)}</div><div class="score">${escapeAttr(o.grade)}/100</div></div></div>
         <div class="opponent-table-wrap"><table class="opponent-table"><thead><tr><th>Jogos</th><th>V/E/D</th><th>Win</th><th>Gols</th><th>G/J</th><th>Sofre/J</th><th>Saldo</th><th>Top 5 jogadores</th></tr></thead><tbody><tr><td data-label="Jogos">${escapeAttr(s.matches || 0)}</td><td data-label="V/E/D">${escapeAttr(s.wins || 0)} / ${escapeAttr(s.draws || 0)} / ${escapeAttr(s.losses || 0)}</td><td data-label="Win">${escapeAttr(s.win_rate || 0)}%</td><td data-label="Gols">${escapeAttr(s.goals_for || 0)}-${escapeAttr(s.goals_against || 0)}</td><td data-label="G/J">${escapeAttr(s.goals_per_match || 0)}</td><td data-label="Sofre/J">${escapeAttr(s.goals_against_per_match || 0)}</td><td data-label="Saldo">${escapeAttr(s.goal_diff || 0)}</td><td data-label="Top 5 jogadores">${top}</td></tr></tbody></table></div>
         <div class="scout-cols"><div class="scout-box"><h4>Pontos fortes</h4><ul>${strengths}</ul></div><div class="scout-box"><h4>Pontos fracos</h4><ul>${weaknesses}</ul></div><div class="scout-box"><h4>Estratégia sugerida</h4><p>${escapeAttr(o.strategy || '')}</p></div></div>
       </div>`;
@@ -7947,7 +7947,7 @@ function renderAgendaList() {
         </div>
         <div class="agenda-info">
           <div class="opp">VS ${a.opponent}</div>
-          <div class="meta">${hora} · <span class="tag ${a.match_type}">${a.match_type}</span> ${a.location ? '· ' + a.location : ''}</div>
+          <div class="meta">${hora} &middot; <span class="tag ${a.match_type}">${a.match_type}</span> ${a.location ? '&middot; ' + a.location : ''}</div>
           ${a.notes ? '<div class="meta" style="margin-top:4px;">✍️ ' + a.notes + '</div>' : ''}
         </div>
         <button class="btn-mini" onclick="editAgenda(${a.id})">Editar</button>
@@ -7986,7 +7986,7 @@ function cancelAgendaEdit() {
   AGENDA_EDIT_ID = null;
   if (!isAdmin()) {
     document.querySelectorAll('.tab').forEach(el => {
-      if (['JOGADORES','COMPARAR','CONFRONTOS','CADASTRO','ADVERSÁRIOS'].includes((el.textContent || '').trim())) el.remove();
+      if (['JOGADORES','COMPARAR','CONFRONTOS','CADASTRO','ADVERS&Aacute;RIOS'].includes((el.textContent || '').trim())) el.remove();
     });
   }
   renderTab();
@@ -8051,7 +8051,7 @@ function showMatchDetails(matchId) {
   let html = `
     <h2>VS ${String(m.opponent || '').toUpperCase()}</h2>
     <p><strong>Resultado:</strong> ${m.result === 'V' ? 'Vitória' : m.result === 'E' ? 'Empate' : 'Derrota'} (${m.score})</p>
-    <p><strong>Data:</strong> ${m.date} · <strong>Tipo:</strong> ${m.match_type} · <strong>ID:</strong> ${m.match_id}</p>
+    <p><strong>Data:</strong> ${m.date} &middot; <strong>Tipo:</strong> ${m.match_type} &middot; <strong>ID:</strong> ${m.match_id}</p>
     <div class="analytics-cards" style="margin:14px 0;">
       <div class="analytics-card"><div class="v">${m.goals_for}</div><div class="l">Gols Pró</div></div>
       <div class="analytics-card"><div class="v">${m.goals_against}</div><div class="l">Gols Contra</div></div>
@@ -8059,7 +8059,7 @@ function showMatchDetails(matchId) {
       <div class="analytics-card"><div class="v">${m.mom_rating || '-'}</div><div class="l">Nota MOM</div></div>
     </div>
     <h3>Resumo</h3>
-    <p><strong>MOM:</strong> ${m.mom || 'N/A'}${m.mom_rating ? ' · ' + m.mom_rating : ''}</p>
+    <p><strong>MOM:</strong> ${m.mom || 'N/A'}${m.mom_rating ? ' &middot; ' + m.mom_rating : ''}</p>
     <h3>Pontos positivos</h3><ul>${positives.map(x => `<li>${x}</li>`).join('')}</ul>
     <h3>Pontos negativos</h3><ul>${negatives.map(x => `<li>${x}</li>`).join('')}</ul>
     <h3>Notas dos jogadores</h3>
@@ -8133,7 +8133,7 @@ function renderHeatmap(heatmap) {
 
 function matchLine(m) {
   if (!m) return '<div class="mini-insight"><div class="v">Sem dados</div></div>';
-  return `<div class="mini-insight"><div class="k">${m.date} · ${m.match_type}</div><div class="v">VS ${m.opponent} · ${m.result} ${m.score} · Sofi ${m.sofi_rating} · EA ${m.rating}</div></div>`;
+  return `<div class="mini-insight"><div class="k">${m.date} &middot; ${m.match_type}</div><div class="v">VS ${m.opponent} &middot; ${m.result} ${m.score} &middot; Sofi ${m.sofi_rating} &middot; EA ${m.rating}</div></div>`;
 }
 
 function plainScoutSummary(text) {
@@ -8164,8 +8164,8 @@ function renderPlayerDetailHTML(data) {
   const detailedGames = Number(data.detail_games ?? data.games_with_history ?? h.length ?? 0) || h.length || 0;
   const clubTotalGames = Number(data.club_total_games ?? p.ea_global_games ?? p.games ?? detailedGames) || detailedGames;
   const gamesLine = data.uses_member_totals
-    ? `${clubTotalGames} jogos no clube (totais EA) · ${detailedGames} partidas detalhadas salvas · ranking ${rank.rating_rank_label || '-'} · tendência ${trend.status || '-'}`
-    : `${detailedGames} partidas detalhadas salvas de ${CURRENT_MATCH_TYPE} · ranking ${rank.rating_rank_label || '-'} · tendência ${trend.status || '-'}`;
+    ? `${clubTotalGames} jogos no clube (totais EA) &middot; ${detailedGames} partidas detalhadas salvas &middot; ranking ${rank.rating_rank_label || '-'} &middot; tendência ${trend.status || '-'}`
+    : `${detailedGames} partidas detalhadas salvas de ${CURRENT_MATCH_TYPE} &middot; ranking ${rank.rating_rank_label || '-'} &middot; tendência ${trend.status || '-'}`;
   return `
     <div class="player-detail">
       <div class="analytics-hero">
@@ -8221,10 +8221,10 @@ function renderPlayerDetailHTML(data) {
       <div class="mini-insights" style="grid-template-columns:repeat(2,1fr);display:grid;">
         ${matchLine(data.best_match)}
         ${matchLine(data.worst_match)}
-        <div class="mini-insight"><div class="k">Contra quem mais performou</div><div class="v">${data.best_opponent ? `${data.best_opponent.opponent} · ${data.best_opponent.avg_sofi}` : '-'}</div></div>
-        <div class="mini-insight"><div class="k">Contra quem menos performou</div><div class="v">${data.worst_opponent ? `${data.worst_opponent.opponent} · ${data.worst_opponent.avg_sofi}` : '-'}</div></div>
-        <div class="mini-insight"><div class="k">Comparação elenco</div><div class="v">Rating vs média: ${cmp.player_vs_team_rating || 0} · G/J vs média: ${cmp.player_vs_team_goals_per_game || 0}</div></div>
-        <div class="mini-insight"><div class="k">Avançadas</div><div class="v">Ofensivo ${adv.offensive_impact || 0} · Defensivo ${adv.defensive_impact || 0} · Risco ${adv.risk || 0}</div></div>
+        <div class="mini-insight"><div class="k">Contra quem mais performou</div><div class="v">${data.best_opponent ? `${data.best_opponent.opponent} &middot; ${data.best_opponent.avg_sofi}` : '-'}</div></div>
+        <div class="mini-insight"><div class="k">Contra quem menos performou</div><div class="v">${data.worst_opponent ? `${data.worst_opponent.opponent} &middot; ${data.worst_opponent.avg_sofi}` : '-'}</div></div>
+        <div class="mini-insight"><div class="k">Comparação elenco</div><div class="v">Rating vs média: ${cmp.player_vs_team_rating || 0} &middot; G/J vs média: ${cmp.player_vs_team_goals_per_game || 0}</div></div>
+        <div class="mini-insight"><div class="k">Avançadas</div><div class="v">Ofensivo ${adv.offensive_impact || 0} &middot; Defensivo ${adv.defensive_impact || 0} &middot; Risco ${adv.risk || 0}</div></div>
       </div>
 
       <div class="section-title">Relatório Scout Offline</div>
@@ -8292,7 +8292,7 @@ function generateTeamAnalysisClient(team) {
     lines || '- Nenhum jogador disponível no filtro atual.',
     '',
     '### Leitura do elenco',
-    `A escalação acima usa exatamente o time que está no campinho agora, com estatísticas somente do clube/filtro atual e respeitando posições manuais salvas no Cadastro. Média EA do XI: **${avg}**.`,
+    `A escalação acima usa exatamente o time que está no campinho agora, com estat&iacute;sticas somente do clube/filtro atual e respeitando posições manuais salvas no Cadastro. Média EA do XI: **${avg}**.`,
     '',
     '### Distribuição',
     `- Goleiros: ${byRole.GK || 0}`,
