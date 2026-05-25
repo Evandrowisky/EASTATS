@@ -1272,6 +1272,18 @@ def _get_app_user_by_usuario(usuario: str, club_id: Optional[str] = None):
         raise HTTPException(500, "Erro ao consultar usuario")
 
 
+
+def _get_app_users_by_usuario(usuario: str):
+    sb = get_supabase()
+    if not sb:
+        raise HTTPException(503, "Supabase nao configurado para autenticacao")
+    usuario_norm = str(usuario or "").strip().lower()
+    try:
+        resp = sb.table("app_users").select("*").eq("usuario", usuario_norm).execute()
+        return getattr(resp, "data", None) or []
+    except Exception as e:
+        print(f"[AUTH] Erro buscando usuarios por login: {type(e).__name__}: {e}")
+        raise HTTPException(500, "Erro ao consultar usuario")
 def _get_app_user_by_id(user_id: str):
     sb = get_supabase()
     if not sb:
@@ -1887,10 +1899,38 @@ def auth_login(payload: AuthLoginPayload):
     if not usuario or not senha or not clube_informado:
         raise HTTPException(400, "Usuario, senha e nome do clube sao obrigatorios")
 
-    resolved = resolve_club_for_auth(clube_informado)
-    row = _get_app_user_by_usuario(usuario, resolved["club_id"])
-    if not row or not verify_password(senha, row.get("password_hash")):
+    rows = _get_app_users_by_usuario(usuario)
+    if not rows:
         raise HTTPException(401, "Usuario, clube ou senha invalidos")
+
+    resolved = None
+    try:
+        resolved = resolve_club_for_auth(clube_informado)
+    except HTTPException as e:
+        print(f"[AUTH] Aviso: clube nao resolvido no login ({clube_informado}): {e.detail}")
+    except Exception as e:
+        print(f"[AUTH] Aviso: erro ao resolver clube no login: {type(e).__name__}: {e}")
+
+    password_matches = [r for r in rows if verify_password(senha, r.get("password_hash"))]
+    if not password_matches:
+        raise HTTPException(401, "Usuario, clube ou senha invalidos")
+
+    club_id_resolved = str((resolved or {}).get("club_id") or "")
+    row = None
+    for r in password_matches:
+        if club_id_resolved and str(r.get("club_id") or "") == club_id_resolved:
+            row = r
+            break
+    if row is None:
+        for r in password_matches:
+            if _club_name_matches(clube_informado, r.get("clube") or ""):
+                row = r
+                break
+    if row is None and len(password_matches) == 1:
+        row = password_matches[0]
+    if row is None:
+        raise HTTPException(401, "Usuario, clube ou senha invalidos")
+
     if not bool(row.get("is_active", True)):
         raise HTTPException(403, "Conta inativa. Aguarde o admin liberar seu login.")
     status_value = row.get("status") or "ativo"
@@ -1911,7 +1951,6 @@ def auth_login(payload: AuthLoginPayload):
         "cargo": user["cargo"],
     })
     return {"success": True, "access_token": token, "token_type": "bearer", "user": user}
-
 
 @app.post("/api/auth/reset")
 def auth_reset(payload: AuthResetPayload):
@@ -6063,6 +6102,29 @@ html, body { max-width: 100%; }
   .field { height: min(680px, 150vw); }
 }
 
+
+.owner-user-row {
+  grid-template-columns: minmax(190px,1.3fr) minmax(160px,1fr) 130px 140px auto auto;
+}
+.owner-user-row select,
+.owner-user-row button {
+  min-height: 34px;
+}
+@media (max-width: 760px) {
+  .owner-user-row {
+    grid-template-columns: 1fr !important;
+    gap: 8px;
+  }
+  .owner-user-row select,
+  .owner-user-row button {
+    width: 100%;
+    min-height: 42px;
+  }
+  .owner-user-row .profile-name,
+  .owner-user-row .profile-meta {
+    overflow-wrap: anywhere;
+  }
+}
 </style>
 </head>
 <body>
@@ -8095,7 +8157,7 @@ function renderOwnerUsersAdmin() {
     const self = u.id === AUTH_USER?.id;
     const active = !!u.is_active && (u.status || 'ativo') === 'ativo';
     return `
-      <div class="profile-row profile-user-row" style="grid-template-columns:minmax(190px,1.3fr) minmax(160px,1fr) 130px 140px auto auto;">
+      <div class="profile-row profile-user-row owner-user-row">
         <div>
           <div class="profile-name">${escapeAttr(u.nome || '-')}</div>
           <div class="profile-meta">Usuário/ID FIFA: ${escapeAttr(u.usuario || '-')}</div>
@@ -9173,6 +9235,8 @@ if __name__ == "__main__":
     print("="*60 + "\n")
     
     uvicorn.run(app, host="0.0.0.0", port=8000)
+
+
 
 
 
