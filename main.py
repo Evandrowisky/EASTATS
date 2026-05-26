@@ -1,4 +1,4 @@
-﻿# -*- coding: utf-8 -*-
+# -*- coding: utf-8 -*-
 """
 Scout Clubs Pro v2 - Análise Profissional EA FC
 Inspirado no app Scout Clubs original
@@ -6494,7 +6494,7 @@ function filteredMatches() {
   }
   // Já vem ordenado por timestamp desc
   if (CURRENT_PERIOD === 'todos') return all;
-  const ultMatch = String(CURRENT_PERIOD || '').match(/^ult(\\d+)$/);
+  const ultMatch = String(CURRENT_PERIOD || '').match(/^ult(\d+)$/);
   if (ultMatch) return all.slice(0, Number(ultMatch[1] || 0));
   const now = Math.floor(Date.now() / 1000);
   if (CURRENT_PERIOD === 'semana') {
@@ -6524,7 +6524,7 @@ function setPeriod(p, ev) {
       if (['JOGADORES','COMPARAR','CONFRONTOS','CADASTRO','CONFIG','USUÁRIOS','USUARIOS','ADVERSÁRIOS','ADVERSARIOS','ADVERS&Aacute;RIOS'].includes((el.textContent || '').trim())) el.remove();
     });
   }
-  renderTab();
+  render();
 }
 
 
@@ -9285,6 +9285,7 @@ if __name__ == "__main__":
     print("="*60 + "\n")
     
     uvicorn.run(app, host="0.0.0.0", port=8000)
+
 
 
 
