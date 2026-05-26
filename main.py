@@ -4366,6 +4366,7 @@ body {
   transition: all 0.2s;
 }
 
+.period-select { appearance:auto; outline:none; font-family:inherit; text-align:center; }
 .period.active {
   border-color: var(--green);
   background: var(--green-dim);
@@ -6454,8 +6455,8 @@ function filteredMatches() {
   }
   // Já vem ordenado por timestamp desc
   if (CURRENT_PERIOD === 'todos') return all;
-  if (CURRENT_PERIOD === 'ult5') return all.slice(0, 5);
-  if (CURRENT_PERIOD === 'ult10') return all.slice(0, 10);
+  const ultMatch = String(CURRENT_PERIOD || '').match(/^ult(\\d+)$/);
+  if (ultMatch) return all.slice(0, Number(ultMatch[1] || 0));
   const now = Math.floor(Date.now() / 1000);
   if (CURRENT_PERIOD === 'semana') {
     const cutoff = now - 7 * 86400;
@@ -9238,6 +9239,7 @@ if __name__ == "__main__":
     print("="*60 + "\n")
     
     uvicorn.run(app, host="0.0.0.0", port=8000)
+
 
 
 
