@@ -5673,6 +5673,45 @@ body {
   .profile-row .btn-mini { width: 100%; }
 }
 
+
+.period-dropdown { position: relative; display: inline-flex; }
+.period-menu-btn { min-width: 150px; }
+.period-menu {
+  display: none;
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  z-index: 50;
+  min-width: 180px;
+  background: #050505;
+  border: 1px solid var(--green);
+  border-radius: 10px;
+  padding: 8px;
+  box-shadow: 0 12px 28px rgba(0,0,0,.55), 0 0 22px var(--green-glow);
+}
+.period-dropdown:hover .period-menu,
+.period-dropdown:focus-within .period-menu { display: grid; gap: 6px; }
+.period-menu-item {
+  background: transparent;
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  text-align: left;
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+.period-menu-item:hover,
+.period-menu-item.active { border-color: var(--green); color: var(--green); background: var(--green-dim); }
+@media (max-width: 640px) {
+  .period-dropdown { width: 100%; }
+  .period-menu-btn { width: 100%; }
+  .period-menu { width: 100%; }
+}
 /* RESPONSIVE */
 @media (max-width: 768px) {
   .stats-grid { grid-template-columns: repeat(2, 1fr); }
@@ -6922,7 +6961,14 @@ function render() {
     
     <div class="period-filter">
       <div class="period ${CURRENT_PERIOD==='todos'?'active':''}" onclick="setPeriod('todos', event)">TODOS</div>
-      <div class="period ${CURRENT_PERIOD==='ult5'?'active':''}" onclick="setPeriod('ult5', event)">ÚLT. 5</div>
+      <div class="period-dropdown">
+        <button class="period period-menu-btn ${String(CURRENT_PERIOD).startsWith('ult')?'active':''}" type="button">
+          ${String(CURRENT_PERIOD).startsWith('ult') ? 'ÚLT. ' + String(CURRENT_PERIOD).replace('ult','') : 'ÚLTIMOS JOGOS'} ▾
+        </button>
+        <div class="period-menu">
+          ${[1,2,3,4,5,6,7].map(n => `<button type="button" class="period-menu-item ${CURRENT_PERIOD==='ult'+n?'active':''}" onclick="setPeriod('ult${n}', event)">Últimos ${n} jogo${n>1?'s':''}</button>`).join('')}
+        </div>
+      </div>
       <div class="period ${CURRENT_PERIOD==='ult10'?'active':''}" onclick="setPeriod('ult10', event)">ÚLT. 10</div>
       <div class="period ${CURRENT_PERIOD==='semana'?'active':''}" onclick="setPeriod('semana', event)">SEMANA</div>
       <div class="period ${CURRENT_PERIOD==='mes'?'active':''}" onclick="setPeriod('mes', event)">MÊS</div>
@@ -9239,6 +9285,7 @@ if __name__ == "__main__":
     print("="*60 + "\n")
     
     uvicorn.run(app, host="0.0.0.0", port=8000)
+
 
 
 
