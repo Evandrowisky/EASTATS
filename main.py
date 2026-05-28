@@ -1,4 +1,4 @@
-﻿# -*- coding: utf-8 -*-
+# -*- coding: utf-8 -*-
 """
 Scout Clubs Pro v2 - Análise Profissional EA FC
 Inspirado no app Scout Clubs original
@@ -6232,6 +6232,7 @@ let DATA = null;
 let CURRENT_TAB = 'visao';
 let CURRENT_PERIOD = 'todos';
 let CURRENT_MATCH_TYPE = 'todos';
+let CURRENT_MATCH_STATUS = 'validas';
 let PLAYER_PROFILES = {};
 let COMPARE_A = null;
 let COMPARE_B = null;
@@ -6507,6 +6508,22 @@ const ARCHETYPE_CATALOG = [
   {name:'Muralha', code:'Shot Stopper', group:'Goleiros', desc:'Goleiro de reflexo: foco em defesa de chutes, alcance e segurança na meta.'},
   {name:'GL-Linha', code:'Sweeper Keeper', group:'Goleiros', desc:'Goleiro-líbero: sai do gol, cobre profundidade e inicia jogadas.'},
 ];
+function isQuitMatch(m) {
+  const players = (m && m.players_ratings) ? m.players_ratings : [];
+  if (!players.length) return false;
+  const rated = players.filter(p => Number(p.rating || 0) > 0);
+  if (rated.length < 5) return false;
+  const low = rated.filter(p => Number(p.rating || 0) < 6).length;
+  return (low / rated.length) >= 0.6;
+}
+
+function filterByMatchStatus(matches) {
+  const all = matches || [];
+  if (CURRENT_MATCH_STATUS === 'quitadas') return all.filter(isQuitMatch);
+  if (CURRENT_MATCH_STATUS === 'todas') return all;
+  return all.filter(m => !isQuitMatch(m));
+}
+
 function filteredMatches() {
   let all = (DATA && DATA.matches) ? [...DATA.matches] : [];
   if (CURRENT_MATCH_TYPE !== 'todos') {
@@ -6533,7 +6550,7 @@ function playerStatMatches() {
   if (CURRENT_MATCH_TYPE !== 'todos') {
     all = all.filter(m => String(m.match_type || '').toLowerCase() === CURRENT_MATCH_TYPE);
   }
-  return all;
+  return filterByMatchStatus(all);
 }
 function setPeriod(p, ev) {
   CURRENT_PERIOD = p;
@@ -6558,6 +6575,13 @@ function setMatchType(t, ev) {
     });
   }
   renderTab();
+}
+
+function setMatchStatus(s, ev) {
+  CURRENT_MATCH_STATUS = s;
+  document.querySelectorAll('.matchstatus').forEach(el => el.classList.remove('active'));
+  if (ev && ev.target) ev.target.classList.add('active');
+  render();
 }
 
 function computePlayersForMatches(matches) {
@@ -6999,6 +7023,11 @@ function render() {
       <div class="period matchtype ${CURRENT_MATCH_TYPE==='liga'?'active':''}" onclick="setMatchType('liga', event)">LIGA</div>
       <div class="period matchtype ${CURRENT_MATCH_TYPE==='copa'?'active':''}" onclick="setMatchType('copa', event)">COPA</div>
       <div class="period matchtype ${CURRENT_MATCH_TYPE==='amistoso'?'active':''}" onclick="setMatchType('amistoso', event)">AMISTOSO</div>
+    </div>
+    <div class="period-filter" style="margin-top:-10px;">
+      <div class="period matchstatus ${CURRENT_MATCH_STATUS==='validas'?'active':''}" onclick="setMatchStatus('validas', event)">V?LIDAS</div>
+      <div class="period matchstatus ${CURRENT_MATCH_STATUS==='quitadas'?'active':''}" onclick="setMatchStatus('quitadas', event)">QUITADAS</div>
+      <div class="period matchstatus ${CURRENT_MATCH_STATUS==='todas'?'active':''}" onclick="setMatchStatus('todas', event)">TODAS</div>
     </div>
 
     
@@ -8854,6 +8883,7 @@ function showMatchDetails(matchId) {
 
   let html = `
     <h2>VS ${String(m.opponent || '').toUpperCase()}</h2>
+    ${isQuitMatch(m) ? '<p><strong>Status:</strong> Quitada automaticamente (maioria com nota EA abaixo de 6)</p>' : '<p><strong>Status:</strong> V?lida</p>'}
     <p><strong>Resultado:</strong> ${m.result === 'V' ? 'Vitória' : m.result === 'E' ? 'Empate' : 'Derrota'} (${m.score})</p>
     <p><strong>Data:</strong> ${m.date} &middot; <strong>Tipo:</strong> ${m.match_type} &middot; <strong>ID:</strong> ${m.match_id}</p>
     <div class="analytics-cards" style="margin:14px 0;">
