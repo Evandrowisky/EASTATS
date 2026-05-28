@@ -6509,6 +6509,7 @@ const ARCHETYPE_CATALOG = [
   {name:'GL-Linha', code:'Sweeper Keeper', group:'Goleiros', desc:'Goleiro-líbero: sai do gol, cobre profundidade e inicia jogadas.'},
 ];
 function isQuitMatch(m) {
+  if (String((m && m.match_type) || '').toLowerCase() !== 'amistoso') return false;
   const players = (m && m.players_ratings) ? m.players_ratings : [];
   if (!players.length) return false;
   const rated = players
@@ -9356,6 +9357,7 @@ if __name__ == "__main__":
     print("="*60 + "\n")
     
     uvicorn.run(app, host="0.0.0.0", port=8000)
+
 
 
 
