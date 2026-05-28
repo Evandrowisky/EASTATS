@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-
+﻿# -*- coding: utf-8 -*-
 """
 Scout Clubs Pro v2 - Análise Profissional EA FC
 Inspirado no app Scout Clubs original
@@ -5015,6 +5015,26 @@ body {
 @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
 @keyframes slideUp { from { transform: translateY(20px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
 
+
+.match-player-cards { display:none; }
+.match-table-wrap { width:100%; overflow-x:auto; }
+@media (max-width: 640px) {
+  .modal-bg.active { align-items:flex-start; padding:12px 8px; }
+  .modal-box { width:calc(100vw - 16px); max-width:calc(100vw - 16px); padding:16px; max-height:88vh; }
+  .modal-content h2 { font-size:18px; line-height:1.25; overflow-wrap:anywhere; }
+  .modal-content p { font-size:14px; overflow-wrap:anywhere; }
+  .modal-content .analytics-cards { grid-template-columns:1fr 1fr; }
+  .match-player-cards { display:grid; gap:10px; }
+  .match-table-wrap { display:none; }
+  .match-player-card { background:rgba(0,255,115,.055); border:1px solid var(--border); border-radius:10px; padding:12px; }
+  .mp-top { display:grid; grid-template-columns:28px 1fr auto; gap:8px; align-items:center; }
+  .mp-rank { width:24px; height:24px; display:inline-flex; align-items:center; justify-content:center; border-radius:6px; background:var(--green-dim); color:var(--green); font-weight:800; }
+  .mp-top strong { overflow-wrap:anywhere; color:var(--text); }
+  .mp-meta { color:var(--text-2); font-size:12px; margin:4px 0 10px; }
+  .mp-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:6px; font-size:11px; color:var(--text-2); }
+  .mp-grid span { background:rgba(0,0,0,.25); border:1px solid rgba(255,255,255,.06); border-radius:6px; padding:6px; text-align:center; }
+  .mp-grid b { display:block; color:var(--green); font-size:13px; margin-top:2px; }
+}
 /* SYNC PROGRESS */
 .sync-progress {
   display: none;
@@ -8847,7 +8867,18 @@ function showMatchDetails(matchId) {
     <h3>Pontos positivos</h3><ul>${positives.map(x => `<li>${x}</li>`).join('')}</ul>
     <h3>Pontos negativos</h3><ul>${negatives.map(x => `<li>${x}</li>`).join('')}</ul>
     <h3>Notas dos jogadores</h3>
-    <table class="history-table">
+    <div class="match-player-cards">
+      ${players.map((p, idx) => `<div class="match-player-card">
+        <div class="mp-top"><span class="mp-rank">${idx + 1}</span><strong>${p.name}</strong><span class="sofi">${p.sofi_rating ?? p.rating}</span></div>
+        <div class="mp-meta">${p.pos || '-'} &middot; EA ${p.rating ?? '-'}${p.mom ? ' &middot; MOM' : ''}</div>
+        <div class="mp-grid">
+          <span>G <b>${p.goals || 0}</b></span><span>A <b>${p.assists || 0}</b></span><span>Chu <b>${p.shots || 0}</b></span>
+          <span>Pass <b>${p.pass_pct || 0}%</b></span><span>Des <b>${p.tackles_made || 0}</b></span><span>D% <b>${p.tackle_pct || 0}%</b></span>
+        </div>
+      </div>`).join('')}
+    </div>
+    <div class="match-table-wrap">
+    <table class="history-table match-history-table">
       <thead><tr><th>#</th><th>Jogador</th><th>Pos</th><th>Sofi</th><th>EA</th><th>G</th><th>A</th><th>Chu</th><th>Pass%</th><th>Des%</th><th>Des</th><th>Def</th><th>SG</th><th>Verm</th><th>MOM</th></tr></thead>
       <tbody>
         ${players.map((p, idx) => `<tr>
@@ -8857,7 +8888,7 @@ function showMatchDetails(matchId) {
         </tr>`).join('')}
       </tbody>
     </table>
-  `;
+  </div>`;
   document.getElementById('modalContent').innerHTML = html;
   document.getElementById('modal').classList.add('active');
 }
@@ -9285,6 +9316,7 @@ if __name__ == "__main__":
     print("="*60 + "\n")
     
     uvicorn.run(app, host="0.0.0.0", port=8000)
+
 
 
 
