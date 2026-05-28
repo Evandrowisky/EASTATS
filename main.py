@@ -6232,7 +6232,7 @@ let DATA = null;
 let CURRENT_TAB = 'visao';
 let CURRENT_PERIOD = 'todos';
 let CURRENT_MATCH_TYPE = 'todos';
-let CURRENT_MATCH_STATUS = 'validas';
+let CURRENT_MATCH_STATUS = 'todas';
 let PLAYER_PROFILES = {};
 let COMPARE_A = null;
 let COMPARE_B = null;
@@ -6511,10 +6511,19 @@ const ARCHETYPE_CATALOG = [
 function isQuitMatch(m) {
   const players = (m && m.players_ratings) ? m.players_ratings : [];
   if (!players.length) return false;
-  const rated = players.filter(p => Number(p.rating || 0) > 0);
-  if (rated.length < 5) return false;
-  const low = rated.filter(p => Number(p.rating || 0) < 6).length;
-  return (low / rated.length) >= 0.6;
+  const rated = players
+    .map(p => Number(p.rating || 0))
+    .filter(v => Number.isFinite(v) && v > 0);
+  if (rated.length < 3) return false;
+  const avg = rated.reduce((a, b) => a + b, 0) / rated.length;
+  const belowSix = rated.filter(v => v < 6).length;
+  const lowOrFlat = rated.filter(v => v <= 6.1).length;
+  const mostlyLow = (belowSix / rated.length) >= 0.55 || (lowOrFlat / rated.length) >= 0.75;
+  const almostAllFlat = avg <= 6.15 && lowOrFlat >= Math.max(3, Math.ceil(rated.length * 0.7));
+  const lowActivity = players.reduce((sum, p) => {
+    return sum + Number(p.goals || 0) + Number(p.assists || 0) + Number(p.shots || 0) + Number(p.tackles_made || 0) + Number(p.saves || 0);
+  }, 0) <= Math.max(2, rated.length * 0.35);
+  return mostlyLow || almostAllFlat || (avg <= 6.05 && lowActivity);
 }
 
 function filterByMatchStatus(matches) {
@@ -9347,6 +9356,7 @@ if __name__ == "__main__":
     print("="*60 + "\n")
     
     uvicorn.run(app, host="0.0.0.0", port=8000)
+
 
 
 
