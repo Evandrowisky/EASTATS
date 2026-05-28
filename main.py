@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-
+﻿# -*- coding: utf-8 -*-
 """
 Scout Clubs Pro v2 - Análise Profissional EA FC
 Inspirado no app Scout Clubs original
@@ -6529,7 +6529,8 @@ function filteredMatches() {
   if (CURRENT_MATCH_TYPE !== 'todos') {
     all = all.filter(m => String(m.match_type || '').toLowerCase() === CURRENT_MATCH_TYPE);
   }
-  // Já vem ordenado por timestamp desc
+  all = filterByMatchStatus(all);
+  // Ja vem ordenado por timestamp desc
   if (CURRENT_PERIOD === 'todos') return all;
   const ultMatch = String(CURRENT_PERIOD || '').match(/^ult(\d+)$/);
   if (ultMatch) return all.slice(0, Number(ultMatch[1] || 0));
@@ -7025,7 +7026,7 @@ function render() {
       <div class="period matchtype ${CURRENT_MATCH_TYPE==='amistoso'?'active':''}" onclick="setMatchType('amistoso', event)">AMISTOSO</div>
     </div>
     <div class="period-filter" style="margin-top:-10px;">
-      <div class="period matchstatus ${CURRENT_MATCH_STATUS==='validas'?'active':''}" onclick="setMatchStatus('validas', event)">V?LIDAS</div>
+      <div class="period matchstatus ${CURRENT_MATCH_STATUS==='validas'?'active':''}" onclick="setMatchStatus('validas', event)">V&Aacute;LIDAS</div>
       <div class="period matchstatus ${CURRENT_MATCH_STATUS==='quitadas'?'active':''}" onclick="setMatchStatus('quitadas', event)">QUITADAS</div>
       <div class="period matchstatus ${CURRENT_MATCH_STATUS==='todas'?'active':''}" onclick="setMatchStatus('todas', event)">TODAS</div>
     </div>
@@ -8883,7 +8884,7 @@ function showMatchDetails(matchId) {
 
   let html = `
     <h2>VS ${String(m.opponent || '').toUpperCase()}</h2>
-    ${isQuitMatch(m) ? '<p><strong>Status:</strong> Quitada automaticamente (maioria com nota EA abaixo de 6)</p>' : '<p><strong>Status:</strong> V?lida</p>'}
+    ${isQuitMatch(m) ? '<p><strong>Status:</strong> Quitada automaticamente (maioria com nota EA abaixo de 6)</p>' : '<p><strong>Status:</strong> V&aacute;lida</p>'}
     <p><strong>Resultado:</strong> ${m.result === 'V' ? 'Vitória' : m.result === 'E' ? 'Empate' : 'Derrota'} (${m.score})</p>
     <p><strong>Data:</strong> ${m.date} &middot; <strong>Tipo:</strong> ${m.match_type} &middot; <strong>ID:</strong> ${m.match_id}</p>
     <div class="analytics-cards" style="margin:14px 0;">
@@ -9346,6 +9347,7 @@ if __name__ == "__main__":
     print("="*60 + "\n")
     
     uvicorn.run(app, host="0.0.0.0", port=8000)
+
 
 
 
