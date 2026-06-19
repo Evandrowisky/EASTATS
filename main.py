@@ -6855,8 +6855,24 @@ function playersFromMemberTotals() {
   return rows.filter(p => Number(p.games || 0) > 0).sort((a,b) => Number(b.rating || 0) - Number(a.rating || 0));
 }
 
+function isFullPlayerScope() {
+  return CURRENT_MATCH_TYPE === 'todos' && CURRENT_PERIOD === 'todos' && CURRENT_MATCH_STATUS === 'todas';
+}
+
+function currentScopeLabel() {
+  const periodLabel = {
+    todos: 'todo o hist?rico salvo',
+    ult10: '?ltimas 10 partidas',
+    semana: '?ltimos 7 dias',
+    mes: '?ltimos 30 dias',
+  }[CURRENT_PERIOD] || (String(CURRENT_PERIOD || '').startsWith('ult') ? '?ltimas ' + String(CURRENT_PERIOD).replace('ult','') + ' partidas' : 'filtro atual');
+  const typeLabel = CURRENT_MATCH_TYPE === 'todos' ? 'todas as partidas' : CURRENT_MATCH_TYPE;
+  const statusLabel = CURRENT_MATCH_STATUS === 'todas' ? 'todas' : CURRENT_MATCH_STATUS;
+  return `${typeLabel} ? ${periodLabel} ? ${statusLabel}`;
+}
+
 function scopedPlayers() {
-  if (CURRENT_MATCH_TYPE === 'todos') return playersFromMemberTotals();
+  if (isFullPlayerScope()) return playersFromMemberTotals();
   return computePlayersForMatches(playerStatMatches());
 }
 
@@ -7632,7 +7648,7 @@ function renderMeuScout() {
   const savedName = currentMyScoutName();
   const found = findPlayerByTypedName(savedName, players);
   const options = players.map(p => `<option value="${escapeAttr(p.name)}"></option>`).join('');
-  const scopeLabel = CURRENT_MATCH_TYPE === 'todos' ? 'todos os jogos do clube' : 'partidas detalhadas salvas de ' + CURRENT_MATCH_TYPE;
+  const scopeLabel = currentScopeLabel();
   const scoutControls = isAdmin() ? `
     <form class="agenda-form" onsubmit="saveMyScoutName(event)" style="grid-template-columns: 1fr auto auto auto; align-items:end;">
       <div style="grid-column:auto;">
@@ -7673,7 +7689,7 @@ function renderMeuScout() {
     <div class="players-grid" style="grid-template-columns:minmax(260px, 420px);">
       <div class="player-card" onclick="showPlayerDetail('${safeName}')">
         <div class="player-rating-big">${found.rating}</div>
-        <div class="player-pos"><span class="player-pos-badge">${found.position} &middot; ${found.games}J ${CURRENT_MATCH_TYPE === 'todos' ? 'no clube' : 'detalhadas salvas'}</span></div>
+        <div class="player-pos"><span class="player-pos-badge">${found.position} &middot; ${found.games}J no filtro</span></div>
         <div class="player-name">${found.name}</div>
         <div style="color:var(--text-2);font-size:11px;text-align:center;margin:4px 0 8px;">Posição cadastrada: <strong style="color:var(--green);">${profileForPlayer(found.name).manual_position || found.position}</strong></div>
         <div style="text-align:center;margin-bottom:10px;">${profilePlaystyleBadges(found.name)}</div>
@@ -7709,14 +7725,14 @@ function renderJogadores() {
   if (!players.length) {
     return '<div class="empty-state">Nenhum jogador encontrado neste filtro</div>';
   }
-  const scopeLabel = CURRENT_MATCH_TYPE === 'todos' ? 'todos os jogos do clube' : 'partidas detalhadas salvas de ' + CURRENT_MATCH_TYPE;
+  const scopeLabel = currentScopeLabel();
   let html = `<div class="section-title">Jogadores &middot; ${scopeLabel}</div><div class="players-grid">`;
   players.forEach(p => {
     html += `
       <div class="player-card" onclick="showPlayerDetail('${p.name.replace(/'/g, "\\'")}')">
         <div class="player-rating-big">${p.rating}</div>
         <div class="player-pos">
-          <span class="player-pos-badge">${p.position} &middot; ${p.games}J ${CURRENT_MATCH_TYPE === 'todos' ? 'no clube' : 'detalhadas salvas'} &middot; ${p.position_source || 'auto'}</span>
+          <span class="player-pos-badge">${p.position} &middot; ${p.games}J no filtro &middot; ${p.position_source || 'auto'}</span>
         </div>
         <div class="player-name">${p.name}</div>
         <div class="player-stats">
