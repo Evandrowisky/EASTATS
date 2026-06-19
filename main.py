@@ -1144,6 +1144,11 @@ class AdminUserStatusPayload(BaseModel):
     cargo: Optional[str] = None
 
 
+class OwnerClubPayload(BaseModel):
+    clube: str
+    platform: Optional[str] = "auto"
+
+
 class ClubSettingsPayload(BaseModel):
     image_url: Optional[str] = None
 
@@ -1407,6 +1412,29 @@ def resolve_club_for_auth(clube: str, platform: str = "auto") -> dict:
         "clube": search.get("name") or name,
         "platform": search.get("platform") or "common-gen5",
     }
+def owner_club_is_allowed(club_id: str) -> bool:
+    sb = get_supabase()
+    if not sb or not club_id:
+        return False
+    try:
+        resp = sb.table("allowed_clubs").select("club_id").eq("club_id", str(club_id)).limit(1).execute()
+        return bool(getattr(resp, "data", None) or [])
+    except Exception as e:
+        print(f"[OWNER] Aviso ao verificar clube liberado {club_id}: {type(e).__name__}: {e}")
+        return False
+
+
+def list_allowed_clubs_supabase():
+    sb = get_supabase()
+    if not sb:
+        raise HTTPException(503, "Supabase nao configurado")
+    try:
+        resp = sb.table("allowed_clubs").select("club_id,clube,platform,created_at,updated_at").order("clube", desc=False).execute()
+        return getattr(resp, "data", None) or []
+    except Exception as e:
+        print(f"[OWNER] Erro listando clubes liberados: {type(e).__name__}: {e}")
+        raise HTTPException(500, "Erro ao listar clubes liberados. Confira se a tabela allowed_clubs existe.")
+
 def _assert_same_club(current_user: dict, club_id: str):
     user_club = str((current_user or {}).get("club_id") or "")
     if user_club and str(club_id or "") and user_club != str(club_id):
@@ -1867,6 +1895,8 @@ def auth_register(payload: AuthRegisterPayload):
     resolved = resolve_club_for_auth(clube_informado)
     club_id = resolved["club_id"]
     clube = resolved["clube"]
+    if not owner_club_is_allowed(club_id):
+        raise HTTPException(403, "Este clube ainda nao foi liberado pelo admin master.")
     if _get_app_user_by_usuario(usuario, club_id):
         raise HTTPException(409, "Usuario ja existe neste clube")
 
@@ -2097,6 +2127,58 @@ def admin_delete_user(user_id: str, current_user: dict = Depends(require_admin))
         print(f"[AUTH] Erro excluindo usuario: {type(e).__name__}: {e}")
         raise HTTPException(500, "Erro ao excluir usuario")
 
+
+@app.get("/api/owner/clubs")
+def owner_list_allowed_clubs(current_user: dict = Depends(require_owner_admin)):
+    return {"clubs": list_allowed_clubs_supabase()}
+
+
+@app.post("/api/owner/clubs")
+def owner_add_allowed_club(payload: OwnerClubPayload, current_user: dict = Depends(require_owner_admin)):
+    sb = get_supabase()
+    if not sb:
+        raise HTTPException(503, "Supabase nao configurado")
+    clube_input = str(payload.clube or "").strip()
+    if not clube_input:
+        raise HTTPException(400, "Nome do clube obrigatorio")
+    resolved = resolve_club_for_auth(clube_input, payload.platform or "auto")
+    club_id = str(resolved.get("club_id") or "").strip()
+    clube = resolved.get("clube") or clube_input
+    platform = resolved.get("platform") or "common-gen5"
+    if not club_id:
+        raise HTTPException(404, "Clube nao encontrado")
+    try:
+        sb.table("clubs").upsert({
+            "club_id": club_id,
+            "name": clube,
+            "platform": platform,
+            "updated_at": _now_iso(),
+        }, on_conflict="club_id").execute()
+        resp = sb.table("allowed_clubs").upsert({
+            "club_id": club_id,
+            "clube": clube,
+            "platform": platform,
+            "created_by": str(current_user.get("usuario") or ""),
+            "updated_at": _now_iso(),
+        }, on_conflict="club_id").execute()
+        rows = getattr(resp, "data", None) or []
+        return {"success": True, "club": rows[0] if rows else {"club_id": club_id, "clube": clube, "platform": platform}}
+    except Exception as e:
+        print(f"[OWNER] Erro cadastrando clube liberado: {type(e).__name__}: {e}")
+        raise HTTPException(500, "Erro ao cadastrar clube liberado. Confira se a tabela allowed_clubs existe.")
+
+
+@app.delete("/api/owner/clubs/{club_id}")
+def owner_delete_allowed_club(club_id: str, current_user: dict = Depends(require_owner_admin)):
+    sb = get_supabase()
+    if not sb:
+        raise HTTPException(503, "Supabase nao configurado")
+    try:
+        sb.table("allowed_clubs").delete().eq("club_id", str(club_id)).execute()
+        return {"success": True, "deleted": str(club_id)}
+    except Exception as e:
+        print(f"[OWNER] Erro excluindo clube liberado: {type(e).__name__}: {e}")
+        raise HTTPException(500, "Erro ao excluir clube liberado")
 
 @app.get("/api/owner/users")
 def owner_list_all_users(current_user: dict = Depends(require_owner_admin)):
@@ -6240,6 +6322,7 @@ let AGENDA = [];
 let OPPONENT_SCOUTS = [];
 let CLUB_USERS = [];
 let OWNER_USERS = [];
+let OWNER_CLUBS = [];
 let AGENDA_EDIT_ID = null;
 let IDEAL_FORMATION = '3-5-2';
 let IDEAL_MODE = localStorage.getItem('scout_ideal_mode') || 'auto';
@@ -6300,7 +6383,7 @@ function renderAuth(mode = 'login') {
   if (!c) return;
   const isRegister = mode === 'register';
   const isReset = mode === 'reset';
-  if (!isAdmin() && ['jogadores','comparar','confrontos','cadastro','config','owner-users','adversarios'].includes(CURRENT_TAB)) CURRENT_TAB = 'visao';
+  if (!isAdmin() && ['jogadores','comparar','confrontos','cadastro','config','owner-users','owner-clubs','adversarios'].includes(CURRENT_TAB)) CURRENT_TAB = 'visao';
   const title = isRegister ? 'Criar Conta' : isReset ? 'Redefinir Acesso' : 'Entrar no ClubScout Pro';
   const help = isRegister
     ? 'Crie sua conta como jogador. O admin do clube libera ou bloqueia seu login depois.'
@@ -6975,7 +7058,7 @@ function render() {
   const c = document.getElementById('content');
   
   if (!DATA || !DATA.club) {
-    if (!isAdmin() && ['jogadores','comparar','confrontos','cadastro','config','owner-users','adversarios'].includes(CURRENT_TAB)) CURRENT_TAB = 'visao';
+    if (!isAdmin() && ['jogadores','comparar','confrontos','cadastro','config','owner-users','owner-clubs','adversarios'].includes(CURRENT_TAB)) CURRENT_TAB = 'visao';
   c.innerHTML = `
       <div class="empty-state">
         <div class="empty-icon">⚽</div>
@@ -6986,7 +7069,7 @@ function render() {
     return;
   }
   
-  if (!isAdmin() && ['jogadores','comparar','confrontos','cadastro','config','owner-users','adversarios'].includes(CURRENT_TAB)) CURRENT_TAB = 'visao';
+  if (!isAdmin() && ['jogadores','comparar','confrontos','cadastro','config','owner-users','owner-clubs','adversarios'].includes(CURRENT_TAB)) CURRENT_TAB = 'visao';
   c.innerHTML = `
     <div class="club-card">
       <div class="club-info">
@@ -7009,6 +7092,7 @@ function render() {
       ${isAdmin() ? `<div class="tab ${CURRENT_TAB==='cadastro'?'active':''}" onclick="setTab('cadastro')">CADASTRO</div>` : ''}
       ${isAdmin() ? `<div class="tab ${CURRENT_TAB==='config'?'active':''}" onclick="setTab('config')">CONFIG</div>` : ''}
       ${isOwnerAdmin() ? `<div class="tab ${CURRENT_TAB==='owner-users'?'active':''}" onclick="setTab('owner-users')">USU&Aacute;RIOS</div>` : ''}
+      ${isOwnerAdmin() ? `<div class="tab ${CURRENT_TAB==='owner-clubs'?'active':''}" onclick="setTab('owner-clubs')">CLUBES</div>` : ''}
       <div class="tab ${CURRENT_TAB==='playstyles'?'active':''}" onclick="setTab('playstyles')">ESTILOS</div>
       <div class="tab ${CURRENT_TAB==='adversarios'?'active':''}" onclick="setTab('adversarios')">ADVERS&Aacute;RIOS</div>
       <div class="tab ${CURRENT_TAB==='agenda'?'active':''}" onclick="setTab('agenda')">AGENDA</div>
@@ -7088,9 +7172,10 @@ function renderTab() {
   else if (CURRENT_TAB === 'cadastro' && isAdmin()) { tc.innerHTML = '<div class="loading"><div class="spinner"></div> Carregando cadastro...</div>'; loadClubUsers().then(() => { const t=document.getElementById('tabContent'); if (t && CURRENT_TAB === 'cadastro') t.innerHTML = renderCadastroJogadores(); }); }
   else if (CURRENT_TAB === 'config' && isAdmin()) tc.innerHTML = renderConfiguracoesClube();
   else if (CURRENT_TAB === 'owner-users' && isOwnerAdmin()) { tc.innerHTML = '<div class="loading"><div class="spinner"></div> Carregando usu&aacute;rios...</div>'; loadOwnerUsers().then(() => { const t=document.getElementById('tabContent'); if (t && CURRENT_TAB === 'owner-users') t.innerHTML = renderOwnerUsersAdmin(); }); }
+  else if (CURRENT_TAB === 'owner-clubs' && isOwnerAdmin()) { tc.innerHTML = '<div class="loading"><div class="spinner"></div> Carregando clubes...</div>'; loadOwnerClubs().then(() => { const t=document.getElementById('tabContent'); if (t && CURRENT_TAB === 'owner-clubs') t.innerHTML = renderOwnerClubsAdmin(); }); }
   else if (CURRENT_TAB === 'playstyles') tc.innerHTML = renderPlaystyles();
   else if (CURRENT_TAB === 'adversarios') tc.innerHTML = renderAdversarios();
-  else if (['jogadores','comparar','confrontos','cadastro','config','owner-users','adversarios'].includes(CURRENT_TAB) && (!isAdmin() || (CURRENT_TAB === 'owner-users' && !isOwnerAdmin()))) { CURRENT_TAB = 'visao'; tc.innerHTML = renderVisao(); }
+  else if (['jogadores','comparar','confrontos','cadastro','config','owner-users','owner-clubs','adversarios'].includes(CURRENT_TAB) && (!isAdmin() || (['owner-users','owner-clubs'].includes(CURRENT_TAB) && !isOwnerAdmin()))) { CURRENT_TAB = 'visao'; tc.innerHTML = renderVisao(); }
   else if (CURRENT_TAB === 'agenda') tc.innerHTML = renderAgenda();
 }
 
@@ -8217,6 +8302,83 @@ function renderClubUsersAdmin() {
 }
 
 
+async function loadOwnerClubs() {
+  if (!isOwnerAdmin()) return [];
+  try {
+    const r = await authFetch('/api/owner/clubs');
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(data.detail || 'Erro ao carregar clubes');
+    OWNER_CLUBS = data.clubs || [];
+  } catch (e) {
+    console.warn('Erro ao carregar clubes liberados', e);
+    OWNER_CLUBS = [];
+  }
+  return OWNER_CLUBS;
+}
+
+async function addOwnerClub(ev) {
+  ev.preventDefault();
+  const input = document.getElementById('owner-club-name');
+  const msg = document.getElementById('owner-club-msg');
+  const clube = (input?.value || '').trim();
+  if (!clube) return;
+  if (msg) msg.textContent = 'Cadastrando clube...';
+  try {
+    const r = await authFetch('/api/owner/clubs', {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({clube})
+    });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(data.detail || 'Erro ao cadastrar clube');
+    if (input) input.value = '';
+    await loadOwnerClubs();
+    renderTab();
+    alert('Clube liberado para cadastro.');
+  } catch (e) {
+    if (msg) msg.textContent = e.message;
+    alert(e.message);
+  }
+}
+
+async function deleteOwnerClub(clubId, clube) {
+  if (!confirm(`Remover ${clube || 'este clube'} da lista liberada? Novos cadastros serao bloqueados.`)) return;
+  try {
+    const r = await authFetch('/api/owner/clubs/' + encodeURIComponent(clubId), {method:'DELETE'});
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(data.detail || 'Erro ao excluir clube');
+    await loadOwnerClubs();
+    renderTab();
+    alert('Clube removido da lista liberada.');
+  } catch (e) {
+    alert(e.message);
+  }
+}
+
+function renderOwnerClubsAdmin() {
+  const rows = (OWNER_CLUBS || []).map(c => `
+    <div class="profile-row profile-user-row owner-user-row">
+      <div>
+        <div class="profile-name">${escapeAttr(c.clube || '-')}</div>
+        <div class="profile-meta">ID EA: ${escapeAttr(c.club_id || '-')} · ${escapeAttr(c.platform || 'common-gen5')}</div>
+      </div>
+      <div><div class="profile-meta">Liberado em</div>${escapeAttr(formatDateTime(c.created_at || c.updated_at || ''))}</div>
+      <div><span class="tag v">Liberado</span></div>
+      <button class="btn-mini danger" onclick="deleteOwnerClub('${escapeAttr(c.club_id)}','${escapeAttr(c.clube || '')}')">Excluir</button>
+    </div>
+  `).join('');
+  return `
+    <div class="section-title">Painel sennasant · clubes liberados</div>
+    <div style="color:var(--text-2);font-size:12px;margin-bottom:12px;line-height:1.5;">Cadastre aqui os clubes que podem receber novos usuários. O cadastro de jogador só será permitido se o clube estiver nesta lista.</div>
+    <form class="agenda-form" onsubmit="addOwnerClub(event)" style="grid-template-columns: 1fr auto;">
+      <input id="owner-club-name" type="text" placeholder="Nome do clube exatamente como aparece no Pro Clubs" required>
+      <button type="submit" class="btn-primary" style="padding:8px 18px;">Liberar clube</button>
+      <div id="owner-club-msg" class="profile-meta" style="grid-column:1 / -1;"></div>
+    </form>
+    <div class="section-title">Lista de clubes liberados</div>
+    <div class="profile-list">${rows || '<div class="empty-state" style="padding:30px 20px;">Nenhum clube liberado ainda.</div>'}</div>
+  `;
+}
 async function loadOwnerUsers() {
   if (!isOwnerAdmin()) return [];
   try {
@@ -9357,6 +9519,11 @@ if __name__ == "__main__":
     print("="*60 + "\n")
     
     uvicorn.run(app, host="0.0.0.0", port=8000)
+
+
+
+
+
 
 
 
