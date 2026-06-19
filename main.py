@@ -1,4 +1,4 @@
-﻿# -*- coding: utf-8 -*-
+# -*- coding: utf-8 -*-
 """
 Scout Clubs Pro v2 - Análise Profissional EA FC
 Inspirado no app Scout Clubs original
@@ -1145,7 +1145,8 @@ class AdminUserStatusPayload(BaseModel):
 
 
 class OwnerClubPayload(BaseModel):
-    clube: str
+    clube: Optional[str] = None
+    club_id: Optional[str] = None
     platform: Optional[str] = "auto"
 
 
@@ -1429,11 +1430,42 @@ def list_allowed_clubs_supabase():
     if not sb:
         raise HTTPException(503, "Supabase nao configurado")
     try:
-        resp = sb.table("allowed_clubs").select("club_id,clube,platform,created_at,updated_at").order("clube", desc=False).execute()
-        return getattr(resp, "data", None) or []
+        clubs_resp = sb.table("clubs").select("club_id,name,platform,created_at,updated_at").order("name", desc=False).execute()
+        allowed_resp = sb.table("allowed_clubs").select("club_id,clube,platform,created_at,updated_at").execute()
+        clubs = getattr(clubs_resp, "data", None) or []
+        allowed = getattr(allowed_resp, "data", None) or []
+        allowed_by_id = {str(c.get("club_id")): c for c in allowed if c.get("club_id")}
+        merged = []
+        seen = set()
+        for c in clubs:
+            cid = str(c.get("club_id") or "")
+            if not cid:
+                continue
+            a = allowed_by_id.get(cid, {})
+            seen.add(cid)
+            merged.append({
+                "club_id": cid,
+                "clube": a.get("clube") or c.get("name") or "Clube",
+                "platform": a.get("platform") or c.get("platform") or "common-gen5",
+                "created_at": a.get("created_at") or c.get("created_at"),
+                "updated_at": a.get("updated_at") or c.get("updated_at"),
+                "allowed": bool(a),
+            })
+        for cid, a in allowed_by_id.items():
+            if cid in seen:
+                continue
+            merged.append({
+                "club_id": cid,
+                "clube": a.get("clube") or "Clube",
+                "platform": a.get("platform") or "common-gen5",
+                "created_at": a.get("created_at"),
+                "updated_at": a.get("updated_at"),
+                "allowed": True,
+            })
+        return sorted(merged, key=lambda x: (str(x.get("clube") or "").lower(), str(x.get("club_id") or "")))
     except Exception as e:
-        print(f"[OWNER] Erro listando clubes liberados: {type(e).__name__}: {e}")
-        raise HTTPException(500, "Erro ao listar clubes liberados. Confira se a tabela allowed_clubs existe.")
+        print(f"[OWNER] Erro listando clubes cadastrados/liberados: {type(e).__name__}: {e}")
+        raise HTTPException(500, "Erro ao listar clubes. Confira se as tabelas clubs e allowed_clubs existem.")
 
 def _assert_same_club(current_user: dict, club_id: str):
     user_club = str((current_user or {}).get("club_id") or "")
@@ -2139,9 +2171,25 @@ def owner_add_allowed_club(payload: OwnerClubPayload, current_user: dict = Depen
     if not sb:
         raise HTTPException(503, "Supabase nao configurado")
     clube_input = str(payload.clube or "").strip()
-    if not clube_input:
+    requested_club_id = str(payload.club_id or "").strip()
+    if not clube_input and not requested_club_id:
         raise HTTPException(400, "Nome do clube obrigatorio")
-    resolved = resolve_club_for_auth(clube_input, payload.platform or "auto")
+    if requested_club_id:
+        try:
+            resp = sb.table("clubs").select("club_id,name,platform").eq("club_id", requested_club_id).limit(1).execute()
+            rows = getattr(resp, "data", None) or []
+        except Exception as e:
+            print(f"[OWNER] Erro buscando clube existente: {type(e).__name__}: {e}")
+            rows = []
+        if not rows:
+            raise HTTPException(404, "Clube cadastrado nao encontrado")
+        resolved = {
+            "club_id": str(rows[0].get("club_id") or requested_club_id),
+            "clube": rows[0].get("name") or clube_input or requested_club_id,
+            "platform": rows[0].get("platform") or "common-gen5",
+        }
+    else:
+        resolved = resolve_club_for_auth(clube_input, payload.platform or "auto")
     club_id = str(resolved.get("club_id") or "").strip()
     clube = resolved.get("clube") or clube_input
     platform = resolved.get("platform") or "common-gen5"
@@ -8355,28 +8403,52 @@ async function deleteOwnerClub(clubId, clube) {
   }
 }
 
+async function allowExistingOwnerClub(clubId, clube) {
+  if (!clubId) return;
+  try {
+    const r = await authFetch('/api/owner/clubs', {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({club_id: clubId, clube: clube || ''})
+    });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(data.detail || 'Erro ao liberar clube');
+    await loadOwnerClubs();
+    renderTab();
+    alert('Clube liberado para cadastro.');
+  } catch (e) {
+    alert(e.message);
+  }
+}
+
 function renderOwnerClubsAdmin() {
-  const rows = (OWNER_CLUBS || []).map(c => `
+  const rows = (OWNER_CLUBS || []).map(c => {
+    const allowed = !!c.allowed;
+    const clubId = escapeAttr(c.club_id || '');
+    const clubName = escapeAttr(c.clube || '-');
+    return `
     <div class="profile-row profile-user-row owner-user-row">
       <div>
-        <div class="profile-name">${escapeAttr(c.clube || '-')}</div>
-        <div class="profile-meta">ID EA: ${escapeAttr(c.club_id || '-')} · ${escapeAttr(c.platform || 'common-gen5')}</div>
+        <div class="profile-name">${clubName}</div>
+        <div class="profile-meta">ID EA: ${clubId || '-'} &middot; ${escapeAttr(c.platform || 'common-gen5')}</div>
       </div>
-      <div><div class="profile-meta">Liberado em</div>${escapeAttr(formatDateTime(c.created_at || c.updated_at || ''))}</div>
-      <div><span class="tag v">Liberado</span></div>
-      <button class="btn-mini danger" onclick="deleteOwnerClub('${escapeAttr(c.club_id)}','${escapeAttr(c.clube || '')}')">Excluir</button>
-    </div>
-  `).join('');
+      <div><div class="profile-meta">${allowed ? 'Liberado em' : 'Cadastrado em'}</div>${escapeAttr(formatDateTime(c.created_at || c.updated_at || ''))}</div>
+      <div><span class="tag ${allowed ? 'v' : 'd'}">${allowed ? 'Liberado' : 'Bloqueado'}</span></div>
+      ${allowed
+        ? `<button class="btn-mini danger" onclick="deleteOwnerClub('${clubId}','${clubName}')">Remover libera??o</button>`
+        : `<button class="btn-mini" onclick="allowExistingOwnerClub('${clubId}','${clubName}')">Liberar</button>`}
+    </div>`;
+  }).join('');
   return `
-    <div class="section-title">Painel sennasant · clubes liberados</div>
-    <div style="color:var(--text-2);font-size:12px;margin-bottom:12px;line-height:1.5;">Cadastre aqui os clubes que podem receber novos usuários. O cadastro de jogador só será permitido se o clube estiver nesta lista.</div>
+    <div class="section-title">Painel sennasant &middot; clubes liberados</div>
+    <div style="color:var(--text-2);font-size:12px;margin-bottom:12px;line-height:1.5;">Cadastre aqui os clubes que podem receber novos usu?rios. Clubes que j? foram sincronizados aparecem na lista abaixo; basta clicar em Liberar.</div>
     <form class="agenda-form" onsubmit="addOwnerClub(event)" style="grid-template-columns: 1fr auto;">
       <input id="owner-club-name" type="text" placeholder="Nome do clube exatamente como aparece no Pro Clubs" required>
-      <button type="submit" class="btn-primary" style="padding:8px 18px;">Liberar clube</button>
+      <button type="submit" class="btn-primary" style="padding:8px 18px;">Cadastrar / liberar clube</button>
       <div id="owner-club-msg" class="profile-meta" style="grid-column:1 / -1;"></div>
     </form>
-    <div class="section-title">Lista de clubes liberados</div>
-    <div class="profile-list">${rows || '<div class="empty-state" style="padding:30px 20px;">Nenhum clube liberado ainda.</div>'}</div>
+    <div class="section-title">Lista de clubes cadastrados</div>
+    <div class="profile-list">${rows || '<div class="empty-state" style="padding:30px 20px;">Nenhum clube cadastrado ainda.</div>'}</div>
   `;
 }
 async function loadOwnerUsers() {
