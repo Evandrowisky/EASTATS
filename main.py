@@ -180,11 +180,11 @@ class EAFCClient:
         params = {
             "clubIds": club_id,
             "platform": platform,
-            "matchType": match_type,
             "maxResultCount": max_count,
         }
+        if match_type:
+            params["matchType"] = match_type
         return self._get(url, params)
-
 
 # ============================================================
 # BANCO DE DADOS
@@ -540,12 +540,12 @@ def calc_club_stats(overall_data, club_info_data, matches_list):
 
 
 def fetch_all_match_types(ea_client, club_id, platform, max_count=100):
-    """Testa matchTypes e varios maxResultCount, porque a API da EA as vezes devolve menos com 100 do que com 20/50."""
+    """Testa matchTypes, contagens e a chamada sem matchType, com diagnostico das datas recentes."""
     all_matches_raw = []
     seen = set()
     debug = []
     request_counts = []
-    for n in (max_count, 100, 50, 20):
+    for n in (200, max_count, 100, 50, 20):
         try:
             n = int(n)
         except Exception:
@@ -553,19 +553,39 @@ def fetch_all_match_types(ea_client, club_id, platform, max_count=100):
         if n > 0 and n not in request_counts:
             request_counts.append(n)
 
-    for match_type in MATCH_TYPE_CANDIDATES:
+    def _match_preview(item):
+        try:
+            ts = int((item or {}).get("timestamp", 0) or 0)
+        except Exception:
+            ts = 0
+        date = datetime.fromtimestamp(ts).strftime("%d/%m %H:%M") if ts else "sem data"
+        clubs = (item or {}).get("clubs") if isinstance((item or {}).get("clubs"), dict) else {}
+        opp_name = "?"
+        for cid, cdata in clubs.items():
+            if str(cid) == str(club_id) or not isinstance(cdata, dict):
+                continue
+            details = cdata.get("details") if isinstance(cdata.get("details"), dict) else {}
+            opp_name = details.get("name") or cdata.get("name") or "?"
+            break
+        return {"timestamp": ts, "date": date, "opponent": _fix_mojibake(str(opp_name))}
+
+    candidates = list(MATCH_TYPE_CANDIDATES) + [None]
+    for match_type in candidates:
+        label = match_type or "semMatchType"
         entry = {
-            "matchType": match_type,
+            "matchType": label,
             "requested": request_counts,
             "ok": False,
             "count": 0,
             "unique_added": 0,
             "duplicates": 0,
             "attempts": [],
+            "latest": [],
             "error": None,
         }
+        latest_seen = []
         for requested_count in request_counts:
-            attempt = {"requested": requested_count, "ok": False, "count": 0, "unique_added": 0, "duplicates": 0, "error": None}
+            attempt = {"requested": requested_count, "ok": False, "count": 0, "unique_added": 0, "duplicates": 0, "latest": [], "error": None}
             try:
                 raw = ea_client.matches(club_id, match_type, platform, max_count=requested_count)
                 if isinstance(raw, list):
@@ -573,19 +593,22 @@ def fetch_all_match_types(ea_client, club_id, platform, max_count=100):
                     entry["ok"] = True
                     attempt["count"] = len(raw)
                     entry["count"] += len(raw)
+                    previews = sorted((_match_preview(x) for x in raw if isinstance(x, dict)), key=lambda x: x.get("timestamp", 0), reverse=True)
+                    attempt["latest"] = previews[:3]
+                    latest_seen.extend(previews)
                     for idx, m in enumerate(raw):
                         if not isinstance(m, dict):
                             continue
                         match_id = str(m.get("matchId") or "").strip()
                         if not match_id:
-                            match_id = f"{match_type}:{m.get('timestamp', '')}:{idx}:{json.dumps(m.get('clubs', {}), sort_keys=True)}"
+                            match_id = f"{label}:{m.get('timestamp', '')}:{idx}:{json.dumps(m.get('clubs', {}), sort_keys=True)}"
                         if match_id in seen:
                             attempt["duplicates"] += 1
                             entry["duplicates"] += 1
                             continue
                         seen.add(match_id)
                         enriched = dict(m)
-                        enriched["_origin"] = match_type
+                        enriched["_origin"] = str(m.get("matchType") or label)
                         enriched["_requested_count"] = requested_count
                         all_matches_raw.append(enriched)
                         attempt["unique_added"] += 1
@@ -596,23 +619,18 @@ def fetch_all_match_types(ea_client, club_id, platform, max_count=100):
                 attempt["error"] = f"{type(e).__name__}: {e}"
             entry["attempts"].append(attempt)
 
+        entry["latest"] = sorted(latest_seen, key=lambda x: x.get("timestamp", 0), reverse=True)[:5]
         errors = [a["error"] for a in entry["attempts"] if a.get("error")]
         if errors and not entry["ok"]:
             entry["error"] = " | ".join(errors[:3])
 
-        attempts_msg = ", ".join(
-            f"{a['requested']}=>{a['count']} (+{a['unique_added']}, dup {a['duplicates']})"
-            for a in entry["attempts"]
-        )
-        print(
-            f"[EA FC] matchType={match_type} attempts=[{attempts_msg}] "
-            f"unique_added={entry['unique_added']} duplicates={entry['duplicates']} error={entry['error']}"
-        )
+        attempts_msg = ", ".join(f"{a['requested']}=>{a['count']} (+{a['unique_added']}, dup {a['duplicates']})" for a in entry["attempts"])
+        latest_msg = "; ".join(f"{x.get('date')} vs {x.get('opponent')}" for x in entry.get("latest", [])[:3]) or "sem datas"
+        print(f"[EA FC] matchType={label} attempts=[{attempts_msg}] unique_added={entry['unique_added']} duplicates={entry['duplicates']} latest=[{latest_msg}] error={entry['error']}")
         debug.append(entry)
 
     print(f"[EA FC] Total bruto unico apos dedupe: {len(all_matches_raw)}")
     return all_matches_raw, debug
-
 
 
 def stable_match_id_for_storage(match: dict, club_id: str, index: int = 0) -> str:
@@ -2798,9 +2816,14 @@ async def sync_stream(
                     f"{a.get('requested')}=>{a.get('count', 0)} (+{a.get('unique_added', 0)})"
                     for a in d.get("attempts", [])
                 ) or str(d.get("requested", 100))
+                latest = "; ".join(
+                    f"{x.get('date')} vs {x.get('opponent')}"
+                    for x in (d.get("latest") or [])[:3]
+                ) or "sem datas"
                 mt_msg = (
                     f"matchType={d.get('matchType')} | tentativas {attempts} "
-                    f"| novos={d.get('unique_added', 0)} | duplicados={d.get('duplicates', 0)} ({status}){err}"
+                    f"| novos={d.get('unique_added', 0)} | duplicados={d.get('duplicates', 0)} "
+                    f"| ultimos={latest} ({status}){err}"
                 )
                 yield f"data: {log(mt_msg, 7, 8)}\n\n"
                 await asyncio.sleep(0.01)
@@ -9689,6 +9712,8 @@ if __name__ == "__main__":
     print("="*60 + "\n")
     
     uvicorn.run(app, host="0.0.0.0", port=8000)
+
+
 
 
 
