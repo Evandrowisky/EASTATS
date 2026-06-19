@@ -5840,7 +5840,8 @@ body {
   box-shadow: 0 12px 28px rgba(0,0,0,.55), 0 0 22px var(--green-glow);
 }
 .period-dropdown:hover .period-menu,
-.period-dropdown:focus-within .period-menu { display: grid; gap: 6px; }
+.period-dropdown:focus-within .period-menu,
+.period-dropdown.open .period-menu { display: grid; gap: 6px; }
 .period-menu-item {
   background: transparent;
   color: var(--text);
@@ -6665,38 +6666,52 @@ function filterByMatchStatus(matches) {
   return all.filter(m => !isQuitMatch(m));
 }
 
-function filteredMatches() {
-  let all = (DATA && DATA.matches) ? [...DATA.matches] : [];
-  if (CURRENT_MATCH_TYPE !== 'todos') {
+function applyMatchFilters(matches, opts = {}) {
+  const includeType = opts.includeType !== false;
+  const includeStatus = opts.includeStatus !== false;
+  const includePeriod = opts.includePeriod !== false;
+  let all = [...(matches || [])].sort((a,b) => Number(b.timestamp || 0) - Number(a.timestamp || 0));
+  if (includeType && CURRENT_MATCH_TYPE !== 'todos') {
     all = all.filter(m => String(m.match_type || '').toLowerCase() === CURRENT_MATCH_TYPE);
   }
-  all = filterByMatchStatus(all);
-  // Ja vem ordenado por timestamp desc
-  if (CURRENT_PERIOD === 'todos') return all;
+  if (includeStatus) all = filterByMatchStatus(all);
+  if (!includePeriod || CURRENT_PERIOD === 'todos') return all;
   const ultMatch = String(CURRENT_PERIOD || '').match(/^ult(\d+)$/);
   if (ultMatch) return all.slice(0, Number(ultMatch[1] || 0));
   const now = Math.floor(Date.now() / 1000);
   if (CURRENT_PERIOD === 'semana') {
     const cutoff = now - 7 * 86400;
-    return all.filter(m => (m.timestamp || 0) >= cutoff);
+    return all.filter(m => Number(m.timestamp || 0) >= cutoff);
   }
   if (CURRENT_PERIOD === 'mes') {
     const cutoff = now - 30 * 86400;
-    return all.filter(m => (m.timestamp || 0) >= cutoff);
+    return all.filter(m => Number(m.timestamp || 0) >= cutoff);
   }
   return all;
 }
 
-function playerStatMatches() {
-  let all = (DATA && DATA.matches) ? [...DATA.matches] : [];
-  if (CURRENT_MATCH_TYPE !== 'todos') {
-    all = all.filter(m => String(m.match_type || '').toLowerCase() === CURRENT_MATCH_TYPE);
-  }
-  return filterByMatchStatus(all);
+function filteredMatches() {
+  return applyMatchFilters((DATA && DATA.matches) ? DATA.matches : []);
 }
+
+function playerStatMatches() {
+  return applyMatchFilters((DATA && DATA.matches) ? DATA.matches : []);
+}
+function togglePeriodMenu(ev) {
+  if (ev) ev.stopPropagation();
+  const wrap = ev && ev.currentTarget ? ev.currentTarget.closest('.period-dropdown') : null;
+  document.querySelectorAll('.period-dropdown').forEach(el => { if (el !== wrap) el.classList.remove('open'); });
+  if (wrap) wrap.classList.toggle('open');
+}
+
+document.addEventListener('click', e => {
+  if (!e.target.closest('.period-dropdown')) document.querySelectorAll('.period-dropdown').forEach(el => el.classList.remove('open'));
+});
+
 function setPeriod(p, ev) {
   CURRENT_PERIOD = p;
   document.querySelectorAll('.period').forEach(el => el.classList.remove('active'));
+  document.querySelectorAll('.period-dropdown').forEach(el => el.classList.remove('open'));
   if (ev && ev.target) ev.target.classList.add('active');
   if (!isAdmin()) {
     document.querySelectorAll('.tab').forEach(el => {
@@ -7149,7 +7164,7 @@ function render() {
     <div class="period-filter">
       <div class="period ${CURRENT_PERIOD==='todos'?'active':''}" onclick="setPeriod('todos', event)">TODOS</div>
       <div class="period-dropdown">
-        <button class="period period-menu-btn ${String(CURRENT_PERIOD).startsWith('ult')?'active':''}" type="button">
+        <button class="period period-menu-btn ${String(CURRENT_PERIOD).startsWith('ult')?'active':''}" type="button" onclick="togglePeriodMenu(event)">
           ${String(CURRENT_PERIOD).startsWith('ult') ? 'ÚLT. ' + String(CURRENT_PERIOD).replace('ult','') : 'ÚLTIMOS JOGOS'} ▾
         </button>
         <div class="period-menu">
@@ -7220,7 +7235,7 @@ function renderTab() {
   else if (CURRENT_TAB === 'cadastro' && isAdmin()) { tc.innerHTML = '<div class="loading"><div class="spinner"></div> Carregando cadastro...</div>'; loadClubUsers().then(() => { const t=document.getElementById('tabContent'); if (t && CURRENT_TAB === 'cadastro') t.innerHTML = renderCadastroJogadores(); }); }
   else if (CURRENT_TAB === 'config' && isAdmin()) tc.innerHTML = renderConfiguracoesClube();
   else if (CURRENT_TAB === 'owner-users' && isOwnerAdmin()) { tc.innerHTML = '<div class="loading"><div class="spinner"></div> Carregando usu&aacute;rios...</div>'; loadOwnerUsers().then(() => { const t=document.getElementById('tabContent'); if (t && CURRENT_TAB === 'owner-users') t.innerHTML = renderOwnerUsersAdmin(); }); }
-  else if (CURRENT_TAB === 'owner-clubs' && isOwnerAdmin()) { tc.innerHTML = '<div class="loading"><div class="spinner"></div> Carregando clubes...</div>'; loadOwnerClubs().then(() => { const t=document.getElementById('tabContent'); if (t && CURRENT_TAB === 'owner-clubs') t.innerHTML = renderOwnerClubsAdmin(); }); }
+  else if (CURRENT_TAB === 'owner-clubs' && isOwnerAdmin()) { tc.innerHTML = '<div class="loading"><div class="spinner"></div> Carregando clubes...</div>'; loadOwnerClubs().then(() => { const t=document.getElementById('tabContent'); if (t && CURRENT_TAB === 'owner-clubs') t.innerHTML = renderOwnerClubsAdmin(); }).catch(e => { const t=document.getElementById('tabContent'); if (t) t.innerHTML = `<div class="empty-state" style="padding:40px 20px;"><div class="empty-text">Erro ao carregar clubes: ${escapeAttr(e.message || e)}</div></div>`; }); }
   else if (CURRENT_TAB === 'playstyles') tc.innerHTML = renderPlaystyles();
   else if (CURRENT_TAB === 'adversarios') tc.innerHTML = renderAdversarios();
   else if (['jogadores','comparar','confrontos','cadastro','config','owner-users','owner-clubs','adversarios'].includes(CURRENT_TAB) && (!isAdmin() || (['owner-users','owner-clubs'].includes(CURRENT_TAB) && !isOwnerAdmin()))) { CURRENT_TAB = 'visao'; tc.innerHTML = renderVisao(); }
@@ -8572,6 +8587,17 @@ function renderCadastroJogadores() {
 
 function cssSafeId(value) {
   return String(value || '').replace(/[^a-zA-Z0-9_-]/g, '_');
+}
+
+function formatDateTime(value) {
+  if (!value) return '-';
+  try {
+    const d = new Date(value);
+    if (Number.isNaN(d.getTime())) return String(value).slice(0, 16);
+    return d.toLocaleString('pt-BR', {day:'2-digit', month:'2-digit', year:'numeric', hour:'2-digit', minute:'2-digit'});
+  } catch (e) {
+    return String(value || '-');
+  }
 }
 
 function escapeAttr(value) {
