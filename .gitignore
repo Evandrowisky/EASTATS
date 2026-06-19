@@ -7,3 +7,5 @@ __pycache__/
 *.sqlite
 *.sqlite3
 dados_clube.json
+.vercel
+.env*
