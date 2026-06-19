@@ -123,10 +123,18 @@ class EAFCClient:
                     return {}
             else:
                 print(f"[EA FC]   body: {r.text[:300]}")
-            return {}
+            return {
+                "_ea_error": True,
+                "status": r.status_code,
+                "body": (r.text or "")[:500],
+            }
         except Exception as e:
             print(f"[EA FC] Erro de conexao em {url}: {type(e).__name__}: {e}")
-            return {}
+            return {
+                "_ea_error": True,
+                "status": 0,
+                "body": f"{type(e).__name__}: {e}",
+            }
     
     def search_club(self, club_name: str, platform: str = "common-gen5"):
         # Endpoint correto (EA mudou em 2025): allTimeLeaderboard/search
@@ -545,7 +553,9 @@ def fetch_all_match_types(ea_client, club_id, platform, max_count=100):
     seen = set()
     debug = []
     request_counts = []
-    for n in (200, max_count, 100, 50, 20):
+    # A EA costuma oscilar/retornar 500 quando pedimos 200 resultados.
+    # Comecar pelos limites mais estaveis evita "azedar" a sessao inteira.
+    for n in (50, max_count, 100, 20):
         try:
             n = int(n)
         except Exception:
@@ -614,7 +624,11 @@ def fetch_all_match_types(ea_client, club_id, platform, max_count=100):
                         attempt["unique_added"] += 1
                         entry["unique_added"] += 1
                 else:
-                    attempt["error"] = f"Retorno inesperado: {type(raw).__name__}"
+                    if isinstance(raw, dict) and raw.get("_ea_error"):
+                        body = str(raw.get("body") or "").replace("\n", " ")[:140]
+                        attempt["error"] = f"EA status {raw.get('status')}: {body}"
+                    else:
+                        attempt["error"] = f"Retorno inesperado: {type(raw).__name__}"
             except Exception as e:
                 attempt["error"] = f"{type(e).__name__}: {e}"
             entry["attempts"].append(attempt)
