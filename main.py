@@ -6861,14 +6861,14 @@ function isFullPlayerScope() {
 
 function currentScopeLabel() {
   const periodLabel = {
-    todos: 'todo o hist?rico salvo',
-    ult10: '?ltimas 10 partidas',
-    semana: '?ltimos 7 dias',
-    mes: '?ltimos 30 dias',
-  }[CURRENT_PERIOD] || (String(CURRENT_PERIOD || '').startsWith('ult') ? '?ltimas ' + String(CURRENT_PERIOD).replace('ult','') + ' partidas' : 'filtro atual');
+    todos: 'todo o historico salvo',
+    ult10: 'ultimas 10 partidas',
+    semana: 'ultimos 7 dias',
+    mes: 'ultimos 30 dias',
+  }[CURRENT_PERIOD] || (String(CURRENT_PERIOD || '').startsWith('ult') ? 'ultimas ' + String(CURRENT_PERIOD).replace('ult','') + ' partidas' : 'filtro atual');
   const typeLabel = CURRENT_MATCH_TYPE === 'todos' ? 'todas as partidas' : CURRENT_MATCH_TYPE;
   const statusLabel = CURRENT_MATCH_STATUS === 'todas' ? 'todas' : CURRENT_MATCH_STATUS;
-  return `${typeLabel} ? ${periodLabel} ? ${statusLabel}`;
+  return `${typeLabel} - ${periodLabel} - ${statusLabel}`;
 }
 
 function scopedPlayers() {
@@ -6876,6 +6876,56 @@ function scopedPlayers() {
   return computePlayersForMatches(playerStatMatches());
 }
 
+function emptyPlayerForCurrentFilter(base) {
+  if (!base) return null;
+  const intel = inferPlayerPositionIntel(base);
+  return {
+    ...base,
+    position: intel.label || base.position || '?',
+    position_family: intel.family || base.position_family || '',
+    position_source: base.position_source || intel.source || 'cadastro',
+    games: 0,
+    rating: 0,
+    sofi_rating: 0,
+    goals: 0,
+    assists: 0,
+    goal_involvements: 0,
+    goals_per_game: 0,
+    assists_per_game: 0,
+    goal_involvements_per_game: 0,
+    shots: 0,
+    shots_per_game: 0,
+    passes_made: 0,
+    pass_pct: 0,
+    tackles_made: 0,
+    tackle_pct: 0,
+    tackles_per_game: 0,
+    saves: 0,
+    saves_per_game: 0,
+    clean_sheet: 0,
+    mom: 0,
+    wins: 0,
+    draws: 0,
+    losses: 0,
+    win_rate: 0,
+    reds: 0,
+    no_games_in_filter: true,
+  };
+}
+
+function playerRosterOptions() {
+  const byName = new Map();
+  playersFromMemberTotals().forEach(p => byName.set(String(p.name || '').toLowerCase(), p));
+  (DATA.players || []).forEach(p => {
+    const k = String(p.name || '').toLowerCase();
+    if (k && !byName.has(k)) byName.set(k, p);
+  });
+  scopedPlayers().forEach(p => {
+    const k = String(p.name || '').toLowerCase();
+    if (k && !byName.has(k)) byName.set(k, p);
+  });
+  return [...byName.values()].filter(p => p && p.name).sort((a,b) => String(a.name).localeCompare(String(b.name)));
+}
 
 
 
@@ -7180,11 +7230,11 @@ function render() {
     <div class="period-filter">
       <div class="period ${CURRENT_PERIOD==='todos'?'active':''}" onclick="setPeriod('todos', event)">TODOS</div>
       <div class="period-dropdown">
-        <button class="period period-menu-btn ${String(CURRENT_PERIOD).startsWith('ult')?'active':''}" type="button" onclick="togglePeriodMenu(event)">
-          ${String(CURRENT_PERIOD).startsWith('ult') ? 'ÚLT. ' + String(CURRENT_PERIOD).replace('ult','') : 'ÚLTIMOS JOGOS'} ▾
+        <button class="period period-menu-btn ${/^ult[1-7]$/.test(String(CURRENT_PERIOD))?"active":""}" type="button" onclick="togglePeriodMenu(event)">
+          ${/^ult[1-7]$/.test(String(CURRENT_PERIOD)) ? 'ULT. ' + String(CURRENT_PERIOD).replace('ult','') : 'ULTIMOS JOGOS'} ▾
         </button>
         <div class="period-menu">
-          ${[1,2,3,4,5,6,7].map(n => `<button type="button" class="period-menu-item ${CURRENT_PERIOD==='ult'+n?'active':''}" onclick="setPeriod('ult${n}', event)">Últimos ${n} jogo${n>1?'s':''}</button>`).join('')}
+          ${[1,2,3,4,5,6,7].map(n => `<button type="button" class="period-menu-item ${CURRENT_PERIOD==="ult"+n?"active":""}" onclick="setPeriod('ult${n}', event)">Ultimos ${n} jogo${n>1?"s":""}</button>`).join('')}
         </div>
       </div>
       <div class="period ${CURRENT_PERIOD==='ult10'?'active':''}" onclick="setPeriod('ult10', event)">ÚLT. 10</div>
@@ -7645,9 +7695,12 @@ async function saveMyScoutProfile(name) {
 
 function renderMeuScout() {
   const players = scopedPlayers();
+  const rosterPlayers = playerRosterOptions();
   const savedName = currentMyScoutName();
-  const found = findPlayerByTypedName(savedName, players);
-  const options = players.map(p => `<option value="${escapeAttr(p.name)}"></option>`).join('');
+  const filteredFound = findPlayerByTypedName(savedName, players);
+  const rosterFound = findPlayerByTypedName(savedName, rosterPlayers);
+  const found = filteredFound || emptyPlayerForCurrentFilter(rosterFound);
+  const options = rosterPlayers.map(p => `<option value="${escapeAttr(p.name)}"></option>`).join('');
   const scopeLabel = currentScopeLabel();
   const scoutControls = isAdmin() ? `
     <form class="agenda-form" onsubmit="saveMyScoutName(event)" style="grid-template-columns: 1fr auto auto auto; align-items:end;">
@@ -7678,10 +7731,13 @@ function renderMeuScout() {
     html += `<div class="empty-state" style="padding:40px 20px;"><div class="empty-title">Digite seu nome de jogador</div><div class="empty-text">Use o mesmo nome que aparece no Pro Clubs para abrir seu scout individual.</div></div>`;
     return html;
   }
-
   if (!found) {
-    html += `<div class="empty-state" style="padding:40px 20px;"><div class="empty-title">Jogador não encontrado neste filtro</div><div class="empty-text">Confira o nome digitado ou mude o filtro de tipo de partida para TODAS PARTIDAS.</div></div>`;
+    html += `<div class="empty-state" style="padding:40px 20px;"><div class="empty-title">Jogador nao encontrado no elenco</div><div class="empty-text">Confira se o usuario esta igual ao ID FIFA/Pro Clubs cadastrado no time.</div></div>`;
     return html;
+  }
+
+  if (found.no_games_in_filter) {
+    html += `<div class="empty-state" style="padding:22px 20px;margin-bottom:16px;"><div class="empty-title">0 partidas neste filtro</div><div class="empty-text">O jogador existe no clube, mas nao apareceu no recorte selecionado. Os numeros abaixo ficam zerados para nao misturar outro periodo.</div></div>`;
   }
 
   const safeName = found.name.replace(/'/g, "\\'");
@@ -9633,6 +9689,11 @@ if __name__ == "__main__":
     print("="*60 + "\n")
     
     uvicorn.run(app, host="0.0.0.0", port=8000)
+
+
+
+
+
 
 
 
