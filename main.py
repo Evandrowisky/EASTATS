@@ -135,6 +135,51 @@ class EAFCClient:
                 "status": 0,
                 "body": f"{type(e).__name__}: {e}",
             }
+
+    def _get_fresh(self, url: str, params: dict = None, timeout: int = 30):
+        """GET com sessao nova. A rota de partidas da EA costuma falhar em serverless com sessao reaproveitada."""
+        headers = dict(getattr(self.session, "headers", {}) or {})
+        last_error = None
+        impersonations = ["chrome120", "chrome116", "chrome110", "firefox133", "safari17_0"]
+        try:
+            from curl_cffi import requests as cffi_requests
+            for impersonate in impersonations:
+                try:
+                    fresh = cffi_requests.Session(impersonate=impersonate)
+                    fresh.headers.update(headers)
+                    r = fresh.get(url, params=params, timeout=timeout)
+                    print(f"[EA FC] FRESH {impersonate} GET {url} {params} -> {r.status_code} ({len(r.text)} bytes)")
+                    if r.status_code == 200 and r.text:
+                        preview = r.text[:200].replace('\n', ' ')
+                        print(f"[EA FC]   fresh preview: {preview}")
+                        try:
+                            return r.json()
+                        except Exception as je:
+                            return {"_ea_error": True, "status": r.status_code, "body": f"JSON: {je} | {r.text[:300]}"}
+                    last_error = {"status": r.status_code, "body": (r.text or "")[:500]}
+                except Exception as e:
+                    last_error = {"status": 0, "body": f"{type(e).__name__}: {e}"}
+        except Exception as import_err:
+            last_error = {"status": 0, "body": f"curl_cffi indisponivel: {import_err}"}
+
+        try:
+            import requests as simple_requests
+            r = simple_requests.get(url, params=params, headers=headers, timeout=timeout)
+            print(f"[EA FC] FRESH requests GET {url} {params} -> {r.status_code} ({len(r.text)} bytes)")
+            if r.status_code == 200 and r.text:
+                try:
+                    return r.json()
+                except Exception as je:
+                    return {"_ea_error": True, "status": r.status_code, "body": f"JSON: {je} | {r.text[:300]}"}
+            last_error = {"status": r.status_code, "body": (r.text or "")[:500]}
+        except Exception as e:
+            last_error = {"status": 0, "body": f"{type(e).__name__}: {e}"}
+
+        return {
+            "_ea_error": True,
+            "status": (last_error or {}).get("status", 0),
+            "body": (last_error or {}).get("body", "erro desconhecido"),
+        }
     
     def search_club(self, club_name: str, platform: str = "common-gen5"):
         # Endpoint correto (EA mudou em 2025): allTimeLeaderboard/search
@@ -192,7 +237,7 @@ class EAFCClient:
         }
         if match_type:
             params["matchType"] = match_type
-        return self._get(url, params)
+        return self._get_fresh(url, params)
 
 # ============================================================
 # BANCO DE DADOS
