@@ -12,6 +12,7 @@ Inspirado no app Scout Clubs original
 import os
 import json
 import sqlite3
+import random
 import asyncio
 import time
 import unicodedata
@@ -55,7 +56,26 @@ JWT_ALGORITHM = "HS256"
 JWT_EXPIRE_DAYS = int(os.getenv("JWT_EXPIRE_DAYS", "7") or "7")
 SUPABASE_LOGO_BUCKET = os.getenv("SUPABASE_LOGO_BUCKET", "club-logos").strip() or "club-logos"
 
-MATCH_TYPE_CANDIDATES = [
+def _env_float_local(name: str, default: float) -> float:
+    try:
+        return float(os.getenv(name, str(default)) or default)
+    except Exception:
+        return default
+
+
+def _env_bool_local(name: str, default: str = "0") -> bool:
+    return str(os.getenv(name, default) or default).strip().lower() in ("1", "true", "yes", "on", "sim")
+
+
+# Sync normal: use apenas matchTypes que a EA aceita em producao. Os outros valores
+# ficam reservados para diagnostico, porque chamadas invalidas aumentam o risco de 400/403.
+PRODUCTION_MATCH_TYPE_CANDIDATES = [
+    "leagueMatch",
+    "playoffMatch",
+    "friendlyMatch",
+]
+
+DIAGNOSTIC_MATCH_TYPE_CANDIDATES = [
     "leagueMatch",
     "playoffMatch",
     "friendlyMatch",
@@ -68,6 +88,11 @@ MATCH_TYPE_CANDIDATES = [
     "gameType15",
     "gameType16",
 ]
+
+MATCH_TYPE_CANDIDATES = PRODUCTION_MATCH_TYPE_CANDIDATES
+EA_SYNC_DELAY_SECONDS = max(0.0, _env_float_local("EA_SYNC_DELAY_SECONDS", 1.2))
+EA_SYNC_JITTER_SECONDS = max(0.0, _env_float_local("EA_SYNC_JITTER_SECONDS", 0.6))
+EA_STOP_ON_ACCESS_DENIED = not _env_bool_local("EA_IGNORE_ACCESS_DENIED", "0")
 
 # ============================================================
 # CLIENTE EA FC
@@ -592,11 +617,21 @@ def calc_club_stats(overall_data, club_info_data, matches_list):
     return stats
 
 
-def fetch_all_match_types(ea_client, club_id, platform, max_count=100):
-    """Testa matchTypes, contagens e a chamada sem matchType, com diagnostico das datas recentes."""
+def _ea_access_denied(raw) -> bool:
+    if not isinstance(raw, dict) or not raw.get("_ea_error"):
+        return False
+    status = str(raw.get("status") or "").strip()
+    body = str(raw.get("body") or "").lower()
+    return status == "403" or "access denied" in body or "forbidden" in body
+
+
+def fetch_all_match_types(ea_client, club_id, platform, max_count=100, diagnostic: Optional[bool] = None):
+    """Busca partidas com matchTypes seguros; diagnostico completo somente quando habilitado."""
     all_matches_raw = []
     seen = set()
     debug = []
+    diagnostic_mode = _env_bool_local("EA_DIAG_MATCHTYPES", "0") if diagnostic is None else bool(diagnostic)
+    blocked_by_ea = False
     request_counts = []
     # A EA costuma oscilar/retornar 500 quando pedimos 200 resultados.
     # Comecar pelos limites mais estaveis evita "azedar" a sessao inteira.
@@ -624,9 +659,13 @@ def fetch_all_match_types(ea_client, club_id, platform, max_count=100):
             break
         return {"timestamp": ts, "date": date, "opponent": _fix_mojibake(str(opp_name))}
 
-    candidates = list(MATCH_TYPE_CANDIDATES) + [None]
+    candidates = list(DIAGNOSTIC_MATCH_TYPE_CANDIDATES if diagnostic_mode else PRODUCTION_MATCH_TYPE_CANDIDATES)
+    if diagnostic_mode:
+        candidates.append(None)
     for match_type in candidates:
         label = match_type or "semMatchType"
+        if blocked_by_ea:
+            break
         entry = {
             "matchType": label,
             "requested": request_counts,
@@ -640,6 +679,8 @@ def fetch_all_match_types(ea_client, club_id, platform, max_count=100):
         }
         latest_seen = []
         for requested_count in request_counts:
+            if blocked_by_ea:
+                break
             attempt = {"requested": requested_count, "ok": False, "count": 0, "unique_added": 0, "duplicates": 0, "latest": [], "error": None}
             try:
                 raw = ea_client.matches(club_id, match_type, platform, max_count=requested_count)
@@ -674,13 +715,20 @@ def fetch_all_match_types(ea_client, club_id, platform, max_count=100):
                         attempt["error"] = f"EA status {raw.get('status')}: {body}"
                     else:
                         attempt["error"] = f"Retorno inesperado: {type(raw).__name__}"
+                    if EA_STOP_ON_ACCESS_DENIED and _ea_access_denied(raw):
+                        blocked_by_ea = True
+                        entry["blocked"] = True
+                        entry["error"] = attempt["error"] or "EA bloqueou a consulta"
+                        print("[EA FC] Bloqueio 403/Access Denied detectado; interrompendo sync para evitar novas chamadas.")
             except Exception as e:
                 attempt["error"] = f"{type(e).__name__}: {e}"
             entry["attempts"].append(attempt)
+            if EA_SYNC_DELAY_SECONDS > 0:
+                time.sleep(EA_SYNC_DELAY_SECONDS + random.uniform(0, EA_SYNC_JITTER_SECONDS))
 
         entry["latest"] = sorted(latest_seen, key=lambda x: x.get("timestamp", 0), reverse=True)[:5]
         errors = [a["error"] for a in entry["attempts"] if a.get("error")]
-        if errors and not entry["ok"]:
+        if errors and not entry.get("error") and not entry["ok"]:
             entry["error"] = " | ".join(errors[:3])
 
         attempts_msg = ", ".join(f"{a['requested']}=>{a['count']} (+{a['unique_added']}, dup {a['duplicates']})" for a in entry["attempts"])
@@ -2790,7 +2838,7 @@ def test_matchtypes(
 
     club_id = str(search["clubId"])
     plat = search.get("platform", platform) or "common-gen5"
-    all_matches_raw, debug = fetch_all_match_types(ea_client, club_id, plat, max_count=max_count)
+    all_matches_raw, debug = fetch_all_match_types(ea_client, club_id, plat, max_count=max_count, diagnostic=True)
     parsed = parse_matches(all_matches_raw, club_id)
     resumo = summarize_matches_by_type(parsed)
 
