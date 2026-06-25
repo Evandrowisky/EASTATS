@@ -3752,7 +3752,30 @@ def build_player_analytics(player_name, cache, match_type="todos", match_status=
             "key_passes_per_game": 0,
         }
     else:
-        raise HTTPException(404, f"Jogador '{player_name}' sem partidas no clube/filtro atual")
+        print(f"[ANALYTICS] Jogador '{player_name}' nao achado em players/matches; devolvendo pacote vazio para nao quebrar o modal")
+        player = {
+            "name": pname_raw or player_name,
+            "position": "?",
+            "rating": 0,
+            "games": 0,
+            "club_games": 0,
+            "ea_global_games": 0,
+            "member_stats": {},
+            "goals": 0,
+            "assists": 0,
+            "pre_assists": 0,
+            "key_passes": 0,
+            "shots": 0,
+            "passes_made": 0,
+            "pass_pct": 0,
+            "tackles_made": 0,
+            "tackle_pct": 0,
+            "mom": 0,
+            "goals_per_game": 0,
+            "assists_per_game": 0,
+            "pre_assists_per_game": 0,
+            "key_passes_per_game": 0,
+        }
 
     team_rating_avg = _avg([p.get("rating", 0) for p in club_players], 0)
     team_goal_avg = _avg([p.get("goals_per_game", 0) for p in club_players], 0)
@@ -9903,7 +9926,7 @@ function renderPlayerFallbackHTML(p, errorMessage) {
   return `
     <div class="player-detail">
       <div style="border:1px solid rgba(255,170,0,.35);background:rgba(255,170,0,.08);color:#ffaa00;border-radius:10px;padding:12px 14px;margin-bottom:16px;font-weight:700;">
-        O histórico detalhado não abriu pela rota de análise, então carreguei os dados salvos do card para não deixar a tela quebrar. Detalhe técnico: ${escapeHtml(errorMessage || '')}
+        Resumo consolidado do jogador. ${escapeHtml(errorMessage || '')}
       </div>
       <h2>${escapeHtml(p.name)} <span class="pos-tag">${escapeHtml(profile.manual_position || p.position || '-')}</span></h2>
       <div style="color:var(--text-2);font-size:13px;">${escapeHtml(p.games || 0)} jogos no clube/filtro · nota ${escapeHtml(p.rating || p.sofi_rating || 0)}</div>
@@ -9934,6 +9957,7 @@ async function showPlayerDetail(name) {
     match_status: CURRENT_MATCH_STATUS || 'todas',
     period: CURRENT_PERIOD || 'todos'
   };
+  const immediateFallbackPlayer = findPlayerFallbackSource(name);
 
   try {
     let data = null;
@@ -9957,6 +9981,11 @@ async function showPlayerDetail(name) {
       usedFallback = true;
     }
 
+    if ((!data || !Array.isArray(data.history) || data.history.length === 0) && immediateFallbackPlayer) {
+      mc.innerHTML = renderPlayerFallbackHTML(immediateFallbackPlayer, 'Sem histórico detalhado para este filtro. Exibindo os dados consolidados do card.');
+      return;
+    }
+
     const notice = usedFallback
       ? '<div style="border:1px solid rgba(255,170,0,.35);background:rgba(255,170,0,.08);color:#ffaa00;border-radius:8px;padding:10px 12px;margin-bottom:14px;font-weight:700;">Sem partidas para este jogador no filtro atual. Exibindo todo o histórico salvo do clube.</div>'
       : '';
@@ -9964,7 +9993,7 @@ async function showPlayerDetail(name) {
     mc.innerHTML = notice + renderPlayerDetailHTML(data);
     setTimeout(() => renderPlayerCharts(data), 80);
   } catch (e) {
-    const fallbackPlayer = findPlayerFallbackSource(name);
+    const fallbackPlayer = immediateFallbackPlayer || findPlayerFallbackSource(name);
     if (fallbackPlayer) {
       mc.innerHTML = renderPlayerFallbackHTML(fallbackPlayer, e.message);
       return;
@@ -10334,6 +10363,7 @@ if __name__ == "__main__":
     print("="*60 + "\n")
     
     uvicorn.run(app, host="0.0.0.0", port=8000)
+
 
 
 
