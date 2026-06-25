@@ -4082,7 +4082,72 @@ def get_player_analytics(
     if not cache:
         raise HTTPException(404, "Dados do clube não carregados")
 
-    return build_player_analytics(player_name, cache, match_type, match_status, period)
+    # Para o modal do jogador, carregue sempre a fonte persistente de partidas.
+    # O JSON salvo em clubs.data pode estar atrasado ou incompleto em deploy serverless.
+    if USE_SUPABASE and user_club_id:
+        try:
+            supabase_matches = load_matches_supabase(user_club_id, limit=5000)
+            if supabase_matches:
+                cache = dict(cache)
+                cache["matches"] = merge_match_lists_for_storage(
+                    user_club_id,
+                    supabase_matches,
+                    cache.get("matches", []),
+                )
+        except Exception as e:
+            print(f"[ANALYTICS] Aviso ao carregar matches diretos do Supabase: {e}")
+
+    active_filter = (
+        (match_type or "todos").lower() != "todos"
+        or (match_status or "todas").lower() != "todas"
+        or (period or "todos").lower() != "todos"
+    )
+
+    try:
+        return build_player_analytics(player_name, cache, match_type, match_status, period)
+    except HTTPException as first_error:
+        # Se o recorte atual nao tem o jogador, abre pelo historico completo em vez de quebrar o modal.
+        if active_filter:
+            try:
+                analytics = build_player_analytics(player_name, cache, "todos", "todas", "todos")
+                analytics.setdefault("scope", {})["fallback_from_filter"] = True
+                analytics["scope"]["requested"] = {
+                    "match_type": match_type,
+                    "match_status": match_status,
+                    "period": period,
+                }
+                return analytics
+            except Exception as fallback_error:
+                print(f"[ANALYTICS] Fallback completo falhou para {player_name}: {fallback_error}")
+        raise first_error
+    except Exception as e:
+        print(f"[ANALYTICS] Erro ao montar analytics de {player_name}: {type(e).__name__}: {e}")
+        if active_filter:
+            try:
+                analytics = build_player_analytics(player_name, cache, "todos", "todas", "todos")
+                analytics.setdefault("scope", {})["fallback_from_filter"] = True
+                return analytics
+            except Exception as fallback_error:
+                print(f"[ANALYTICS] Fallback apos erro falhou para {player_name}: {fallback_error}")
+        raise HTTPException(500, "Nao foi possivel montar a analise do jogador agora")
+
+
+@app.get("/api/player-analytics")
+def get_player_analytics_query(
+    player_name: str = Query(...),
+    match_type: str = Query("todos"),
+    match_status: str = Query("todas"),
+    period: str = Query("todos"),
+    current_user: dict = Depends(get_current_user),
+):
+    """Versao por querystring para nomes com espacos, acentos ou caracteres especiais."""
+    return get_player_analytics(
+        player_name=player_name,
+        match_type=match_type,
+        match_status=match_status,
+        period=period,
+        current_user=current_user,
+    )
 
 
 @app.get("/api/player/{player_name}")
@@ -8130,10 +8195,10 @@ function renderMeuScout() {
     html += `<div class="empty-state" style="padding:22px 20px;margin-bottom:16px;"><div class="empty-title">0 partidas neste filtro</div><div class="empty-text">O jogador existe no clube, mas nao apareceu no recorte selecionado. Os numeros abaixo ficam zerados para nao misturar outro periodo.</div></div>`;
   }
 
-  const safeName = found.name.replace(/'/g, "\\'");
+  const safeNameJson = JSON.stringify(found.name || "").replace(/'/g, "&#39;");
   html += `
     <div class="players-grid" style="grid-template-columns:minmax(260px, 420px);">
-      <div class="player-card" onclick="showPlayerDetail('${safeName}')">
+      <div class="player-card" onclick='showPlayerDetail(${safeNameJson})'>
         <div class="player-rating-big">${found.rating}</div>
         <div class="player-pos"><span class="player-pos-badge">${found.position} &middot; ${found.games}J no filtro</span></div>
         <div class="player-name">${found.name}</div>
@@ -8161,7 +8226,7 @@ function renderMeuScout() {
           ${playerStatLine('Win%', found.win_rate, '%')}
           ${playerStatLine('Verm.', found.reds)}
         </div>
-        <button class="btn-primary" style="width:100%;margin-top:14px;padding:10px 16px;" onclick="event.stopPropagation();showPlayerDetail('${safeName}')">Abrir análise completa</button>
+        <button class="btn-primary" style="width:100%;margin-top:14px;padding:10px 16px;" onclick='event.stopPropagation();showPlayerDetail(${safeNameJson})'>Abrir análise completa</button>
       </div>
     </div>
     ${renderMyScoutProfileEditor(found.name)}
@@ -8177,7 +8242,7 @@ function renderJogadores() {
   let html = `<div class="section-title">Jogadores &middot; ${scopeLabel}</div><div class="players-grid">`;
   players.forEach(p => {
     html += `
-      <div class="player-card" onclick="showPlayerDetail('${p.name.replace(/'/g, "\\'")}')">
+      <div class="player-card" onclick='showPlayerDetail(${JSON.stringify(p.name || "").replace(/'/g, "&#39;")})'>
         <div class="player-rating-big">${p.rating}</div>
         <div class="player-pos">
           <span class="player-pos-badge">${p.position} &middot; ${p.games}J no filtro &middot; ${p.position_source || 'auto'}</span>
@@ -8270,7 +8335,7 @@ function renderRankings() {
         <div class="ranking-title"><span class="ranking-title-icon">${icon}</span>${title}</div>
         <div class="ranking-list">
           ${rows.map((p, idx) => `
-            <div class="ranking-row" onclick="showPlayerDetail('${p.name.replace(/'/g, "\'")}')">
+            <div class="ranking-row" onclick='showPlayerDetail(${JSON.stringify(p.name || "").replace(/'/g, "&#39;")})'>
               <div class="ranking-pos ${podiumClass(idx)}">${podiumIcon(idx)}</div>
               <div class="ranking-main">
                 <div class="ranking-name">${p.name}</div>
@@ -9738,14 +9803,18 @@ async function analyzePlayer(name) {
 }
 
 async function requestPlayerAnalytics(name, filters) {
-  const qs = new URLSearchParams(filters);
-  const r = await authFetch('/api/player/' + encodeURIComponent(name) + '/analytics?' + qs.toString());
+  const qs = new URLSearchParams(filters || {});
+  qs.set('player_name', name || '');
+  const r = await authFetch('/api/player-analytics?' + qs.toString());
   if (!r.ok) {
     let msg = 'Não encontrado ou sem dados suficientes';
     try {
       const payload = await r.json();
-      if (payload && payload.detail) msg = payload.detail;
+      if (payload && payload.detail) {
+        msg = Array.isArray(payload.detail) ? JSON.stringify(payload.detail) : payload.detail;
+      }
     } catch (_) {}
+    console.error('Falha ao carregar análise do jogador', {status: r.status, player: name, msg});
     const err = new Error(msg);
     err.status = r.status;
     throw err;
@@ -9806,7 +9875,7 @@ function renderPlayerDetailHTML(data) {
   const rank = data.ranking || {};
   const cmp = data.team_comparison || {};
   const trend = data.trend || {};
-  const safeName = p.name.replace(/'/g, "\\'");
+  const safeNameJson = JSON.stringify(p.name || "").replace(/'/g, "&#39;");
   const radar = adv.radar || {};
   const profile = profileForPlayer(p.name);
   const psBadges = (profile.playstyles || []).map(x => `<span class="tag liga" style="margin-right:6px;">${playstyleIcon(x)} ${x}</span>`).join('');
@@ -9901,7 +9970,7 @@ function renderPlayerDetailHTML(data) {
       </table>`}
 
       <div style="margin-top:18px;display:flex;gap:8px;">
-        <button class="btn-primary" style="padding:8px 18px;" onclick="analyzePlayer('${safeName}')"> Analisar com IA</button>
+        <button class="btn-primary" style="padding:8px 18px;" onclick='analyzePlayer(${safeNameJson})'> Analisar com IA</button>
       </div>
     </div>`;
 }
