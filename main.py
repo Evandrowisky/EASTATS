@@ -3433,7 +3433,67 @@ def build_estimated_heatmap(player, history):
     }
 
 
-def build_player_analytics(player_name, cache, match_type="todos"):
+def _analytics_is_quit_match(m):
+    """Mesma regra do front: partida quitada so vale para amistoso."""
+    if str((m or {}).get("match_type") or "").lower() != "amistoso":
+        return False
+    players = (m or {}).get("players_ratings") or []
+    if not players:
+        return False
+    rated = []
+    for p in players:
+        try:
+            rating = float(p.get("rating", 0) or 0)
+        except Exception:
+            rating = 0
+        if rating > 0:
+            rated.append(rating)
+    if len(rated) < 3:
+        return False
+    avg = sum(rated) / len(rated)
+    below_six = sum(1 for v in rated if v < 6)
+    low_or_flat = sum(1 for v in rated if v <= 6.1)
+    mostly_low = (below_six / len(rated)) >= 0.55 or (low_or_flat / len(rated)) >= 0.75
+    almost_all_flat = avg <= 6.15 and low_or_flat >= max(3, ceil(len(rated) * 0.7))
+    activity = 0
+    for p in players:
+        for key in ("goals", "assists", "shots", "tackles_made", "saves"):
+            try:
+                activity += float(p.get(key, 0) or 0)
+            except Exception:
+                pass
+    low_activity = activity <= max(2, len(rated) * 0.35)
+    return mostly_low or almost_all_flat or (avg <= 6.05 and low_activity)
+
+
+def _filter_matches_for_analytics(matches, match_type="todos", match_status="todas", period="todos"):
+    wanted_type = str(match_type or "todos").lower()
+    wanted_status = str(match_status or "todas").lower()
+    wanted_period = str(period or "todos").lower()
+    out = sorted(list(matches or []), key=lambda x: int((x or {}).get("timestamp", 0) or 0), reverse=True)
+    if wanted_type != "todos":
+        out = [m for m in out if str((m or {}).get("match_type") or "").lower() == wanted_type]
+    if wanted_status == "quitadas":
+        out = [m for m in out if _analytics_is_quit_match(m)]
+    elif wanted_status == "validas":
+        out = [m for m in out if not _analytics_is_quit_match(m)]
+    if wanted_period.startswith("ult"):
+        try:
+            n = int(wanted_period.replace("ult", "") or 0)
+        except Exception:
+            n = 0
+        if n > 0:
+            out = out[:n]
+    elif wanted_period == "semana":
+        cutoff = int(time.time()) - 7 * 86400
+        out = [m for m in out if int((m or {}).get("timestamp", 0) or 0) >= cutoff]
+    elif wanted_period == "mes":
+        cutoff = int(time.time()) - 30 * 86400
+        out = [m for m in out if int((m or {}).get("timestamp", 0) or 0) >= cutoff]
+    return out
+
+
+def build_player_analytics(player_name, cache, match_type="todos", match_status="todas", period="todos"):
     """Gera pacote analitico profissional do jogador a partir do cache local."""
     if not cache:
         raise HTTPException(404, "Sincronize um clube primeiro")
@@ -3442,11 +3502,11 @@ def build_player_analytics(player_name, cache, match_type="todos"):
     player = next((p for p in players if p.get("name", "").lower() == pname), None)
 
     wanted_match_type = (match_type or "todos").lower()
+    wanted_match_status = (match_status or "todas").lower()
+    wanted_period = (period or "todos").lower()
+    filtered_matches_for_scope = _filter_matches_for_analytics(cache.get("matches", []), wanted_match_type, wanted_match_status, wanted_period)
     history = []
-    for m in cache.get("matches", []):
-        current_match_type = str(m.get("match_type", "desconhecido") or "desconhecido").lower()
-        if wanted_match_type != "todos" and current_match_type != wanted_match_type:
-            continue
+    for m in filtered_matches_for_scope:
         for pr in (m.get("players_ratings") or []):
             if pr.get("name", "").lower() == pname:
                 history.append({
@@ -3483,10 +3543,7 @@ def build_player_analytics(player_name, cache, match_type="todos"):
     # Todas as metricas de elenco/ranking abaixo vêm SOMENTE das partidas salvas do clube atual.
     # Nao usa games/goals globais de members/career/stats, porque esses numeros podem incluir outros clubes.
     club_player_rows = {}
-    for m in cache.get("matches", []):
-        current_match_type = str(m.get("match_type", "desconhecido") or "desconhecido").lower()
-        if wanted_match_type != "todos" and current_match_type != wanted_match_type:
-            continue
+    for m in filtered_matches_for_scope:
         for pr in (m.get("players_ratings") or []):
             nm = pr.get("name") or "Unknown"
             row = club_player_rows.setdefault(nm, {
@@ -3584,7 +3641,7 @@ def build_player_analytics(player_name, cache, match_type="todos"):
     analytics = {
         "player": player,
         "games_with_history": games,
-        "scope": {"club_id": (cache.get("club") or {}).get("id"), "match_type": wanted_match_type, "label": "clube atual"},
+        "scope": {"club_id": (cache.get("club") or {}).get("id"), "match_type": wanted_match_type, "match_status": wanted_match_status, "period": wanted_period, "label": "clube atual"},
         "history": history,
         "series": list(reversed(history)),
         "averages": {
@@ -3608,7 +3665,8 @@ def build_player_analytics(player_name, cache, match_type="todos"):
     }
     detail_games = games
     club_total_games = int(float(player.get("ea_global_games") or player.get("games") or detail_games or 0))
-    use_member_totals = wanted_match_type == "todos" and club_total_games > detail_games
+    full_scope = wanted_match_type == "todos" and wanted_match_status == "todas" and wanted_period == "todos"
+    use_member_totals = full_scope and club_total_games > detail_games
     if use_member_totals:
         member = player.get("member_stats") or player
         has_shot_stats = bool(member.get("has_shot_stats"))
@@ -3712,13 +3770,18 @@ Priorize treinos e chamadas que maximizem os pontos fortes acima. Em jogos grand
 """
 
 @app.post("/api/ai/player")
-async def ai_player(player_name: str, match_type: str = Query("todos")):
+async def ai_player(
+    player_name: str,
+    match_type: str = Query("todos"),
+    match_status: str = Query("todas"),
+    period: str = Query("todos"),
+):
     """Analise de jogador por IA usando o pacote analitico completo."""
     cache = load_cache()
     if not cache or not cache.get("players"):
         raise HTTPException(404, "Sincronize um clube primeiro")
 
-    analytics = build_player_analytics(player_name, cache, match_type)
+    analytics = build_player_analytics(player_name, cache, match_type, match_status, period)
     player = analytics["player"]
 
     if not OPENAI_API_KEY:
@@ -3836,10 +3899,15 @@ A formação **{ideal['formation']}** foi escolhida com base no elenco disponív
 # ============================================================
 
 @app.get("/api/player/{player_name}/analytics")
-def get_player_analytics(player_name: str, match_type: str = Query("todos")):
-    """Retorna analytics profissional completo do jogador."""
+def get_player_analytics(
+    player_name: str,
+    match_type: str = Query("todos"),
+    match_status: str = Query("todas"),
+    period: str = Query("todos"),
+):
+    """Retorna analytics profissional completo do jogador respeitando os filtros atuais da tela."""
     cache = load_cache()
-    return build_player_analytics(player_name, cache, match_type)
+    return build_player_analytics(player_name, cache, match_type, match_status, period)
 
 
 @app.get("/api/player/{player_name}")
@@ -9401,7 +9469,13 @@ async function analyzePlayer(name) {
   document.getElementById('modal').classList.add('active');
   
   try {
-    const r = await authFetch(`/api/ai/player?player_name=${encodeURIComponent(name)}&match_type=${encodeURIComponent(CURRENT_MATCH_TYPE)}`, { method: 'POST' });
+    const qs = new URLSearchParams({
+      player_name: name,
+      match_type: CURRENT_MATCH_TYPE,
+      match_status: CURRENT_MATCH_STATUS,
+      period: CURRENT_PERIOD
+    });
+    const r = await authFetch(`/api/ai/player?${qs.toString()}`, { method: 'POST' });
     const data = await r.json();
     document.getElementById('modalContent').innerHTML = renderMarkdown(data.analysis);
   } catch (e) {
@@ -9414,7 +9488,12 @@ async function showPlayerDetail(name) {
   mc.innerHTML = '<div class="loading"><div class="spinner"></div> Carregando analytics...</div>';
   document.getElementById('modal').classList.add('active');
   try {
-    const r = await authFetch('/api/player/' + encodeURIComponent(name) + '/analytics?match_type=' + encodeURIComponent(CURRENT_MATCH_TYPE));
+    const qs = new URLSearchParams({
+      match_type: CURRENT_MATCH_TYPE,
+      match_status: CURRENT_MATCH_STATUS,
+      period: CURRENT_PERIOD
+    });
+    const r = await authFetch('/api/player/' + encodeURIComponent(name) + '/analytics?' + qs.toString());
     if (!r.ok) throw new Error('Não encontrado ou sem dados suficientes');
     const data = await r.json();
     mc.innerHTML = renderPlayerDetailHTML(data);
@@ -9481,9 +9560,14 @@ function renderPlayerDetailHTML(data) {
   const psBadges = (profile.playstyles || []).map(x => `<span class="tag liga" style="margin-right:6px;">${playstyleIcon(x)} ${x}</span>`).join('');
   const detailedGames = Number(data.detail_games ?? data.games_with_history ?? h.length ?? 0) || h.length || 0;
   const clubTotalGames = Number(data.club_total_games ?? p.ea_global_games ?? p.games ?? detailedGames) || detailedGames;
+  const scope = data.scope || {};
+  const typeLabel = scope.match_type && scope.match_type !== 'todos' ? scope.match_type : 'todas as partidas';
+  const statusLabel = scope.match_status && scope.match_status !== 'todas' ? scope.match_status : 'todas';
+  const periodLabel = scope.period && scope.period !== 'todos' ? scope.period.replace('ult', 'ultimas ') : 'todo historico salvo';
+  const filterLabel = `${typeLabel} &middot; ${statusLabel} &middot; ${periodLabel}`;
   const gamesLine = data.uses_member_totals
-    ? `${clubTotalGames} jogos no clube (totais EA) &middot; ${detailedGames} partidas detalhadas salvas &middot; ranking ${rank.rating_rank_label || '-'} &middot; tendência ${trend.status || '-'}`
-    : `${detailedGames} partidas detalhadas salvas de ${CURRENT_MATCH_TYPE} &middot; ranking ${rank.rating_rank_label || '-'} &middot; tendência ${trend.status || '-'}`;
+    ? `${clubTotalGames} jogos no clube (totais EA) &middot; ${detailedGames} partidas detalhadas salvas &middot; ${filterLabel} &middot; ranking ${rank.rating_rank_label || '-'} &middot; tendencia ${trend.status || '-'}`
+    : `${detailedGames} partidas detalhadas salvas &middot; ${filterLabel} &middot; ranking ${rank.rating_rank_label || '-'} &middot; tendencia ${trend.status || '-'}`;
   return `
     <div class="player-detail">
       <div class="analytics-hero">
@@ -9548,7 +9632,7 @@ function renderPlayerDetailHTML(data) {
       <div class="section-title">Relatório Scout Offline</div>
       <div class="analytics-note">${renderMarkdown(data.scout_report || '')}</div>
 
-      <div class="section-title" style="margin-top:18px;">Todas as ${h.length} partidas detalhadas salvas ${CURRENT_MATCH_TYPE === 'todos' ? 'no clube' : 'de ' + CURRENT_MATCH_TYPE}</div>
+      <div class="section-title" style="margin-top:18px;">${h.length} partidas detalhadas salvas &middot; ${filterLabel}</div>
       ${h.length === 0 ? '<div style="color:var(--text-2);padding:20px;text-align:center;">Nenhuma partida com participação registrada.</div>' : `
       <table class="history-table">
         <thead><tr><th>Data</th><th>Tipo</th><th>Adversário</th><th>Resultado</th><th>Pos</th><th>Sofi</th><th>EA</th><th>G</th><th>A</th><th>Chu</th><th>Pass%</th><th>Des%</th><th>Des</th><th>Def</th><th>SG</th><th>Verm</th><th>MOM</th></tr></thead>
