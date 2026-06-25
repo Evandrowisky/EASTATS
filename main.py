@@ -1,4 +1,4 @@
-﻿# -*- coding: utf-8 -*-
+# -*- coding: utf-8 -*-
 """
 Scout Clubs Pro v2 - Análise Profissional EA FC
 Inspirado no app Scout Clubs original
@@ -3565,6 +3565,30 @@ def _analytics_player_key(value):
     return re.sub(r"[^a-z0-9]+", "", text)
 
 
+def _analytics_names_match(left, right):
+    """Compara IDs/nomes EA aceitando pequenas variacoes visuais do mesmo nick."""
+    left_key = _analytics_player_key(left)
+    right_key = _analytics_player_key(right)
+    if not left_key or not right_key:
+        return False
+    if left_key == right_key:
+        return True
+    if min(len(left_key), len(right_key)) < 5:
+        return False
+    return left_key in right_key or right_key in left_key
+
+
+def _analytics_find_player_record(items, wanted_name, name_field="name"):
+    wanted_key = _analytics_player_key(wanted_name)
+    for item in items or []:
+        if isinstance(item, dict) and _analytics_player_key(item.get(name_field)) == wanted_key:
+            return item
+    for item in items or []:
+        if isinstance(item, dict) and _analytics_names_match(item.get(name_field), wanted_name):
+            return item
+    return None
+
+
 def _analytics_int_alias(data, aliases, default=0):
     for key in aliases:
         if isinstance(data, dict) and key in data:
@@ -3592,7 +3616,7 @@ def build_player_analytics(player_name, cache, match_type="todos", match_status=
     pname_raw = str(player_name or "").strip()
     pkey = _analytics_player_key(pname_raw)
     players = cache.get("players", [])
-    player = next((p for p in players if _analytics_player_key(p.get("name")) == pkey), None)
+    player = _analytics_find_player_record(players, pname_raw, "name")
 
     wanted_match_type = (match_type or "todos").lower()
     wanted_match_status = (match_status or "todas").lower()
@@ -3602,7 +3626,7 @@ def build_player_analytics(player_name, cache, match_type="todos", match_status=
     any_saved_player = None
     for m_any in cache.get("matches", []) or []:
         for pr_any in (m_any.get("players_ratings") or []):
-            if _analytics_player_key(pr_any.get("name")) == pkey:
+            if _analytics_names_match(pr_any.get("name"), pname_raw):
                 any_saved_player = pr_any
                 break
         if any_saved_player:
@@ -3611,7 +3635,7 @@ def build_player_analytics(player_name, cache, match_type="todos", match_status=
     history = []
     for m in filtered_matches_for_scope:
         for pr in (m.get("players_ratings") or []):
-            if _analytics_player_key(pr.get("name")) == pkey:
+            if _analytics_names_match(pr.get("name"), pname_raw):
                 history.append({
                     "match_id": m.get("match_id"), "opponent": m.get("opponent"), "date": m.get("date"),
                     "timestamp": int(m.get("timestamp", 0) or 0), "score": m.get("score"), "result": m.get("result"),
@@ -3694,7 +3718,7 @@ def build_player_analytics(player_name, cache, match_type="todos", match_status=
             "key_passes_per_game": round(row.get("key_passes", 0) / gp, 2),
         })
 
-    player_club = next((p for p in club_players if _analytics_player_key(p.get("name")) == pkey), None)
+    player_club = _analytics_find_player_record(club_players, pname_raw, "name")
     if player_club:
         base_player = player or {"name": player_club.get("name", player_name), "position": player_club.get("position", "?"), "rating": player_club.get("rating", 0)}
         member_stats = dict(base_player)
@@ -3733,7 +3757,7 @@ def build_player_analytics(player_name, cache, match_type="todos", match_status=
     team_rating_avg = _avg([p.get("rating", 0) for p in club_players], 0)
     team_goal_avg = _avg([p.get("goals_per_game", 0) for p in club_players], 0)
     ranking = sorted(club_players, key=lambda p: float(p.get("rating", 0) or 0), reverse=True)
-    rank_position = next((i + 1 for i, p in enumerate(ranking) if _analytics_player_key(p.get("name")) == pkey), None)
+    rank_position = next((i + 1 for i, p in enumerate(ranking) if _analytics_names_match(p.get("name"), pname_raw)), None)
 
     recent_asc = sorted(history[:8], key=lambda x: x.get("timestamp", 0))
     first_half = recent_asc[:max(1, len(recent_asc)//2)]
@@ -4159,7 +4183,7 @@ def get_player_detail(player_name: str, current_user: dict = Depends(get_current
 
     pname_raw = str(player_name or "").strip()
     pkey = _analytics_player_key(pname_raw)
-    player = next((p for p in cache["players"] if _analytics_player_key(p.get("name")) == pkey), None)
+    player = _analytics_find_player_record(cache["players"], pname_raw, "name")
     if not player:
         raise HTTPException(404, f"Jogador '{player_name}' nao encontrado")
 
@@ -4167,7 +4191,7 @@ def get_player_detail(player_name: str, current_user: dict = Depends(get_current
     history = []
     for m in cache.get("matches", []):
         for pr in (m.get("players_ratings") or []):
-            if _analytics_player_key(pr.get("name")) == pkey:
+            if _analytics_names_match(pr.get("name"), pname_raw):
                 history.append({
                     "match_id": m.get("match_id"),
                     "opponent": m.get("opponent"),
@@ -9822,6 +9846,84 @@ async function requestPlayerAnalytics(name, filters) {
   return await r.json();
 }
 
+function normalizeNameKey(value) {
+  return String(value || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '');
+}
+
+function namesMatchLoose(a, b) {
+  const ka = normalizeNameKey(a);
+  const kb = normalizeNameKey(b);
+  if (!ka || !kb) return false;
+  if (ka === kb) return true;
+  return Math.min(ka.length, kb.length) >= 5 && (ka.includes(kb) || kb.includes(ka));
+}
+
+function escapeHtml(value) {
+  return String(value ?? '').replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
+}
+
+function findPlayerFallbackSource(name) {
+  const pools = [];
+  try { pools.push(...(typeof scopedPlayers === 'function' ? scopedPlayers() : [])); } catch (_) {}
+  try { pools.push(...(typeof playersFromMemberTotals === 'function' ? playersFromMemberTotals() : [])); } catch (_) {}
+  if (DATA && Array.isArray(DATA.players)) pools.push(...DATA.players);
+  if (DATA && Array.isArray(DATA.matches)) {
+    DATA.matches.forEach(m => (m.players_ratings || []).forEach(pr => pools.push({
+      name: pr.name,
+      position: pr.pos,
+      rating: pr.rating,
+      sofi_rating: pr.sofi_rating,
+      goals: pr.goals,
+      assists: pr.assists,
+      shots: pr.shots,
+      pass_pct: pr.pass_pct,
+      passes_made: pr.passes_made,
+      tackle_pct: pr.tackle_pct,
+      tackles_made: pr.tackles_made,
+      mom: pr.mom,
+      saves: pr.saves,
+      clean_sheet: pr.clean_sheet,
+      games: 1
+    })));
+  }
+  return pools.find(p => namesMatchLoose(p && p.name, name)) || null;
+}
+
+function renderPlayerFallbackHTML(p, errorMessage) {
+  const profile = (typeof profileForPlayer === 'function') ? (profileForPlayer(p.name || '') || {}) : {};
+  const playstyles = Array.isArray(profile.playstyles) ? profile.playstyles.filter(Boolean) : [];
+  const chips = playstyles.length
+    ? `<div style="margin:10px 0;display:flex;gap:6px;flex-wrap:wrap;justify-content:center;">${playstyles.map(x => `<span class="tag liga">${typeof playstyleIcon === 'function' ? playstyleIcon(x) : ''} ${escapeHtml(x)}</span>`).join('')}</div>`
+    : '';
+  const stat = (label, value) => `<div class="detail-stat"><div class="v">${escapeHtml(value ?? 0)}</div><div class="l">${escapeHtml(label)}</div></div>`;
+  return `
+    <div class="player-detail">
+      <div style="border:1px solid rgba(255,170,0,.35);background:rgba(255,170,0,.08);color:#ffaa00;border-radius:10px;padding:12px 14px;margin-bottom:16px;font-weight:700;">
+        O histórico detalhado não abriu pela rota de análise, então carreguei os dados salvos do card para não deixar a tela quebrar. Detalhe técnico: ${escapeHtml(errorMessage || '')}
+      </div>
+      <h2>${escapeHtml(p.name)} <span class="pos-tag">${escapeHtml(profile.manual_position || p.position || '-')}</span></h2>
+      <div style="color:var(--text-2);font-size:13px;">${escapeHtml(p.games || 0)} jogos no clube/filtro · nota ${escapeHtml(p.rating || p.sofi_rating || 0)}</div>
+      ${chips}
+      <div class="detail-grid">
+        ${stat('Média EA', p.rating || 0)}
+        ${stat('Média Sofi', p.sofi_rating || p.rating || 0)}
+        ${stat('Gols', p.goals || 0)}
+        ${stat('Assist', p.assists || 0)}
+        ${stat('G+A', (Number(p.goals || 0) + Number(p.assists || 0)))}
+        ${stat('Chutes', p.shots || 0)}
+        ${stat('Pass%', p.pass_pct != null ? `${p.pass_pct}%` : 'N/D')}
+        ${stat('Passes', p.passes_made || 0)}
+        ${stat('Des%', p.tackle_pct != null ? `${p.tackle_pct}%` : 'N/D')}
+        ${stat('Desarmes', p.tackles_made || 0)}
+        ${stat('Defesas', p.saves || 0)}
+        ${stat('MOMs', p.mom || 0)}
+      </div>
+    </div>`;
+}
 async function showPlayerDetail(name) {
   const mc = document.getElementById('modalContent');
   mc.innerHTML = '<div class="loading"><div class="spinner"></div> Carregando análise...</div>';
@@ -9862,7 +9964,12 @@ async function showPlayerDetail(name) {
     mc.innerHTML = notice + renderPlayerDetailHTML(data);
     setTimeout(() => renderPlayerCharts(data), 80);
   } catch (e) {
-    mc.innerHTML = `<div style="color:var(--red);border:1px solid rgba(255,51,68,.35);border-radius:10px;padding:18px;">Erro: ${e.message}</div>`;
+    const fallbackPlayer = findPlayerFallbackSource(name);
+    if (fallbackPlayer) {
+      mc.innerHTML = renderPlayerFallbackHTML(fallbackPlayer, e.message);
+      return;
+    }
+    mc.innerHTML = `<div style="color:var(--red);border:1px solid rgba(255,51,68,.35);border-radius:10px;padding:18px;">Erro: ${escapeHtml(e.message)}</div>`;
   }
 }
 
