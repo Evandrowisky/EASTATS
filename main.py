@@ -1658,6 +1658,22 @@ def parse_matches(matches_raw, our_club_id):
                 player_name = pdata.get("playername", "Unknown")
                 p_goals = int(float(pdata.get("goals", 0) or 0))
                 p_assists = int(float(pdata.get("assists", 0) or 0))
+                p_pre_assists = 0
+                for _key in ("preassists", "preAssists", "pre_assists", "secondaryAssists", "secondaryassists", "secondAssists", "secondassists", "hockeyAssists", "hockeyassists", "assists2", "secondassist", "secondAssist"):
+                    if _key in pdata:
+                        try:
+                            p_pre_assists = int(float(pdata.get(_key, 0) or 0))
+                            break
+                        except Exception:
+                            pass
+                p_key_passes = 0
+                for _key in ("keyPasses", "keypasses", "key_passes", "passesToShot", "passesToShots", "passestoshooting", "chancesCreated", "chancescreated"):
+                    if _key in pdata:
+                        try:
+                            p_key_passes = int(float(pdata.get(_key, 0) or 0))
+                            break
+                        except Exception:
+                            pass
                 p_shots = int(float(pdata.get("shots", 0) or 0))
                 p_passes_made = int(float(pdata.get("passesmade", pdata.get("passesMade", 0)) or 0))
                 p_pass_att = int(float(pdata.get("passattempts", pdata.get("passAttempts", 0)) or 0))
@@ -1716,6 +1732,8 @@ def parse_matches(matches_raw, our_club_id):
                     "pos": p_pos,
                     "goals": p_goals,
                     "assists": p_assists,
+                    "pre_assists": p_pre_assists,
+                    "key_passes": p_key_passes,
                     "shots": p_shots,
                     "passes_made": p_passes_made,
                     "pass_pct": pass_pct,
@@ -6630,7 +6648,7 @@ function renderAuth(mode = 'login') {
   if (!c) return;
   const isRegister = mode === 'register';
   const isReset = mode === 'reset';
-  if (!isAdmin() && ['jogadores','comparar','confrontos','cadastro','config','owner-users','owner-clubs','adversarios'].includes(CURRENT_TAB)) CURRENT_TAB = 'visao';
+  if (!isAdmin() && ['jogadores','comparar','confrontos','cadastro','config','alertas','owner-users','owner-clubs','adversarios'].includes(CURRENT_TAB)) CURRENT_TAB = 'visao';
   const title = isRegister ? 'Criar Conta' : isReset ? 'Redefinir Acesso' : 'Entrar no ClubScout Pro';
   const help = isRegister
     ? 'Crie sua conta como jogador. O admin do clube libera ou bloqueia seu login depois.'
@@ -6947,7 +6965,7 @@ function computePlayersForMatches(matches) {
       favorite_position: p.position || '?',
       last_match_position: '',
       position_counts: {GK:0, DEF:0, MID:0, FWD:0},
-      games: 0, rating_sum: 0, sofi_sum: 0, goals: 0, assists: 0, shots: 0,
+      games: 0, rating_sum: 0, sofi_sum: 0, goals: 0, assists: 0, pre_assists: 0, key_passes: 0, shots: 0,
       passes_pct_sum: 0, passes_made: 0, tackle_pct_sum: 0, tackles_made: 0, mom: 0, reds: 0, saves: 0, clean_sheet: 0, wins: 0, draws: 0, losses: 0
     };
   });
@@ -6957,7 +6975,7 @@ function computePlayersForMatches(matches) {
         byName[pr.name] = {
           name: pr.name, position: pr.pos || '?', favorite_position: pr.pos || '?', last_match_position: '',
           position_counts: {GK:0, DEF:0, MID:0, FWD:0},
-          games: 0, rating_sum: 0, sofi_sum: 0, goals: 0, assists: 0, shots: 0,
+          games: 0, rating_sum: 0, sofi_sum: 0, goals: 0, assists: 0, pre_assists: 0, key_passes: 0, shots: 0,
           passes_pct_sum: 0, passes_made: 0, tackle_pct_sum: 0, tackles_made: 0, mom: 0, reds: 0, saves: 0, clean_sheet: 0, wins: 0, draws: 0, losses: 0
         };
       }
@@ -6970,6 +6988,8 @@ function computePlayersForMatches(matches) {
       p.sofi_sum += Number(pr.sofi_rating || pr.rating || 0);
       p.goals += Number(pr.goals || 0);
       p.assists += Number(pr.assists || 0);
+      p.pre_assists += Number(pr.pre_assists || pr.preAssists || pr.secondaryAssists || pr.secondaryassists || pr.hockeyAssists || pr.hockeyassists || 0);
+      p.key_passes += Number(pr.key_passes || pr.keyPasses || pr.keypasses || pr.chancesCreated || pr.chancescreated || 0);
       p.shots += Number(pr.shots || 0);
       p.passes_pct_sum += Number(pr.pass_pct || 0);
       p.passes_made += Number(pr.passes_made || 0);
@@ -6997,10 +7017,13 @@ function computePlayersForMatches(matches) {
         tackle_pct: +(p.tackle_pct_sum / Math.max(p.games, 1)).toFixed(1),
         goals_per_game: +(p.goals / Math.max(p.games, 1)).toFixed(2),
         assists_per_game: +(p.assists / Math.max(p.games, 1)).toFixed(2),
+        pre_assists_per_game: +(Number(p.pre_assists || 0) / Math.max(p.games, 1)).toFixed(2),
+        key_passes_per_game: +(Number(p.key_passes || 0) / Math.max(p.games, 1)).toFixed(2),
         shots_per_game: +(p.shots / Math.max(p.games, 1)).toFixed(2),
         tackles_per_game: +(p.tackles_made / Math.max(p.games, 1)).toFixed(2),
         saves_per_game: +(p.saves / Math.max(p.games, 1)).toFixed(2),
         goal_involvements: Number(p.goals || 0) + Number(p.assists || 0),
+        chance_involvements: Number(p.goals || 0) + Number(p.assists || 0) + Number(p.pre_assists || 0),
         goal_involvements_per_game: +((Number(p.goals || 0) + Number(p.assists || 0)) / Math.max(p.games, 1)).toFixed(2),
         win_rate: +((Number(p.wins || 0) / Math.max(p.games, 1)) * 100).toFixed(1),
       };
@@ -7039,8 +7062,13 @@ function playersFromMemberTotals() {
       reds: d.reds || 0,
       saves: d.saves || 0,
       clean_sheet: d.clean_sheet || 0,
+      pre_assists: d.pre_assists || 0,
+      pre_assists_per_game: d.pre_assists_per_game || 0,
+      key_passes: d.key_passes || 0,
+      key_passes_per_game: d.key_passes_per_game || 0,
     };
     merged.goal_involvements = Number(merged.goals || 0) + Number(merged.assists || 0);
+    merged.chance_involvements = Number(merged.goals || 0) + Number(merged.assists || 0) + Number(merged.pre_assists || 0);
     merged.goal_involvements_per_game = +(merged.goal_involvements / games).toFixed(2);
     merged.shots_per_game = hasShotStats ? +Number(merged.shots_per_game || 0).toFixed(2) : null;
     merged.tackles_per_game = hasTackleStats ? +Number(merged.tackles_per_game || 0).toFixed(2) : null;
@@ -7087,9 +7115,13 @@ function emptyPlayerForCurrentFilter(base) {
     sofi_rating: 0,
     goals: 0,
     assists: 0,
+    pre_assists: 0,
+    key_passes: 0,
     goal_involvements: 0,
     goals_per_game: 0,
     assists_per_game: 0,
+    pre_assists_per_game: 0,
+    key_passes_per_game: 0,
     goal_involvements_per_game: 0,
     shots: 0,
     shots_per_game: 0,
@@ -7385,7 +7417,7 @@ function render() {
   const c = document.getElementById('content');
   
   if (!DATA || !DATA.club) {
-    if (!isAdmin() && ['jogadores','comparar','confrontos','cadastro','config','owner-users','owner-clubs','adversarios'].includes(CURRENT_TAB)) CURRENT_TAB = 'visao';
+    if (!isAdmin() && ['jogadores','comparar','confrontos','cadastro','config','alertas','owner-users','owner-clubs','adversarios'].includes(CURRENT_TAB)) CURRENT_TAB = 'visao';
   c.innerHTML = `
       <div class="empty-state">
         <div class="empty-icon">⚽</div>
@@ -7396,7 +7428,7 @@ function render() {
     return;
   }
   
-  if (!isAdmin() && ['jogadores','comparar','confrontos','cadastro','config','owner-users','owner-clubs','adversarios'].includes(CURRENT_TAB)) CURRENT_TAB = 'visao';
+  if (!isAdmin() && ['jogadores','comparar','confrontos','cadastro','config','alertas','owner-users','owner-clubs','adversarios'].includes(CURRENT_TAB)) CURRENT_TAB = 'visao';
   c.innerHTML = `
     <div class="club-card">
       <div class="club-info">
@@ -7418,6 +7450,7 @@ function render() {
       <div class="tab ${CURRENT_TAB==='time-ideal'?'active':''}" onclick="setTab('time-ideal')">TIME IDEAL</div>
       ${isAdmin() ? `<div class="tab ${CURRENT_TAB==='cadastro'?'active':''}" onclick="setTab('cadastro')">CADASTRO</div>` : ''}
       ${isAdmin() ? `<div class="tab ${CURRENT_TAB==='config'?'active':''}" onclick="setTab('config')">CONFIG</div>` : ''}
+      ${isAdmin() ? `<div class="tab ${CURRENT_TAB==='alertas'?'active':''}" onclick="setTab('alertas')">ALERTAS</div>` : ''}
       ${isOwnerAdmin() ? `<div class="tab ${CURRENT_TAB==='owner-users'?'active':''}" onclick="setTab('owner-users')">USU&Aacute;RIOS</div>` : ''}
       ${isOwnerAdmin() ? `<div class="tab ${CURRENT_TAB==='owner-clubs'?'active':''}" onclick="setTab('owner-clubs')">CLUBES</div>` : ''}
       <div class="tab ${CURRENT_TAB==='playstyles'?'active':''}" onclick="setTab('playstyles')">ESTILOS</div>
@@ -7498,11 +7531,12 @@ function renderTab() {
   else if (CURRENT_TAB === 'time-ideal') tc.innerHTML = renderTimeIdeal();
   else if (CURRENT_TAB === 'cadastro' && isAdmin()) { tc.innerHTML = '<div class="loading"><div class="spinner"></div> Carregando cadastro...</div>'; loadClubUsers().then(() => { const t=document.getElementById('tabContent'); if (t && CURRENT_TAB === 'cadastro') t.innerHTML = renderCadastroJogadores(); }); }
   else if (CURRENT_TAB === 'config' && isAdmin()) tc.innerHTML = renderConfiguracoesClube();
+  else if (CURRENT_TAB === 'alertas' && isAdmin()) { tc.innerHTML = '<div class="loading"><div class="spinner"></div> Carregando alertas...</div>'; loadClubUsers().then(() => { const t=document.getElementById('tabContent'); if (t && CURRENT_TAB === 'alertas') t.innerHTML = renderAlertasAdmin(); }); }
   else if (CURRENT_TAB === 'owner-users' && isOwnerAdmin()) { tc.innerHTML = '<div class="loading"><div class="spinner"></div> Carregando usu&aacute;rios...</div>'; loadOwnerUsers().then(() => { const t=document.getElementById('tabContent'); if (t && CURRENT_TAB === 'owner-users') t.innerHTML = renderOwnerUsersAdmin(); }); }
   else if (CURRENT_TAB === 'owner-clubs' && isOwnerAdmin()) { tc.innerHTML = '<div class="loading"><div class="spinner"></div> Carregando clubes...</div>'; loadOwnerClubs().then(() => { const t=document.getElementById('tabContent'); if (t && CURRENT_TAB === 'owner-clubs') t.innerHTML = renderOwnerClubsAdmin(); }).catch(e => { const t=document.getElementById('tabContent'); if (t) t.innerHTML = `<div class="empty-state" style="padding:40px 20px;"><div class="empty-text">Erro ao carregar clubes: ${escapeAttr(e.message || e)}</div></div>`; }); }
   else if (CURRENT_TAB === 'playstyles') tc.innerHTML = renderPlaystyles();
   else if (CURRENT_TAB === 'adversarios') tc.innerHTML = renderAdversarios();
-  else if (['jogadores','comparar','confrontos','cadastro','config','owner-users','owner-clubs','adversarios'].includes(CURRENT_TAB) && (!isAdmin() || (['owner-users','owner-clubs'].includes(CURRENT_TAB) && !isOwnerAdmin()))) { CURRENT_TAB = 'visao'; tc.innerHTML = renderVisao(); }
+  else if (['jogadores','comparar','confrontos','cadastro','config','alertas','owner-users','owner-clubs','adversarios'].includes(CURRENT_TAB) && (!isAdmin() || (['owner-users','owner-clubs'].includes(CURRENT_TAB) && !isOwnerAdmin()))) { CURRENT_TAB = 'visao'; tc.innerHTML = renderVisao(); }
   else if (CURRENT_TAB === 'agenda') tc.innerHTML = renderAgenda();
 }
 
@@ -7951,9 +7985,11 @@ function renderMeuScout() {
           ${playerStatLine('Sofi', found.sofi_rating)}
           ${playerStatLine('Gols', found.goals)}
           ${playerStatLine('Assist', found.assists)}
+          ${playerStatLine('Pr&eacute;-A', found.pre_assists)}
           ${playerStatLine('G+A', found.goal_involvements)}
           ${playerStatLine('G/J', found.goals_per_game)}
           ${playerStatLine('A/J', found.assists_per_game)}
+          ${playerStatLine('Pr&eacute;/J', found.pre_assists_per_game)}
           ${playerStatLine('Chutes', found.shots)}
           ${playerStatLine('Chu/J', found.shots_per_game)}
           ${playerStatLine('Pass%', found.pass_pct, '%')}
@@ -7993,9 +8029,11 @@ function renderJogadores() {
           ${playerStatLine('Sofi', p.sofi_rating)}
           ${playerStatLine('Gols', p.goals)}
           ${playerStatLine('Assist', p.assists)}
+          ${playerStatLine('Pr&eacute;-A', p.pre_assists)}
           ${playerStatLine('G+A', p.goal_involvements)}
           ${playerStatLine('G/J', p.goals_per_game)}
           ${playerStatLine('A/J', p.assists_per_game)}
+          ${playerStatLine('Pr&eacute;/J', p.pre_assists_per_game)}
           ${playerStatLine('Chutes', p.shots)}
           ${playerStatLine('Chu/J', p.shots_per_game)}
           ${playerStatLine('Pass%', p.pass_pct, '%')}
@@ -8042,6 +8080,8 @@ function renderRankings() {
     if (key === 'rating') return Number(p.rating || 0);
     if (key === 'goals') return Number(p.goals || 0);
     if (key === 'assists') return Number(p.assists || 0);
+    if (key === 'pre_assists') return Number(p.pre_assists || 0);
+    if (key === 'key_passes') return Number(p.key_passes || 0);
     if (key === 'pass_pct') return Number(p.pass_pct || 0);
     if (key === 'tackle_pct') return Number(p.tackle_pct || 0);
     if (key === 'mom') return Number(p.mom || 0);
@@ -8088,14 +8128,15 @@ function renderRankings() {
   return `
     <div class="section-title">Rankings &middot; ${typeLabel} &middot; ${periodLabel}</div>
     <div style="color:var(--text-2);font-size:12px;margin-bottom:14px;line-height:1.5;">
-      Top 5 calculado somente com partidas do clube atual e respeitando período + tipo de partida selecionados.
+      Top 5 calculado somente com partidas do clube atual e respeitando per&iacute;odo + tipo de partida selecionados. Nota m&eacute;dia, passes e divididas exigem pelo menos 6 jogos no filtro.
     </div>
     <div class="rankings-grid">
-      ${topList('Top 5 Nota M&eacute;dia EA', '&#9733;', 'rating')}
+      ${topList('Top 5 Nota M&eacute;dia EA', '&#9733;', 'rating', '', 6)}
       ${topList('Top 5 Gols', '&#9917;', 'goals', '', 1, true)}
       ${topList('Top 5 Assist&ecirc;ncias', '&#9673;', 'assists', '', 1, true)}
-      ${topList('Top 5 % Passes Certos', '&#10148;', 'pass_pct', '%', 1, true)}
-      ${topList('Top 5 % Divididas', '&#9635;', 'tackle_pct', '%', 1, true)}
+      ${topList('Top 5 Pr&eacute;-Assist&ecirc;ncias', '&#128161;', 'pre_assists', '', 1, true)}
+      ${topList('Top 5 % Passes Certos', '&#10148;', 'pass_pct', '%', 6, true)}
+      ${topList('Top 5 % Divididas', '&#9635;', 'tackle_pct', '%', 6, true)}
       ${topList('Top 5 MOM', '&#9819;', 'mom', '', 1, true)}
     </div>
   `;
@@ -8612,6 +8653,106 @@ async function toggleClubUserLogin(userId, enable, nome) {
   }
 }
 
+
+
+function normIdentity(v) {
+  return String(v || '').trim().toLowerCase();
+}
+
+function profileConfiguredStatus(name) {
+  const p = profileForPlayer(name) || {};
+  const styles = (p.playstyles || []).filter(Boolean);
+  return {
+    profile: p,
+    styles,
+    has_position: !!p.manual_position,
+    has_archetype: !!p.archetype,
+    has_styles: styles.length >= 3,
+    complete: !!p.manual_position && !!p.archetype && styles.length >= 3,
+  };
+}
+
+function renderAlertList(title, help, rows, rowHtml) {
+  return `
+    <div class="ranking-card alert-card">
+      <div class="ranking-title"><span class="ranking-title-icon">&#9888;</span>${title} <span class="tag amistoso" style="margin-left:8px;">${rows.length}</span></div>
+      <div class="profile-meta" style="margin-bottom:12px;line-height:1.5;">${help}</div>
+      <div class="profile-list">${rows.map(rowHtml).join('') || '<div class="empty-state" style="padding:24px 10px;">Tudo certo por aqui.</div>'}</div>
+    </div>
+  `;
+}
+
+function renderAlertasAdmin() {
+  const players = computePlayersForMatches(DATA?.matches || []).filter(p => Number(p.games || 0) > 0);
+  const users = (CLUB_USERS || []).filter(u => String(u.club_id || DATA?.club?.id || '') === String(DATA?.club?.id || '') || !u.club_id);
+  const userKeys = new Set();
+  users.forEach(u => {
+    userKeys.add(normIdentity(u.usuario));
+    userKeys.add(normIdentity(u.nome));
+  });
+
+  const noLogin = players
+    .filter(p => !userKeys.has(normIdentity(p.name)))
+    .sort((a,b) => Number(b.games || 0) - Number(a.games || 0));
+
+  const missingProfile = players
+    .map(p => ({...p, _cfg: profileConfiguredStatus(p.name)}))
+    .filter(p => !p._cfg.complete)
+    .sort((a,b) => Number(b.games || 0) - Number(a.games || 0));
+
+  const usersWithoutPlayerData = users
+    .filter(u => !players.some(p => normIdentity(p.name) === normIdentity(u.usuario) || normIdentity(p.name) === normIdentity(u.nome)))
+    .sort((a,b) => String(a.nome || a.usuario || '').localeCompare(String(b.nome || b.usuario || '')));
+
+  const loginMissingProfile = users
+    .map(u => {
+      const linked = players.find(p => normIdentity(p.name) === normIdentity(u.usuario) || normIdentity(p.name) === normIdentity(u.nome));
+      const key = linked?.name || u.usuario || u.nome;
+      return {...u, linked_player: linked, _cfg: profileConfiguredStatus(key)};
+    })
+    .filter(u => !u._cfg.complete)
+    .sort((a,b) => String(a.nome || a.usuario || '').localeCompare(String(b.nome || b.usuario || '')));
+
+  const playerRow = (p) => `
+    <div class="profile-row profile-user-row">
+      <div><div class="profile-name">${escapeAttr(p.name)}</div><div class="profile-meta">${escapeAttr(p.position || '-')} &middot; ${p.games || 0} jogos salvos no clube</div></div>
+      <div><span class="tag ${p.games >= 6 ? 'liga' : 'amistoso'}">${p.games || 0} jogos</span></div>
+      <button class="btn-mini" onclick="setTab('cadastro')">Abrir cadastro</button>
+    </div>`;
+
+  const profileRow = (p) => {
+    const missing = [];
+    if (!p._cfg.has_position) missing.push('posi&ccedil;&atilde;o');
+    if (!p._cfg.has_archetype) missing.push('arqu&eacute;tipo');
+    if (!p._cfg.has_styles) missing.push('3 estilos');
+    return `
+      <div class="profile-row profile-user-row">
+        <div><div class="profile-name">${escapeAttr(p.name)}</div><div class="profile-meta">Falta: ${missing.join(', ') || '-'}</div></div>
+        <div><span class="tag d">incompleto</span></div>
+        <button class="btn-mini" onclick="setTab('cadastro')">Ajustar</button>
+      </div>`;
+  };
+
+  const userRow = (u) => `
+    <div class="profile-row profile-user-row">
+      <div><div class="profile-name">${escapeAttr(u.nome || u.usuario || '-')}</div><div class="profile-meta">Usu&aacute;rio/ID FIFA: ${escapeAttr(u.usuario || '-')}</div></div>
+      <div><span class="tag ${u.is_active ? 'liga' : 'd'}">${u.is_active ? 'ativo' : 'bloqueado'}</span></div>
+      <button class="btn-mini" onclick="setTab('cadastro')">Abrir cadastro</button>
+    </div>`;
+
+  return `
+    <div class="section-title">Alertas do elenco</div>
+    <div style="color:var(--text-2);font-size:12px;margin-bottom:14px;line-height:1.5;">
+      Painel para o admin controlar quem joga, quem tem login e quem ainda precisa completar posi&ccedil;&atilde;o, arqu&eacute;tipo e estilos de jogo.
+    </div>
+    <div class="rankings-grid">
+      ${renderAlertList('Jogou, mas n&atilde;o tem login', 'Jogadores encontrados nas partidas salvas do clube que ainda n&atilde;o t&ecirc;m usu&aacute;rio cadastrado no app.', noLogin, playerRow)}
+      ${renderAlertList('Cadastro t&eacute;cnico incompleto', 'Jogadores com partidas salvas que ainda n&atilde;o t&ecirc;m posi&ccedil;&atilde;o manual, arqu&eacute;tipo ou 3 playstyles.', missingProfile, profileRow)}
+      ${renderAlertList('Login sem jogador encontrado', 'Usu&aacute;rios cadastrados cujo ID FIFA/usu&aacute;rio ainda n&atilde;o apareceu nas partidas salvas deste clube.', usersWithoutPlayerData, userRow)}
+      ${renderAlertList('Login sem build completa', 'Usu&aacute;rios do clube que precisam preencher/corrigir arqu&eacute;tipo e playstyles.', loginMissingProfile, userRow)}
+    </div>
+  `;
+}
 
 function renderClubUsersAdmin() {
   const rows = (CLUB_USERS || []).map(u => {
