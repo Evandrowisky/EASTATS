@@ -412,7 +412,7 @@ def _fix_mojibake(value: str) -> str:
         "Ãƒº": "ú", "ÃƒÅ¡": "Ú", "Ãƒ£": "ã", "ÃƒÆ’": "Ãƒ", "Ãƒµ": "õ", "Ãƒ•": "Ã•",
         "Ãƒ§": "ç", "Ãƒâ€¡": "Ç", "Ã‚º": "º", "Ã‚ª": "ª", "Ã‚&middot;": "&middot;", "Ã‚": "",
         "ââ‚¬â€œ": "-", "ââ‚¬â€": "-", "ââ‚¬Ëœ": "'", "ââ‚¬â„¢": "'", "ââ‚¬Å“": '"', "ââ‚¬": '"',
-        "Ãƒï¿½M": "ÉM", "Ãƒï¿½S": "ÓS", "NÃƒï¿½O": "NÃƒO", "GANÃƒï¿½S": "GANÓS", "IRMÃƒï¿½OS": "IRMÃƒOS",
+        "Ãƒï¿½M": "ÉM", "Ãƒï¿½S": "ÓS", "NÃƒï¿½O": "NÃO", "GANÃƒï¿½S": "GANÓIS", "IRMÃƒï¿½OS": "IRMÃOS",
     }
     fixed = text
     for bad, good in replacements.items():
@@ -430,8 +430,8 @@ def _fix_mojibake(value: str) -> str:
 
     # Heurísticas para strings antigas onde o caractere acentuado já virou replacement char.
     fixed = fixed.replace("NINGUï¿½M", "NINGUÉM").replace("NINGUÃƒï¿½M", "NINGUÉM")
-    fixed = fixed.replace("PEGANï¿½S", "PEGANÓS").replace("PEGANÃƒï¿½S", "PEGANÓS")
-    fixed = fixed.replace("IRMï¿½OS", "IRMÃƒOS")
+    fixed = fixed.replace("PEGANï¿½S", "PEGANÓIS").replace("PEGANÃƒï¿½S", "PEGANÓIS")
+    fixed = fixed.replace("IRMï¿½OS", "IRMÃOS")
     return fixed
 
 
@@ -580,7 +580,7 @@ def fallback_search_from_local(club_name: str = "", platform: str = "auto") -> O
 # ============================================================
 
 def calc_club_stats(overall_data, club_info_data, matches_list):
-    """Calcula estat&iacute;sticas agregadas do clube"""
+    """Calcula estatisticas agregadas do clube"""
     stats = {
         "win_rate": 0, "goals_for": 0, "goals_against": 0, "goal_diff": 0,
         "wins": 0, "draws": 0, "losses": 0, "matches_played": 0,
@@ -2943,10 +2943,10 @@ async def sync_stream(
             })
         
         try:
-            yield f"data: {log('ðŸ”Œ Conectando Ã  EA FC...', 1, 8)}\n\n"
+            yield f"data: {log(' Conectando à EA FC...', 1, 8)}\n\n"
             await asyncio.sleep(0.1)
             
-            yield f"data: {log(f'ðŸ”Ž Buscando clube: {club_name} (varias plataformas)...', 2, 8)}\n\n"
+            yield f"data: {log(f' Buscando clube: {club_name} (varias plataformas)...', 2, 8)}\n\n"
             await asyncio.sleep(0.05)
             search = ea_client.search_club(club_name, plat)
             
@@ -2957,8 +2957,8 @@ async def sync_stream(
                     fallback_source = fallback.get("source", "local")
                     yield f"data: {log(f'Busca por nome falhou; usando clube salvo em {fallback_source}', 2, 8)}\n\n"
                 else:
-                    yield f"data: {log('âŒ Clube nao encontrado em nenhuma plataforma nem no cache local', 2, 8)}\n\n"
-                    yield f"data: {log('ðŸ’¡ Verifique o nome exato do clube e tente novamente', 2, 8)}\n\n"
+                    yield f"data: {log('ERRO Clube nao encontrado em nenhuma plataforma nem no cache local', 2, 8)}\n\n"
+                    yield f"data: {log(' Verifique o nome exato do clube e tente novamente', 2, 8)}\n\n"
                     yield f"data: {json.dumps({'error': 'Clube nao encontrado', 'done': True})}\n\n"
                     return
             
@@ -2968,11 +2968,11 @@ async def sync_stream(
             plat = search.get("platform", plat) or "common-gen5"
             yield f"data: {log(f'✓ Clube: {club_name_real} (ID: {club_id}, plat: {plat})', 3, 8)}\n\n"
             
-            yield f"data: {log('ðŸ“Š Carregando estat&iacute;sticas gerais...', 4, 8)}\n\n"
+            yield f"data: {log(' Carregando estatisticas gerais...', 4, 8)}\n\n"
             overall = ea_client.overall_stats(club_id, plat)
             info = ea_client.club_info(club_id, plat)
             
-            yield f"data: {log('ðŸ‘¥ Baixando jogadores...', 5, 8)}\n\n"
+            yield f"data: {log(' Baixando jogadores...', 5, 8)}\n\n"
             members = ea_client.members(club_id, plat)
             players = parse_players(members)
             yield f"data: {log(f'✓ {len(players)} jogadores carregados', 5, 8)}\n\n"
@@ -3084,7 +3084,7 @@ async def sync_stream(
                 print(f"[DB] Aviso ao acumular partidas: {e}")
                 matches = merge_match_lists(previous_matches, new_matches)
                 yield f"data: {log(f'Historico via cache: {len(matches)} partidas totais', 8, 8)}\n\n"
-            yield f"data: {log('ðŸ§® Calculando estat&iacute;sticas...', 8, 8)}\n\n"
+            yield f"data: {log(' Calculando estatisticas...', 8, 8)}\n\n"
             stats = calc_club_stats(overall, info, matches)
             opponents = calc_opponent_avg(matches)
             ideal_team = build_ideal_team(players, "3-5-2")
@@ -3178,14 +3178,14 @@ async def sync_stream(
             except Exception as db_err:
                 # DB legado pode nao ter a coluna data; cache JSON eh fonte primaria
                 print(f"[DB] Aviso: nao salvou no SQLite: {db_err}")
-                yield f"data: {log(f'âš ï¸ DB legado ignorado: {db_err}', 8, 8)}\n\n"
+                yield f"data: {log(f'AVISO DB legado ignorado: {db_err}', 8, 8)}\n\n"
             
-            yield f"data: {log(f'âœ… Sincronização completa!', 8, 8)}\n\n"
-            yield f"data: {log(f'ðŸ’¾ Dados salvos em {JSON_CACHE}', 8, 8)}\n\n"
+            yield f"data: {log(f'OK Sincronização completa!', 8, 8)}\n\n"
+            yield f"data: {log(f' Dados salvos em {JSON_CACHE}', 8, 8)}\n\n"
             yield f"data: {json.dumps({'done': True, 'success': True, 'club': club_name_real})}\n\n"
             
         except Exception as e:
-            yield f"data: {log(f'âŒ Erro: {str(e)}', 0, 8)}\n\n"
+            yield f"data: {log(f'ERRO Erro: {str(e)}', 0, 8)}\n\n"
             yield f"data: {json.dumps({'error': str(e), 'done': True})}\n\n"
     
     return StreamingResponse(event_generator(), media_type="text/event-stream")
@@ -3960,48 +3960,61 @@ Responda em markdown com:
 
     return {"player": player, "analytics": analytics, "analysis": analysis}
 
+
 def generate_player_analysis_offline(p):
-    """Análise offline baseada em estat&iacute;sticas"""
-    rating = p['rating']
-    
-    if rating >= 8: nivel = "EXCELENTE â­â­â­â­â­"
-    elif rating >= 7.5: nivel = "MUITO BOM â­â­â­â­"
-    elif rating >= 7: nivel = "BOM â­â­â­"
-    elif rating >= 6.5: nivel = "REGULAR â­â­"
-    else: nivel = "PRECISA MELHORAR â­"
-    
+    """Analise offline baseada em estatisticas."""
+    rating = p["rating"]
+
+    if rating >= 8:
+        nivel = "EXCELENTE"
+    elif rating >= 7.5:
+        nivel = "MUITO BOM"
+    elif rating >= 7:
+        nivel = "BOM"
+    elif rating >= 6.5:
+        nivel = "REGULAR"
+    else:
+        nivel = "PRECISA MELHORAR"
+
     pontos_fortes = []
     pontos_fracos = []
-    
-    if p['pass_pct'] >= 75: pontos_fortes.append(f"Excelente precisão de passes ({p['pass_pct']}%)")
-    elif p['pass_pct'] < 60: pontos_fracos.append(f"Precisão de passes baixa ({p['pass_pct']}%)")
-    
-    if p['tackle_pct'] >= 50: pontos_fortes.append(f"Bom em divididas ({p['tackle_pct']}%)")
-    elif p['tackle_pct'] < 30: pontos_fracos.append(f"Divididas precisam melhorar ({p['tackle_pct']}%)")
-    
-    if p['goals_per_game'] >= 0.5: pontos_fortes.append(f"Artilheiro ({p['goals_per_game']} gols/jogo)")
-    if p['mom'] >= 3: pontos_fortes.append(f"Decisivo: {p['mom']} MOMs")
-    
-    if not pontos_fortes: pontos_fortes.append("Atuação consistente")
-    if not pontos_fracos: pontos_fracos.append("Continue evoluindo")
-    
-    return f"""## ðŸ“Š Análise: {p['name']}
 
-**Posição:** {p['position']} | **Jogos:** {p['games']} | **Nível:** {nivel}
+    if p["pass_pct"] >= 75:
+        pontos_fortes.append(f"Excelente precisao de passes ({p['pass_pct']}%)")
+    elif p["pass_pct"] < 60:
+        pontos_fracos.append(f"Precisao de passes baixa ({p['pass_pct']}%)")
 
-## âœ… Pontos Fortes
+    if p["tackle_pct"] >= 50:
+        pontos_fortes.append(f"Bom em divididas ({p['tackle_pct']}%)")
+    elif p["tackle_pct"] < 30:
+        pontos_fracos.append(f"Divididas precisam melhorar ({p['tackle_pct']}%)")
+
+    if p["goals_per_game"] >= 0.5:
+        pontos_fortes.append(f"Artilheiro ({p['goals_per_game']} gols/jogo)")
+    if p["mom"] >= 3:
+        pontos_fortes.append(f"Decisivo: {p['mom']} MOMs")
+
+    if not pontos_fortes:
+        pontos_fortes.append("Atuacao consistente")
+    if not pontos_fracos:
+        pontos_fracos.append("Continue evoluindo")
+
+    return f"""## Analise: {p['name']}
+
+**Posicao:** {p['position']} | **Jogos:** {p['games']} | **Nivel:** {nivel}
+
+## Pontos Fortes
 {chr(10).join(f'- {pf}' for pf in pontos_fortes)}
 
-## âš ï¸ Pontos a Melhorar
+## Pontos a Melhorar
 {chr(10).join(f'- {pf}' for pf in pontos_fracos)}
 
-## ðŸŽ¯ Recomendação Tática
-{'Mantenha a regularidade. Jogador essencial para o time.' if rating >= 7.5 else 'Trabalhe consistência e participação ofensiva.'}
+## Recomendacao Tatica
+{'Mantenha a regularidade. Jogador essencial para o time.' if rating >= 7.5 else 'Trabalhe consistencia e participacao ofensiva.'}
 
-## ðŸ† Nota Geral
+## Nota Geral
 **{rating}/10**
 """
-
 
 @app.get("/api/ai/team")
 async def ai_team(formation: str = Query("3-5-2")):
@@ -4013,7 +4026,7 @@ async def ai_team(formation: str = Query("3-5-2")):
     players = apply_player_profiles_to_players(cache.get("players", []), (cache.get("club") or {}).get("id"))
     ideal = build_ideal_team(players, formation)
     
-    text = f"""## ðŸ† Time Ideal — Formação {ideal['formation']}
+    text = f"""##  Time Ideal — Formação {ideal['formation']}
 
 ### Escalação
 """
@@ -4021,16 +4034,16 @@ async def ai_team(formation: str = Query("3-5-2")):
         text += f"- **{p['field_pos']}** — {p['name']} (Nota: {p['rating']})\n"
     
     text += f"""
-### ðŸ“‹ Análise Tática
+### Analise Tatica
 
 A formação **{ideal['formation']}** foi escolhida com base no elenco disponível, priorizando os jogadores com melhor desempenho em cada posição.
 
-### ðŸŽ¯ Pontos Fortes
+### Pontos Fortes
 - Equilíbrio entre defesa e ataque
 - Aproveitamento dos jogadores em melhor fase
 - Distribuição tática otimizada
 
-### âš¡ Recomendações
+### Recomendacoes
 - Manter intensidade no meio-campo
 - Aproveitar laterais para ataques rápidos
 - Pressão alta na recuperação de bola
@@ -6687,21 +6700,21 @@ html, body { max-width: 100%; }
 <div class="header">
   <div class="header-inner">
     <div class="logo">
-      <div class="logo-icon">âš½</div>
+      <div class="logo-icon">CS</div>
       <div>
         <div class="logo-text">ClubScout <span>Pro</span></div>
         <div class="logo-sub">Scout inteligente para Clubs</div>
       </div>
     </div>
     <div style="display:flex;gap:8px;align-items:center;">
-      <button id="syncButton" class="btn-sync" onclick="startSync()">â†» Sincronizar</button>
+      <button id="syncButton" class="btn-sync" onclick="startSync()">Sincronizar</button>
       <div id="authBox" class="auth-user-box"></div>
     </div>
   </div>
 </div>
 
 <div id="syncProgress" class="sync-progress">
-  <div class="sync-title">ðŸ”„ Sincronizando dados do clube...</div>
+  <div class="sync-title">Sincronizando dados do clube...</div>
   <div class="sync-step" id="syncStep">Iniciando...</div>
   <div class="sync-progress-bar">
     <div class="sync-progress-fill" id="syncFill"></div>
@@ -6713,7 +6726,7 @@ html, body { max-width: 100%; }
 
 <div class="modal-bg" id="modal" onclick="if(event.target===this) closeModal()">
   <div class="modal-box">
-    <button class="modal-close" onclick="closeModal()">Ã—</button>
+    <button class="modal-close" onclick="closeModal()">&times;</button>
     <div class="modal-content" id="modalContent"></div>
   </div>
 </div>
@@ -6807,7 +6820,7 @@ function renderAuth(mode = 'login') {
         <p>${help}</p>
         <form onsubmit="${isRegister ? 'submitRegister(event)' : isReset ? 'submitResetAccess(event)' : 'submitLogin(event)'}">
           ${isRegister ? `<div class="auth-field"><label>Nome</label><input id="authNome" autocomplete="name" required></div>` : ''}
-          <div class="auth-field"><label>Usu&aacute;rio / ID FIFA</label><input id="authUsuario" autocomplete="username" required><div style="color:var(--text-2);font-size:11px;line-height:1.4;">Use o mesmo ID/nome do jogador no FIFA/EA FC, igual aparece no Pro Clubs. &Eacute; assim que o Meu Scout encontra suas estat&iacute;sticas.</div></div>
+          <div class="auth-field"><label>Usu&aacute;rio / ID FIFA</label><input id="authUsuario" autocomplete="username" required><div style="color:var(--text-2);font-size:11px;line-height:1.4;">Use o mesmo ID/nome do jogador no FIFA/EA FC, igual aparece no Pro Clubs. &Eacute; assim que o Meu Scout encontra suas estatisticas.</div></div>
           <div class="auth-field"><label>${isReset ? 'Senha atual' : 'Senha'}</label><input id="authSenha" type="password" autocomplete="${isRegister ? 'new-password' : 'current-password'}" required></div>
           ${isReset ? `<div class="auth-field"><label>Nova senha (opcional)</label><input id="authNovaSenha" type="password" autocomplete="new-password" placeholder="Preencha s&oacute; se quiser trocar a senha"></div>` : ''}
           <div class="auth-field"><label>${isReset ? 'Clube atual' : 'Nome do Clube'}</label><input id="authClube" placeholder="Nome do clube igual ao Pro Clubs" required><div style="color:var(--text-2);font-size:11px;line-height:1.4;">Digite o nome do clube como est&aacute; no EA FC Pro Clubs, incluindo acentos e espa&ccedil;os quando houver.</div></div>
@@ -7565,10 +7578,10 @@ function render() {
     if (!isAdmin() && ['jogadores','comparar','confrontos','cadastro','config','alertas','owner-users','owner-clubs','adversarios'].includes(CURRENT_TAB)) CURRENT_TAB = 'visao';
   c.innerHTML = `
       <div class="empty-state">
-        <div class="empty-icon">âš½</div>
+        <div class="empty-icon">CS</div>
         <div class="empty-title">Nenhum clube sincronizado</div>
         <div class="empty-text">Clique no botão abaixo para sincronizar seu clube EA FC</div>
-        <button class="btn-primary" onclick="startSync()">â†» SINCRONIZAR CLUBE</button>
+        <button class="btn-primary" onclick="startSync()">SINCRONIZAR CLUBE</button>
       </div>`;
     return;
   }
@@ -7607,7 +7620,7 @@ function render() {
       <div class="period ${CURRENT_PERIOD==='todos'?'active':''}" onclick="setPeriod('todos', event)">TODOS</div>
       <div class="period-dropdown">
         <button class="period period-menu-btn ${/^ult[1-7]$/.test(String(CURRENT_PERIOD))?"active":""}" type="button" onclick="togglePeriodMenu(event)">
-          ${/^ult[1-7]$/.test(String(CURRENT_PERIOD)) ? 'ULT. ' + String(CURRENT_PERIOD).replace('ult','') : 'ULTIMOS JOGOS'} â–¾
+          ${/^ult[1-7]$/.test(String(CURRENT_PERIOD)) ? 'ULT. ' + String(CURRENT_PERIOD).replace('ult','') : 'ULTIMOS JOGOS'} v
         </button>
         <div class="period-menu">
           ${[1,2,3,4,5,6,7].map(n => `<button type="button" class="period-menu-item ${CURRENT_PERIOD==="ult"+n?"active":""}" onclick="setPeriod('ult${n}', event)">Ultimos ${n} jogo${n>1?"s":""}</button>`).join('')}
@@ -7615,7 +7628,7 @@ function render() {
       </div>
       <div class="period ${CURRENT_PERIOD==='ult10'?'active':''}" onclick="setPeriod('ult10', event)">ÚLT. 10</div>
       <div class="period ${CURRENT_PERIOD==='semana'?'active':''}" onclick="setPeriod('semana', event)">SEMANA</div>
-      <div class="period ${CURRENT_PERIOD==='mes'?'active':''}" onclick="setPeriod('mes', event)">MÃŠS</div>
+      <div class="period ${CURRENT_PERIOD==='mes'?'active':''}" onclick="setPeriod('mes', event)">MÊS</div>
     </div>
     
     <div class="period-filter" style="margin-top:-10px;">
@@ -7849,7 +7862,7 @@ function renderVisao() {
     </div>
     
     <div class="stat-card highlight" style="display:flex;align-items:center;gap:16px;justify-content:flex-start;text-align:left;padding:20px;">
-      <div style="font-size:32px;color:var(--yellow);">â­</div>
+      <div style="font-size:32px;color:var(--yellow);">*</div>
       <div>
         <div style="font-size:28px;font-weight:800;color:var(--green);">${s.best_streak || 0}</div>
         <div class="stat-label">Melhor Sequência de Vitórias</div>
@@ -7858,7 +7871,7 @@ function renderVisao() {
   `;
 
   html += `
-    <div class="section-title">ðŸ“Œ Métricas Gerais do Clube no Filtro</div>
+    <div class="section-title"> Métricas Gerais do Clube no Filtro</div>
     <div class="stats-grid">
       ${miniGeneralCard('Média EA Elenco', adv.avg_ea || 0, 'green')}
       ${miniGeneralCard('Média Sofi', adv.avg_sofi || 0, 'green')}
@@ -7887,7 +7900,7 @@ function renderVisao() {
   })[0] : null;
   if (m) {
     html += `
-      <div class="section-title">ðŸ† MVP do Clube no Filtro</div>
+      <div class="section-title"> MVP do Clube no Filtro</div>
       <div class="mvp-card">
         <div class="mvp-badge">M.V.P.</div>
         <div class="mvp-rating">${m.rating}</div>
@@ -7908,7 +7921,7 @@ function renderVisao() {
   const opponentsForFilter = calcOpponentAvgClient(matches);
   if (opponentsForFilter.length) {
     html += `
-      <div class="section-title">ðŸ“Š Média de Gols por Adversário</div>
+      <div class="section-title"> Média de Gols por Adversário</div>
       <div class="opponents-list">
     `;
     opponentsForFilter.forEach(o => {
@@ -7928,7 +7941,7 @@ function renderVisao() {
   // Desempenho por partida
   if (matches.length) {
     html += `
-      <div class="section-title">ðŸ“ˆ Desempenho por Partida</div>
+      <div class="section-title"> Desempenho por Partida</div>
       <div class="perf-bars">
     `;
     const recent = matches.slice(0, 12).reverse();
@@ -7949,7 +7962,7 @@ function renderVisao() {
   
   // Últimas partidas com MOM
   html += `
-    <div class="section-title">âš”ï¸ Últimas Partidas</div>
+    <div class="section-title"> Últimas Partidas</div>
     <div class="matches-list">
   `;
   matches.slice(0, 10).forEach(m => {
@@ -8496,7 +8509,7 @@ const ROLE_DESC = {
   CAM:'Meia ofensivo - cria chances entre linhas.', LAM:'Meia ofensivo esquerdo - corta para dentro e cria.', RAM:'Meia ofensivo direito - corta para dentro e cria.',
   LW:'Ponta esquerda - profundidade e finalização pelo lado.', RW:'Ponta direita - profundidade e finalização pelo lado.',
   LF:'Atacante/ponta interior esquerdo - ataca meia-lua e profundidade.', RF:'Atacante/ponta interior direito - ataca meia-lua e profundidade.',
-  ST:'Centroavante - referência, gols e ataque Ã  área.', LST:'Atacante esquerdo - ataca espaços e combina por dentro.', RST:'Atacante direito - ataca espaços e combina por dentro.',
+  ST:'Centroavante - referência, gols e ataque à área.', LST:'Atacante esquerdo - ataca espaços e combina por dentro.', RST:'Atacante direito - ataca espaços e combina por dentro.',
 };
 
 const ROLE_PREF = {
@@ -8627,58 +8640,13 @@ function setIdealFormation(value) {
 }
 
 function playstyleIcon(nameOrCode) {
-  const key = String(nameOrCode || '').toLowerCase();
-  const map = {
-    'finesse shot':'ðŸŽ¯', 'chute colocado':'ðŸŽ¯',
-    'chip shot':'ðŸ§¤', 'cavadinha':'ðŸ§¤',
-    'power shot':'ðŸ’¥', 'chute forte':'ðŸ’¥',
-    'dead ball':'ðŸŽ¯', 'bola parada':'ðŸŽ¯',
-    'precision header':'ðŸ¦…', 'cabeceio forte':'ðŸ¦…', 'power header':'ðŸ¦…',
-    'acrobatic':'ðŸ¤¸', 'acrobático':'ðŸ¤¸',
-    'low driven shot':'â¬‡', 'chute rasteiro':'â¬‡',
-    'gamechanger':'âš¡', 'decisivo':'âš¡',
-    'incisive pass':'ðŸ§­', 'passe incisivo':'ðŸ§­',
-    'pinged pass':'âž¡', 'passe pingado':'âž¡',
-    'long ball pass':'â†—', 'lançamento longo':'â†—', 'bola longa':'â†—',
-    'tiki taka':'ðŸ”', 'tiki-taka':'ðŸ”',
-    'whipped pass':'ã€°', 'cruzamento tenso':'ã€°',
-    'inventive':'ðŸŽ©', 'inventivo':'ðŸŽ©', 'trivela':'ðŸŽ©', 'flair':'ðŸŽ©',
-    'jockey':'ðŸ•º', 'contenção':'ðŸ•º',
-    'block':'ðŸš§', 'bloqueio':'ðŸš§',
-    'intercept':'ðŸª', 'interceptação':'ðŸª',
-    'anticipate':'ðŸ¦Š', 'antecipação':'ðŸ¦Š',
-    'slide tackle':'ðŸ›', 'carrinho':'ðŸ›',
-    'aerial fortress':'ðŸ›¡', 'fortaleza aérea':'ðŸ›¡', 'jogo aéreo':'ðŸ›¡', 'aerial':'ðŸ›¡',
-    'technical':'ðŸŽ®', 'técnico':'ðŸŽ®',
-    'rapid':'ðŸ’¨', 'rápido com bola':'ðŸ’¨',
-    'first touch':'ðŸ§²', 'primeiro toque':'ðŸ§²',
-    'trickster':'âœ¨', 'driblador':'âœ¨',
-    'press proven':'ðŸ§±', 'resistente Ã  pressão':'ðŸ§±',
-    'quick step':'ðŸš€', 'arranque':'ðŸš€',
-    'relentless':'â™¾', 'incansável':'â™¾',
-    'long throw':'ðŸ™Œ', 'arremesso longo':'ðŸ™Œ',
-    'bruiser':'ðŸ’ª', 'brigador':'ðŸ’ª',
-        'far throw':'ðŸŽ¯', 'reposição longa':'ðŸŽ¯',
-    'footwork':'ðŸ¦¶', 'defesa com os pés':'ðŸ¦¶',
-    'cross claimer':'ðŸ§¤', 'pegador de cruzamento':'ðŸ§¤',
-    'rush out':'ðŸƒ', 'saída rápida':'ðŸƒ',
-    'far reach':'ðŸª½', 'alcance longo':'ðŸª½',
-    'deflector':'ðŸªž', 'defletor':'ðŸªž'
-  };
-  return map[key] || 'â—†';
+  return String.fromCharCode(9670);
 }
 
 function archetypeIcon(name) {
-  const key = String(name || '').toLowerCase();
-  const map = {
-    'finisher':'ðŸŽ¯', 'finalizador':'ðŸŽ¯', 'target':'ðŸ—¼', 'referência':'ðŸ—¼', 'referencia':'ðŸ—¼', 'magician':'ðŸŽ©', 'mago':'ðŸŽ©',
-    'creator':'ðŸ§ ', 'criador':'ðŸ§ ', 'maestro':'ðŸŽ¼', 'recycler':'â™»ï¸', 'reciclador':'â™»ï¸', 'spark':'âš¡', 'faísca':'âš¡', 'faisca':'âš¡',
-    'boss':'ðŸ›¡', 'chefia':'ðŸ›¡', 'marauder':'â†•', 'saqueador':'â†•', 'progressor':'â†—', 'engine':'âš™', 'motor':'âš™',
-    'shot stopper':'ðŸ§±', 'goleiro muralha':'ðŸ§±', 'sweeper keeper':'ðŸ§¤', 'goleiro líbero':'ðŸ§¤', 'goleiro libero':'ðŸ§¤',
-    'chefia':'ðŸ›¡', 'líbero':'â†—', 'libero':'â†—', 'motor':'âš™', 'paredão':'ðŸ§±', 'goleiro líbero':'ðŸ§¤'
-  };
-  return map[key] || 'â—†';
+  return String.fromCharCode(9670);
 }
+
 function styleIconHtml(icon, plus=false) {
   return `<span class="style-icon ${plus ? 'plus' : ''}" aria-hidden="true"><span>${icon}</span></span>`;
 }
@@ -8699,7 +8667,7 @@ function normalizePlaystyleName(value) {
     'Força aérea':'Aerial Fortress', 'Forca aerea':'Aerial Fortress', 'Fortaleza aérea':'Aerial Fortress', 'Jogo aéreo':'Aerial Fortress', 'Aerial Fortress':'Aerial Fortress',
     'Condução ágil':'Technical', 'Conducao agil':'Technical', 'Técnico':'Technical', 'Tecnico':'Technical', 'Technical':'Technical', 'Veloz':'Rapid', 'Rápido':'Rapid', 'Rapido':'Rapid', 'Rapid':'Rapid',
     'Domínio':'First Touch', 'Dominio':'First Touch', 'Primeiro toque':'First Touch', 'First Touch':'First Touch', 'Ilusionista':'Trickster', 'Malabarista':'Trickster', 'Trickster':'Trickster',
-    'Cabeça fria':'Press Proven', 'Cabeca fria':'Press Proven', 'Resistente Ã  pressão':'Press Proven', 'Resistente a pressao':'Press Proven', 'Press Proven':'Press Proven',
+    'Cabeça fria':'Press Proven', 'Cabeca fria':'Press Proven', 'Resistente à pressão':'Press Proven', 'Resistente a pressao':'Press Proven', 'Press Proven':'Press Proven',
     'Impulso':'Quick Step', 'Passo rápido':'Quick Step', 'Passo rapido':'Quick Step', 'Quick Step':'Quick Step', 'Incansável':'Relentless', 'Incansavel':'Relentless', 'Relentless':'Relentless',
     'Lateral longo':'Long Throw', 'Arremesso lateral longo':'Long Throw', 'Long Throw':'Long Throw', 'Xerife':'Bruiser', 'Brigador':'Bruiser', 'Bruiser':'Bruiser',
     'Arremesso longo':'Far Throw', 'Far Throw':'Far Throw', 'Defesa com os pés':'Footwork', 'Defesa com os pes':'Footwork', 'Footwork':'Footwork',
@@ -8915,7 +8883,7 @@ function renderClubUsersAdmin() {
   }).join('');
   return `
     <div class="section-title">Usu&aacute;rios cadastrados no clube</div>
-    <div style="color:var(--text-2);font-size:12px;margin-bottom:12px;line-height:1.5;">Aqui o admin vê todos os acessos cadastrados no clube. O ideal é o usuário ser igual ao ID/nome do FIFA/EA FC para o Meu Scout puxar automaticamente as estat&iacute;sticas certas.</div>
+    <div style="color:var(--text-2);font-size:12px;margin-bottom:12px;line-height:1.5;">Aqui o admin vê todos os acessos cadastrados no clube. O ideal é o usuário ser igual ao ID/nome do FIFA/EA FC para o Meu Scout puxar automaticamente as estatisticas certas.</div>
     <div class="profile-list">${rows || '<div class="empty-state" style="padding:30px 20px;">Nenhum usuário cadastrado encontrado.</div>'}</div>
   `;
 }
@@ -9134,7 +9102,7 @@ function renderCadastroJogadores() {
   return `
     <div class="section-title">Cadastro de Jogadores</div>
     <div style="color:var(--text-2);font-size:12px;margin-bottom:12px;line-height:1.5;">
-      O script sugere posição pela posição favorita da EA e pelas posições dos últimos jogos. Se errar, ajuste aqui uma vez e o Time Ideal passa a obedecer. As estat&iacute;sticas continuam sempre só do clube pesquisado.
+      O script sugere posição pela posição favorita da EA e pelas posições dos últimos jogos. Se errar, ajuste aqui uma vez e o Time Ideal passa a obedecer. As estatisticas continuam sempre só do clube pesquisado.
     </div>
     <div class="profile-list">${rowsHtml}</div>
     ${renderClubUsersAdmin()}
@@ -9567,7 +9535,7 @@ async function scoutOpponents() {
 }
 function renderAgenda() {
   return `
-    <div class="section-title">âœï¸ ${AGENDA_EDIT_ID ? 'Editar Agendamento' : 'Novo Agendamento'}</div>
+    <div class="section-title"> ${AGENDA_EDIT_ID ? 'Editar Agendamento' : 'Novo Agendamento'}</div>
     <form class="agenda-form" onsubmit="saveAgenda(event)">
       <input id="ag-opp" type="text" placeholder="Adversário" required style="grid-column: span 3;">
       <input id="ag-date" type="date" required style="grid-column: span 2;">
@@ -9584,7 +9552,7 @@ function renderAgenda() {
         <button type="submit" class="btn-primary" style="padding:8px 18px;">${AGENDA_EDIT_ID ? 'Salvar Alterações' : 'Adicionar'}</button>
       </div>
     </form>
-    <div class="section-title">ðŸ“… Próximos Jogos</div>
+    <div class="section-title"> Próximos Jogos</div>
     <div id="agenda-list" class="agenda-list">${renderAgendaList()}</div>
   `;
 }
@@ -9608,7 +9576,7 @@ function renderAgendaList() {
         <div class="agenda-info">
           <div class="opp">VS ${a.opponent}</div>
           <div class="meta">${hora} &middot; <span class="tag ${a.match_type}">${a.match_type}</span> ${a.location ? '&middot; ' + a.location : ''}</div>
-          ${a.notes ? '<div class="meta" style="margin-top:4px;">âœï¸ ' + a.notes + '</div>' : ''}
+          ${a.notes ? '<div class="meta" style="margin-top:4px;">' + a.notes + '</div>' : ''}
         </div>
         <button class="btn-mini" onclick="editAgenda(${a.id})">Editar</button>
         <button class="btn-mini danger" onclick="deleteAgenda(${a.id})">Excluir</button>
@@ -9769,73 +9737,64 @@ async function analyzePlayer(name) {
   }
 }
 
+async function requestPlayerAnalytics(name, filters) {
+  const qs = new URLSearchParams(filters);
+  const r = await authFetch('/api/player/' + encodeURIComponent(name) + '/analytics?' + qs.toString());
+  if (!r.ok) {
+    let msg = 'Não encontrado ou sem dados suficientes';
+    try {
+      const payload = await r.json();
+      if (payload && payload.detail) msg = payload.detail;
+    } catch (_) {}
+    const err = new Error(msg);
+    err.status = r.status;
+    throw err;
+  }
+  return await r.json();
+}
+
 async function showPlayerDetail(name) {
   const mc = document.getElementById('modalContent');
-  mc.innerHTML = '<div class="loading"><div class="spinner"></div> Carregando analytics...</div>';
+  mc.innerHTML = '<div class="loading"><div class="spinner"></div> Carregando análise...</div>';
   document.getElementById('modal').classList.add('active');
+
+  const currentFilters = {
+    match_type: CURRENT_MATCH_TYPE || 'todos',
+    match_status: CURRENT_MATCH_STATUS || 'todas',
+    period: CURRENT_PERIOD || 'todos'
+  };
+
   try {
-    const qs = new URLSearchParams({
-      match_type: CURRENT_MATCH_TYPE,
-      match_status: CURRENT_MATCH_STATUS,
-      period: CURRENT_PERIOD
-    });
-    const r = await authFetch('/api/player/' + encodeURIComponent(name) + '/analytics?' + qs.toString());
-    if (!r.ok) {
-      let msg = 'Não encontrado ou sem dados suficientes';
-      try {
-        const payload = await r.json();
-        if (payload && payload.detail) msg = payload.detail;
-      } catch (_) {}
-      throw new Error(msg);
+    let data = null;
+    let usedFallback = false;
+
+    try {
+      data = await requestPlayerAnalytics(name, currentFilters);
+    } catch (firstErr) {
+      const hasActiveFilter =
+        currentFilters.match_type !== 'todos' ||
+        currentFilters.match_status !== 'todas' ||
+        currentFilters.period !== 'todos';
+
+      if (!hasActiveFilter) throw firstErr;
+
+      data = await requestPlayerAnalytics(name, {
+        match_type: 'todos',
+        match_status: 'todas',
+        period: 'todos'
+      });
+      usedFallback = true;
     }
-    const data = await r.json();
-    mc.innerHTML = renderPlayerDetailHTML(data);
+
+    const notice = usedFallback
+      ? '<div style="border:1px solid rgba(255,170,0,.35);background:rgba(255,170,0,.08);color:#ffaa00;border-radius:8px;padding:10px 12px;margin-bottom:14px;font-weight:700;">Sem partidas para este jogador no filtro atual. Exibindo todo o histórico salvo do clube.</div>'
+      : '';
+
+    mc.innerHTML = notice + renderPlayerDetailHTML(data);
     setTimeout(() => renderPlayerCharts(data), 80);
   } catch (e) {
-    mc.innerHTML = `<p style="color:var(--red);">Erro: ${e.message}</p>`;
+    mc.innerHTML = `<div style="color:var(--red);border:1px solid rgba(255,51,68,.35);border-radius:10px;padding:18px;">Erro: ${e.message}</div>`;
   }
-}
-
-function heatColor(v) {
-  const alpha = 0.08 + Math.min(0.82, Number(v || 0) * 0.82);
-  return `rgba(0,255,115,${alpha})`;
-}
-
-function renderHeatmap(heatmap) {
-  const z = (heatmap && heatmap.zones) || {};
-  const labels = [
-    ['att_left','Ataque E'], ['att_center','Ataque C'], ['att_right','Ataque D'],
-    ['mid_left','Meio E'], ['mid_center','Meio C'], ['mid_right','Meio D'],
-    ['def_left','Defesa E'], ['def_center','Defesa C'], ['def_right','Defesa D'],
-  ];
-  return `
-    <div class="heatmap-wrap">
-      <div class="heatmap-field">
-        ${labels.map(([key, label]) => `<div class="heat-zone" style="background:${heatColor(z[key])}">${label}</div>`).join('')}
-      </div>
-      <div class="mini-insights">
-        <div class="mini-insight"><div class="k">Perfil</div><div class="v">${heatmap?.profile || '-'}</div></div>
-        <div class="mini-insight"><div class="k">Leitura</div><div class="v">Quanto mais verde, maior a presença estimada naquela zona.</div></div>
-        <div class="analytics-note">${heatmap?.disclaimer || 'Mapa estimado por perfil estatístico.'}</div>
-      </div>
-    </div>`;
-}
-
-function matchLine(m) {
-  if (!m) return '<div class="mini-insight"><div class="v">Sem dados</div></div>';
-  return `<div class="mini-insight"><div class="k">${m.date} &middot; ${m.match_type}</div><div class="v">VS ${m.opponent} &middot; ${m.result} ${m.score} &middot; Sofi ${m.sofi_rating} &middot; EA ${m.rating}</div></div>`;
-}
-
-function plainScoutSummary(text) {
-  return String(text || '')
-    .replace(/#{1,6}\s*/g, '')
-    .replace(/\*\*/g, '')
-    .replace(/^-\s*/gm, '')
-    .split('\n')
-    .map(x => x.trim())
-    .filter(Boolean)
-    .slice(0, 3)
-    .join(' ');
 }
 
 function renderPlayerDetailHTML(data) {
@@ -9936,13 +9895,13 @@ function renderPlayerDetailHTML(data) {
           ${h.map(x => `<tr>
             <td>${x.date}</td><td><span class="tag ${x.match_type}">${x.match_type}</span></td><td>${x.opponent}</td>
             <td><span class="tag ${x.result.toLowerCase()}">${x.result} ${x.score}</span></td><td>${x.position}</td>
-            <td><span class="sofi">${x.sofi_rating}</span></td><td>${x.rating}</td><td>${x.goals}</td><td>${x.assists}</td><td>${x.pre_assists || 0}</td><td>${x.key_passes || 0}</td><td>${x.shots}</td><td>${x.pass_pct}%</td><td>${x.tackle_pct}%</td><td>${x.tackles_made || 0}</td><td>${x.saves || 0}</td><td>${x.clean_sheet || 0}</td><td>${x.red || 0}</td><td>${x.mom ? 'â­' : ''}</td>
+            <td><span class="sofi">${x.sofi_rating}</span></td><td>${x.rating}</td><td>${x.goals}</td><td>${x.assists}</td><td>${x.pre_assists || 0}</td><td>${x.key_passes || 0}</td><td>${x.shots}</td><td>${x.pass_pct}%</td><td>${x.tackle_pct}%</td><td>${x.tackles_made || 0}</td><td>${x.saves || 0}</td><td>${x.clean_sheet || 0}</td><td>${x.red || 0}</td><td>${x.mom ? '*' : ''}</td>
           </tr>`).join('')}
         </tbody>
       </table>`}
 
       <div style="margin-top:18px;display:flex;gap:8px;">
-        <button class="btn-primary" style="padding:8px 18px;" onclick="analyzePlayer('${safeName}')">ðŸ¤– Analisar com IA</button>
+        <button class="btn-primary" style="padding:8px 18px;" onclick="analyzePlayer('${safeName}')"> Analisar com IA</button>
       </div>
     </div>`;
 }
@@ -9990,7 +9949,7 @@ function generateTeamAnalysisClient(team) {
     lines || '- Nenhum jogador disponível no filtro atual.',
     '',
     '### Leitura do elenco',
-    `A escalação acima usa exatamente o time que está no campinho agora, com estat&iacute;sticas somente do clube/filtro atual e respeitando posições manuais salvas no Cadastro. Média EA do XI: **${avg}**.`,
+    `A escalação acima usa exatamente o time que está no campinho agora, com estatisticas somente do clube/filtro atual e respeitando posições manuais salvas no Cadastro. Média EA do XI: **${avg}**.`,
     '',
     '### Distribuição',
     `- Goleiros: ${byRole.GK || 0}`,
@@ -10097,7 +10056,7 @@ async function startSync() {
       if (data.done) {
         evt.close();
         if (data.success) {
-          stepEl.textContent = 'âœ… Concluído!';
+          stepEl.textContent = 'OK Concluído!';
           fill.style.width = '100%';
           setTimeout(async () => {
             progress.classList.remove('active');
@@ -10111,7 +10070,7 @@ async function startSync() {
             render();
           }, 1500);
         } else if (data.error) {
-          stepEl.textContent = `âŒ Erro: ${data.error}`;
+          stepEl.textContent = `ERRO Erro: ${data.error}`;
         }
       }
     } catch (err) {
@@ -10121,7 +10080,7 @@ async function startSync() {
   
   evt.onerror = () => {
     evt.close();
-    stepEl.textContent = 'âŒ Conexão perdida';
+    stepEl.textContent = 'ERRO Conexão perdida';
   };
 }
 
@@ -10192,10 +10151,10 @@ if __name__ == "__main__":
     print("\n" + "="*60)
     print(f"  {APP_NAME}")
     print("="*60)
-    print(f"  ðŸŒ Acesse:  http://localhost:8000")
-    print(f"  ðŸ“š Docs:    http://localhost:8000/docs")
-    print(f"  ðŸ’¾ Cache:   {JSON_CACHE}")
-    print(f"  ðŸ—„ï¸  Banco:   {DB_FILE}")
+    print(f"  Acesse:  http://localhost:8000")
+    print(f"  Docs:    http://localhost:8000/docs")
+    print(f"   Cache:   {JSON_CACHE}")
+    print(f"  Banco:   {DB_FILE}")
     print("="*60 + "\n")
     
     uvicorn.run(app, host="0.0.0.0", port=8000)
