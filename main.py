@@ -1,12 +1,12 @@
 ﻿# -*- coding: utf-8 -*-
 """
-Scout Clubs Pro v2 - AnÃ¡lise Profissional EA FC
+Scout Clubs Pro v2 - Análise Profissional EA FC
 Inspirado no app Scout Clubs original
-- Abas: VisÃ£o, Jogadores, Comparar, Confrontos, Time Ideal, Agenda
-- FormaÃ§Ã£o tÃ¡tica visual com mapinha do campo
+- Abas: Visão, Jogadores, Comparar, Confrontos, Time Ideal, Agenda
+- Formação tática visual com mapinha do campo
 - MOM (Melhor da Partida) por jogo
-- GrÃ¡ficos circulares e de barras
-- Cache JSON + sincronizaÃ§Ã£o com progresso em tempo real
+- Gráficos circulares e de barras
+- Cache JSON + sincronização com progresso em tempo real
 """
 
 import os
@@ -29,12 +29,12 @@ from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 
 # ============================================================
-# CONFIGURAÃ‡ÃƒO
+# CONFIGURAÇÃƒO
 # ============================================================
 
 APP_NAME = "ClubScout Pro"
 
-# Vercel sÃ³ permite escrita temporÃ¡ria em /tmp
+# Vercel só permite escrita temporária em /tmp
 if os.getenv("VERCEL") == "1":
     DB_FILE = "/tmp/scout_clubs.db"
     JSON_CACHE = "/tmp/dados_clube.json"
@@ -401,24 +401,24 @@ def _strip_accents(value: str) -> str:
 
 
 def _fix_mojibake(value: str) -> str:
-    """Corrige nomes que chegam/salvam com UTF-8 lido como latin1, inclusive histÃ³rico antigo."""
+    """Corrige nomes que chegam/salvam com UTF-8 lido como latin1, inclusive histórico antigo."""
     text = str(value or "")
     if not text:
         return text
 
     replacements = {
-        "ÃƒÂ¡": "Ã¡", "ÃƒÃ": "Ã", "ÃƒÂ©": "Ã©", "Ãƒâ€°": "Ã‰", "ÃƒÂª": "Ãª", "ÃƒÅ ": "ÃŠ",
-        "ÃƒÂ­": "Ã­", "ÃƒÃ": "Ã", "ÃƒÂ³": "Ã³", "Ãƒâ€œ": "Ã“", "ÃƒÂ´": "Ã´", "Ãƒâ€": "Ã”",
-        "ÃƒÂº": "Ãº", "ÃƒÅ¡": "Ãš", "ÃƒÂ£": "Ã£", "ÃƒÆ’": "Ãƒ", "ÃƒÂµ": "Ãµ", "Ãƒâ€¢": "Ã•",
-        "ÃƒÂ§": "Ã§", "Ãƒâ€¡": "Ã‡", "Ã‚Âº": "Âº", "Ã‚Âª": "Âª", "Ã‚&middot;": "&middot;", "Ã‚": "",
-        "Ã¢â‚¬â€œ": "-", "Ã¢â‚¬â€": "-", "Ã¢â‚¬Ëœ": "'", "Ã¢â‚¬â„¢": "'", "Ã¢â‚¬Å“": '"', "Ã¢â‚¬Â": '"',
-        "Ãƒï¿½M": "Ã‰M", "Ãƒï¿½S": "Ã“S", "NÃƒï¿½O": "NÃƒO", "GANÃƒï¿½S": "GANÃ“S", "IRMÃƒï¿½OS": "IRMÃƒOS",
+        "Ãƒ¡": "á", "ÃƒÁ": "Á", "Ãƒ©": "é", "Ãƒâ€°": "É", "Ãƒª": "ê", "ÃƒÅ ": "ÃŠ",
+        "Ãƒ­": "í", "ÃƒÃ": "Ã", "Ãƒ³": "ó", "Ãƒâ€œ": "Ó", "Ãƒ´": "ô", "Ãƒâ€": "Ã”",
+        "Ãƒº": "ú", "ÃƒÅ¡": "Ú", "Ãƒ£": "ã", "ÃƒÆ’": "Ãƒ", "Ãƒµ": "õ", "Ãƒ•": "Ã•",
+        "Ãƒ§": "ç", "Ãƒâ€¡": "Ç", "Ã‚º": "º", "Ã‚ª": "ª", "Ã‚&middot;": "&middot;", "Ã‚": "",
+        "ââ‚¬â€œ": "-", "ââ‚¬â€": "-", "ââ‚¬Ëœ": "'", "ââ‚¬â„¢": "'", "ââ‚¬Å“": '"', "ââ‚¬": '"',
+        "Ãƒï¿½M": "ÉM", "Ãƒï¿½S": "ÓS", "NÃƒï¿½O": "NÃƒO", "GANÃƒï¿½S": "GANÓS", "IRMÃƒï¿½OS": "IRMÃƒOS",
     }
     fixed = text
     for bad, good in replacements.items():
         fixed = fixed.replace(bad, good)
 
-    if any(mark in fixed for mark in ("Ãƒ", "Ã‚", "Ã¢â‚¬", "ï¿½")):
+    if any(mark in fixed for mark in ("Ãƒ", "Ã‚", "ââ‚¬", "ï¿½")):
         for enc in ("latin1", "cp1252"):
             try:
                 decoded = fixed.encode(enc, errors="strict").decode("utf-8", errors="strict")
@@ -428,16 +428,16 @@ def _fix_mojibake(value: str) -> str:
             except Exception:
                 pass
 
-    # HeurÃ­sticas para strings antigas onde o caractere acentuado jÃ¡ virou replacement char.
-    fixed = fixed.replace("NINGUï¿½M", "NINGUÃ‰M").replace("NINGUÃƒï¿½M", "NINGUÃ‰M")
-    fixed = fixed.replace("PEGANï¿½S", "PEGANÃ“S").replace("PEGANÃƒï¿½S", "PEGANÃ“S")
+    # Heurísticas para strings antigas onde o caractere acentuado já virou replacement char.
+    fixed = fixed.replace("NINGUï¿½M", "NINGUÉM").replace("NINGUÃƒï¿½M", "NINGUÉM")
+    fixed = fixed.replace("PEGANï¿½S", "PEGANÓS").replace("PEGANÃƒï¿½S", "PEGANÓS")
     fixed = fixed.replace("IRMï¿½OS", "IRMÃƒOS")
     return fixed
 
 
 
 def normalize_match_text_fields(match: dict) -> dict:
-    """Corrige mojibake em campos textuais de partidas jÃ¡ salvas."""
+    """Corrige mojibake em campos textuais de partidas já salvas."""
     if not isinstance(match, dict):
         return match
     out = dict(match)
@@ -601,7 +601,7 @@ def calc_club_stats(overall_data, club_info_data, matches_list):
             stats["goals_per_match"] = round(stats["goals_for"] / stats["matches_played"], 1)
         stats["goal_diff"] = stats["goals_for"] - stats["goals_against"]
     
-    # Calcula melhor sequÃªncia e clean sheets das partidas
+    # Calcula melhor sequência e clean sheets das partidas
     if matches_list:
         streak = current_streak = 0
         for m in matches_list:
@@ -894,6 +894,10 @@ def save_players_supabase(club_id: str, players: list):
             "rating": _safe_float(p.get("rating")),
             "goals": _safe_int(p.get("goals")),
             "assists": _safe_int(p.get("assists")),
+            "pre_assists": _safe_int(p.get("pre_assists")),
+            "key_passes": _safe_int(p.get("key_passes")),
+            "pre_assists_per_game": _safe_float(p.get("pre_assists_per_game")),
+            "key_passes_per_game": _safe_float(p.get("key_passes_per_game")),
             "shots": _safe_int(p.get("shots")),
             "passes_made": _safe_int(p.get("passes_made")),
             "pass_pct": _safe_float(p.get("pass_pct")),
@@ -957,6 +961,18 @@ def save_matches_supabase(club_id: str, matches: list):
                 "sofi_rating": _safe_float(pr.get("sofi_rating", pr.get("rating"))),
                 "goals": _safe_int(pr.get("goals")),
                 "assists": _safe_int(pr.get("assists")),
+                "pre_assists": _safe_int(
+                    pr.get("pre_assists")
+                    or pr.get("preAssists")
+                    or pr.get("secondaryAssists")
+                    or pr.get("hockeyAssists")
+                ),
+                "key_passes": _safe_int(
+                    pr.get("key_passes")
+                    or pr.get("keyPasses")
+                    or pr.get("chancesCreated")
+                    or pr.get("shotAssists")
+                ),
                 "shots": _safe_int(pr.get("shots")),
                 "passes_made": _safe_int(pr.get("passes_made")),
                 "pass_pct": _safe_float(pr.get("pass_pct")),
@@ -966,6 +982,7 @@ def save_matches_supabase(club_id: str, matches: list):
                 "clean_sheet": _safe_int(pr.get("clean_sheet")),
                 "red": _safe_int(pr.get("red")),
                 "mom": _safe_int(pr.get("mom")),
+                "event_aggregates": pr.get("event_aggregates") or {},
                 "data": pr,
                 "updated_at": _now_iso(),
             })
@@ -976,12 +993,34 @@ def save_matches_supabase(club_id: str, matches: list):
         for chunk in _supabase_chunks(match_rows):
             sb.table("matches").upsert(chunk, on_conflict="match_id").execute()
             saved_matches += len(chunk)
-        for chunk in _supabase_chunks(player_rows):
+    except Exception as e:
+        print(f"[SUPABASE] Aviso ao salvar partidas: {type(e).__name__}: {e}")
+
+    for chunk in _supabase_chunks(player_rows):
+        try:
             sb.table("match_players").upsert(chunk, on_conflict="match_id,player_name").execute()
             saved_players += len(chunk)
-        print(f"[SUPABASE] Partidas salvas: {saved_matches}; atuaÃ§Ãµes: {saved_players}")
-    except Exception as e:
-        print(f"[SUPABASE] Aviso ao salvar partidas/atuaÃ§Ãµes: {type(e).__name__}: {e}")
+        except Exception as e:
+            msg = str(e)
+            if any(col in msg for col in ("pre_assists", "key_passes", "event_aggregates")):
+                fallback_chunk = []
+                for row in chunk:
+                    clean = dict(row)
+                    clean.pop("pre_assists", None)
+                    clean.pop("key_passes", None)
+                    clean.pop("event_aggregates", None)
+                    fallback_chunk.append(clean)
+                try:
+                    sb.table("match_players").upsert(fallback_chunk, on_conflict="match_id,player_name").execute()
+                    saved_players += len(fallback_chunk)
+                    print("[SUPABASE] match_players salvo sem colunas avançadas; rode o SQL das pré-assistências.")
+                    continue
+                except Exception as retry_err:
+                    print(f"[SUPABASE] Aviso ao salvar atuações sem campos avançados: {type(retry_err).__name__}: {retry_err}")
+            else:
+                print(f"[SUPABASE] Aviso ao salvar atuações: {type(e).__name__}: {e}")
+
+    print(f"[SUPABASE] Partidas salvas: {saved_matches}; atuações: {saved_players}")
     return {"matches": saved_matches, "match_players": saved_players}
 
 
@@ -1004,7 +1043,7 @@ def load_matches_supabase(club_id: str, limit: int = 5000):
             data = row.get("data") if isinstance(row, dict) else None
             if isinstance(data, dict):
                 out.append(normalize_match_text_fields(data))
-        print(f"[SUPABASE] HistÃ³rico carregado: {len(out)} partidas")
+        print(f"[SUPABASE] Histórico carregado: {len(out)} partidas")
         return out
     except Exception as e:
         print(f"[SUPABASE] Aviso ao carregar partidas: {type(e).__name__}: {e}")
@@ -1755,8 +1794,8 @@ def parse_matches(matches_raw, our_club_id):
                     mom = player_name
             
             timestamp = int(m.get("timestamp", 0))
-            date_str = datetime.fromtimestamp(timestamp).strftime("%d/%m/%Y") if timestamp else "â€”"
-            opponent_name = _fix_mojibake(opp.get("details", {}).get("name", "AdversÃ¡rio"))
+            date_str = datetime.fromtimestamp(timestamp).strftime("%d/%m/%Y") if timestamp else "—"
+            opponent_name = _fix_mojibake(opp.get("details", {}).get("name", "Adversário"))
             raw_match_id = str(m.get("matchId") or m.get("matchid") or m.get("id") or "").strip()
             if not raw_match_id or raw_match_id.lower() in ("none", "null", "undefined", "0"):
                 # Algumas respostas da EA nao trazem matchId. Sem esse ID estavel,
@@ -1854,7 +1893,7 @@ def parse_players(members_data):
     return sorted(players, key=lambda x: x["rating"], reverse=True)
 
 def calc_opponent_avg(matches_list):
-    """Calcula mÃ©dia de gols por adversÃ¡rio"""
+    """Calcula média de gols por adversário"""
     by_opp = {}
     for m in matches_list:
         opp = m["opponent"]
@@ -2511,7 +2550,7 @@ class HistoryImportPayload(BaseModel):
 
 @app.post("/api/import-history")
 def import_history(payload: HistoryImportPayload, current_user: dict = Depends(require_admin)):
-    """Reidrata o cache/SQLite com o histÃ³rico salvo no navegador antes da sync."""
+    """Reidrata o cache/SQLite com o histórico salvo no navegador antes da sync."""
     club = payload.club or {}
     club_id = str(club.get("id") or club.get("clubId") or "").strip()
     if not club_id:
@@ -2590,7 +2629,7 @@ def import_history(payload: HistoryImportPayload, current_user: dict = Depends(r
 
 @app.get("/api/dashboard")
 def get_dashboard(current_user: dict = Depends(get_current_user)):
-    """Retorna dados do dashboard do clube do usuÃ¡rio e recarrega histÃ³rico completo de partidas."""
+    """Retorna dados do dashboard do clube do usuário e recarrega histórico completo de partidas."""
     user_club_id = str((current_user or {}).get("club_id") or "").strip()
     cache = load_cache()
     if cache and user_club_id and str((cache.get("club") or {}).get("id") or "") != user_club_id:
@@ -2886,7 +2925,7 @@ async def sync_stream(
     platform: str = Query("auto"),
     access_token: str = Query("")
 ):
-    """SincronizaÃ§Ã£o com progresso em tempo real (SSE)"""
+    """Sincronização com progresso em tempo real (SSE)"""
     current_user = get_current_user(authorization=None, access_token=access_token)
     # Qualquer usuario ativo pode sincronizar o proprio clube; _assert_same_club bloqueia clube diferente.
     initial_platform = platform
@@ -2927,7 +2966,7 @@ async def sync_stream(
             _assert_same_club(current_user, club_id)
             club_name_real = search["name"]
             plat = search.get("platform", plat) or "common-gen5"
-            yield f"data: {log(f'âœ“ Clube: {club_name_real} (ID: {club_id}, plat: {plat})', 3, 8)}\n\n"
+            yield f"data: {log(f'✓ Clube: {club_name_real} (ID: {club_id}, plat: {plat})', 3, 8)}\n\n"
             
             yield f"data: {log('ðŸ“Š Carregando estat&iacute;sticas gerais...', 4, 8)}\n\n"
             overall = ea_client.overall_stats(club_id, plat)
@@ -2936,7 +2975,7 @@ async def sync_stream(
             yield f"data: {log('ðŸ‘¥ Baixando jogadores...', 5, 8)}\n\n"
             members = ea_client.members(club_id, plat)
             players = parse_players(members)
-            yield f"data: {log(f'âœ“ {len(players)} jogadores carregados', 5, 8)}\n\n"
+            yield f"data: {log(f'✓ {len(players)} jogadores carregados', 5, 8)}\n\n"
             
             yield f"data: {log('Baixando partidas e testando matchTypes da EA...', 6, 8)}\n\n"
             all_matches_raw, debug_matchtypes = fetch_all_match_types(ea_client, club_id, plat, max_count=100)
@@ -2969,7 +3008,7 @@ async def sync_stream(
             )
             yield f"data: {log(resumo_msg, 7, 8)}\n\n"
             print(f"[EA FC] Amistosos encontrados nesta sync: {resumo_sync.get('amistoso', 0)}")
-            yield f"data: {log(f'âœ“ {len(new_matches)} partidas baixadas nesta sync', 7, 8)}\n\n"
+            yield f"data: {log(f'✓ {len(new_matches)} partidas baixadas nesta sync', 7, 8)}\n\n"
             
             # ACUMULACAO HISTORICA: salva no DB e tambem preserva partidas antigas do cache.
             previous_cache = load_cache() or {}
@@ -3076,7 +3115,7 @@ async def sync_stream(
             
             try:
                 if _env_flag("USE_SUPABASE"):
-                    yield f"data: {log('Salvando e carregando histÃ³rico no Supabase...', 8, 8)}\n\n"
+                    yield f"data: {log('Salvando e carregando histórico no Supabase...', 8, 8)}\n\n"
                     save_club_supabase(club_data)
                     save_players_supabase(club_id, players)
                     save_matches_supabase(club_id, matches)
@@ -3095,7 +3134,7 @@ async def sync_stream(
                         club_data["ideal_team"] = ideal_team
                         club_data["mvp"] = mvp
                         club_data["matchtype_summary"] = summarize_matches_by_type(matches)
-                        yield f"data: {log(f'HistÃ³rico Supabase carregado: {len(matches)} partidas totais', 8, 8)}\n\n"
+                        yield f"data: {log(f'Histórico Supabase carregado: {len(matches)} partidas totais', 8, 8)}\n\n"
                         save_club_supabase(club_data)
 
                     log_sync_supabase(
@@ -3104,7 +3143,7 @@ async def sync_stream(
                         status="success",
                         total_matches=len(matches),
                         new_matches=len(new_matches),
-                        message="SincronizaÃ§Ã£o concluÃ­da com Supabase",
+                        message="Sincronização concluída com Supabase",
                         debug=debug_matchtypes,
                     )
             except Exception as supabase_err:
@@ -3122,7 +3161,7 @@ async def sync_stream(
                 except Exception:
                     pass
                 yield f"data: {log('Supabase falhou; seguindo com cache local/JSON/SQLite', 8, 8)}\n\n"
-            # Salva cache JSON principal e histÃ³rico por clube
+            # Salva cache JSON principal e histórico por clube
             save_cache(club_data)
             save_club_json_history(club_id, club_data)
             
@@ -3141,7 +3180,7 @@ async def sync_stream(
                 print(f"[DB] Aviso: nao salvou no SQLite: {db_err}")
                 yield f"data: {log(f'âš ï¸ DB legado ignorado: {db_err}', 8, 8)}\n\n"
             
-            yield f"data: {log(f'âœ… SincronizaÃ§Ã£o completa!', 8, 8)}\n\n"
+            yield f"data: {log(f'âœ… Sincronização completa!', 8, 8)}\n\n"
             yield f"data: {log(f'ðŸ’¾ Dados salvos em {JSON_CACHE}', 8, 8)}\n\n"
             yield f"data: {json.dumps({'done': True, 'success': True, 'club': club_name_real})}\n\n"
             
@@ -3608,7 +3647,7 @@ def build_player_analytics(player_name, cache, match_type="todos", match_status=
     moms = sum(1 for h in history if h.get("mom"))
     reds = sum(h["red"] for h in history)
 
-    # Todas as metricas de elenco/ranking abaixo vÃªm SOMENTE das partidas salvas do clube atual.
+    # Todas as metricas de elenco/ranking abaixo vêm SOMENTE das partidas salvas do clube atual.
     # Nao usa games/goals globais de members/career/stats, porque esses numeros podem incluir outros clubes.
     club_player_rows = {}
     for m in filtered_matches_for_scope:
@@ -3922,7 +3961,7 @@ Responda em markdown com:
     return {"player": player, "analytics": analytics, "analysis": analysis}
 
 def generate_player_analysis_offline(p):
-    """AnÃ¡lise offline baseada em estat&iacute;sticas"""
+    """Análise offline baseada em estat&iacute;sticas"""
     rating = p['rating']
     
     if rating >= 8: nivel = "EXCELENTE â­â­â­â­â­"
@@ -3934,8 +3973,8 @@ def generate_player_analysis_offline(p):
     pontos_fortes = []
     pontos_fracos = []
     
-    if p['pass_pct'] >= 75: pontos_fortes.append(f"Excelente precisÃ£o de passes ({p['pass_pct']}%)")
-    elif p['pass_pct'] < 60: pontos_fracos.append(f"PrecisÃ£o de passes baixa ({p['pass_pct']}%)")
+    if p['pass_pct'] >= 75: pontos_fortes.append(f"Excelente precisão de passes ({p['pass_pct']}%)")
+    elif p['pass_pct'] < 60: pontos_fracos.append(f"Precisão de passes baixa ({p['pass_pct']}%)")
     
     if p['tackle_pct'] >= 50: pontos_fortes.append(f"Bom em divididas ({p['tackle_pct']}%)")
     elif p['tackle_pct'] < 30: pontos_fracos.append(f"Divididas precisam melhorar ({p['tackle_pct']}%)")
@@ -3943,12 +3982,12 @@ def generate_player_analysis_offline(p):
     if p['goals_per_game'] >= 0.5: pontos_fortes.append(f"Artilheiro ({p['goals_per_game']} gols/jogo)")
     if p['mom'] >= 3: pontos_fortes.append(f"Decisivo: {p['mom']} MOMs")
     
-    if not pontos_fortes: pontos_fortes.append("AtuaÃ§Ã£o consistente")
+    if not pontos_fortes: pontos_fortes.append("Atuação consistente")
     if not pontos_fracos: pontos_fracos.append("Continue evoluindo")
     
-    return f"""## ðŸ“Š AnÃ¡lise: {p['name']}
+    return f"""## ðŸ“Š Análise: {p['name']}
 
-**PosiÃ§Ã£o:** {p['position']} | **Jogos:** {p['games']} | **NÃ­vel:** {nivel}
+**Posição:** {p['position']} | **Jogos:** {p['games']} | **Nível:** {nivel}
 
 ## âœ… Pontos Fortes
 {chr(10).join(f'- {pf}' for pf in pontos_fortes)}
@@ -3956,8 +3995,8 @@ def generate_player_analysis_offline(p):
 ## âš ï¸ Pontos a Melhorar
 {chr(10).join(f'- {pf}' for pf in pontos_fracos)}
 
-## ðŸŽ¯ RecomendaÃ§Ã£o TÃ¡tica
-{'Mantenha a regularidade. Jogador essencial para o time.' if rating >= 7.5 else 'Trabalhe consistÃªncia e participaÃ§Ã£o ofensiva.'}
+## ðŸŽ¯ Recomendação Tática
+{'Mantenha a regularidade. Jogador essencial para o time.' if rating >= 7.5 else 'Trabalhe consistência e participação ofensiva.'}
 
 ## ðŸ† Nota Geral
 **{rating}/10**
@@ -3966,7 +4005,7 @@ def generate_player_analysis_offline(p):
 
 @app.get("/api/ai/team")
 async def ai_team(formation: str = Query("3-5-2")):
-    """AnÃ¡lise do time ideal"""
+    """Análise do time ideal"""
     cache = load_cache()
     if not cache or not cache.get("players"):
         raise HTTPException(404, "Sincronize um clube primeiro")
@@ -3974,27 +4013,27 @@ async def ai_team(formation: str = Query("3-5-2")):
     players = apply_player_profiles_to_players(cache.get("players", []), (cache.get("club") or {}).get("id"))
     ideal = build_ideal_team(players, formation)
     
-    text = f"""## ðŸ† Time Ideal â€” FormaÃ§Ã£o {ideal['formation']}
+    text = f"""## ðŸ† Time Ideal — Formação {ideal['formation']}
 
-### EscalaÃ§Ã£o
+### Escalação
 """
     for p in ideal["players"]:
-        text += f"- **{p['field_pos']}** â€” {p['name']} (Nota: {p['rating']})\n"
+        text += f"- **{p['field_pos']}** — {p['name']} (Nota: {p['rating']})\n"
     
     text += f"""
-### ðŸ“‹ AnÃ¡lise TÃ¡tica
+### ðŸ“‹ Análise Tática
 
-A formaÃ§Ã£o **{ideal['formation']}** foi escolhida com base no elenco disponÃ­vel, priorizando os jogadores com melhor desempenho em cada posiÃ§Ã£o.
+A formação **{ideal['formation']}** foi escolhida com base no elenco disponível, priorizando os jogadores com melhor desempenho em cada posição.
 
 ### ðŸŽ¯ Pontos Fortes
-- EquilÃ­brio entre defesa e ataque
+- Equilíbrio entre defesa e ataque
 - Aproveitamento dos jogadores em melhor fase
-- DistribuiÃ§Ã£o tÃ¡tica otimizada
+- Distribuição tática otimizada
 
-### âš¡ RecomendaÃ§Ãµes
+### âš¡ Recomendações
 - Manter intensidade no meio-campo
-- Aproveitar laterais para ataques rÃ¡pidos
-- PressÃ£o alta na recuperaÃ§Ã£o de bola
+- Aproveitar laterais para ataques rápidos
+- Pressão alta na recuperação de bola
 """
     return {"team": ideal, "analysis": text}
 
@@ -4009,9 +4048,27 @@ def get_player_analytics(
     match_type: str = Query("todos"),
     match_status: str = Query("todas"),
     period: str = Query("todos"),
+    current_user: dict = Depends(get_current_user),
 ):
     """Retorna analytics profissional completo do jogador respeitando os filtros atuais da tela."""
-    cache = load_cache()
+    user_club_id = str(current_user.get("club_id") or "").strip()
+    cache = None
+
+    if USE_SUPABASE and user_club_id:
+        cache = load_latest_club_data_supabase(user_club_id)
+
+    if not cache:
+        cache = load_cache()
+
+    # Em Vercel o cache local pode ser de outro clube ou estar incompleto; o Supabase e o escopo do login mandam.
+    if cache and user_club_id and str((cache.get("club") or {}).get("id") or "") != user_club_id and USE_SUPABASE:
+        scoped_cache = load_latest_club_data_supabase(user_club_id)
+        if scoped_cache:
+            cache = scoped_cache
+
+    if not cache:
+        raise HTTPException(404, "Dados do clube não carregados")
+
     return build_player_analytics(player_name, cache, match_type, match_status, period)
 
 
@@ -4028,7 +4085,7 @@ def get_player_detail(player_name: str, current_user: dict = Depends(get_current
     if not player:
         raise HTTPException(404, f"Jogador '{player_name}' nao encontrado")
 
-    # Coleta histÃ³rico em todas as partidas
+    # Coleta histórico em todas as partidas
     history = []
     for m in cache.get("matches", []):
         for pr in (m.get("players_ratings") or []):
@@ -4250,11 +4307,11 @@ def _infer_opponent_style(stats: dict, players: list, matches: list):
     if gf >= 3.2 and top_goals >= top_assists:
         style = "Ofensivo direto"
     elif top_assists > top_goals and gf >= 2.2:
-        style = "CriaÃ§Ã£o e passe"
+        style = "Criação e passe"
     elif clean >= max(2, len(matches) // 4) and ga <= 1.5:
-        style = "Bloco sÃ³lido"
+        style = "Bloco sólido"
     elif gf >= 2.5 and ga >= 2.5:
-        style = "TrocaÃ§Ã£o aberta"
+        style = "Trocação aberta"
     elif wr >= 60:
         style = "Competitivo equilibrado"
     else:
@@ -4301,26 +4358,26 @@ def _build_opponent_strategy(stats: dict, players: list, style: str, ga_avg: flo
         p = players[0]
         strengths.append(f"jogador destaque: {p.get('name')} ({p.get('rating')})")
     if not strengths:
-        strengths.append("time ainda sem padrÃ£o forte detectado nos dados recentes")
+        strengths.append("time ainda sem padrão forte detectado nos dados recentes")
     if ga_avg >= 2.5:
         weaknesses.append("cede muitas chances e sofre muitos gols")
     if gf < 1.5:
         weaknesses.append("baixo poder ofensivo recente")
     if wr < 40:
-        weaknesses.append("oscilaÃ§Ã£o de resultados")
+        weaknesses.append("oscilação de resultados")
     if not weaknesses:
-        weaknesses.append("nÃ£o hÃ¡ fraqueza gritante nos dados recentes")
-    if style in ("Ofensivo direto", "TrocaÃ§Ã£o aberta"):
-        strategy.append("evitar perder bola no meio e atacar o espaÃ§o nas costas")
-        strategy.append("baixar a exposiÃ§Ã£o dos zagueiros nos primeiros minutos")
-    elif style == "Bloco sÃ³lido":
-        strategy.append("circular a bola com paciÃªncia e buscar inversÃµes rÃ¡pidas")
-        strategy.append("forÃ§ar finalizaÃ§Ãµes de mÃ©dia distÃ¢ncia e rebotes")
-    elif style == "CriaÃ§Ã£o e passe":
+        weaknesses.append("não há fraqueza gritante nos dados recentes")
+    if style in ("Ofensivo direto", "Trocação aberta"):
+        strategy.append("evitar perder bola no meio e atacar o espaço nas costas")
+        strategy.append("baixar a exposição dos zagueiros nos primeiros minutos")
+    elif style == "Bloco sólido":
+        strategy.append("circular a bola com paciência e buscar inversões rápidas")
+        strategy.append("forçar finalizações de média distância e rebotes")
+    elif style == "Criação e passe":
         strategy.append("pressionar o armador e cortar linhas de passe por dentro")
-        strategy.append("nÃ£o deixar o meia receber de frente")
+        strategy.append("não deixar o meia receber de frente")
     else:
-        strategy.append("comeÃ§ar pressionando para testar a saÃ­da de bola")
+        strategy.append("começar pressionando para testar a saída de bola")
         strategy.append("manter posse e atrair erro antes de acelerar")
     return strengths, weaknesses, "; ".join(strategy) + "."
 
@@ -4516,7 +4573,7 @@ def delete_agenda(item_id: int, current_user: dict = Depends(get_current_user)):
 
 @app.get("/", response_class=HTMLResponse)
 def home():
-    return HTMLResponse(content=render_html())
+    return HTMLResponse(content=render_html(), media_type="text/html; charset=utf-8")
 
 
 def render_html() -> str:
@@ -4525,7 +4582,7 @@ def render_html() -> str:
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Scout Clubs Pro - AnÃ¡lise EA FC</title>
+<title>Scout Clubs Pro - Análise EA FC</title>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 <style>
@@ -6721,7 +6778,7 @@ function updateAuthHeader() {
 function showAuthMessage(msg, type = 'error') {
   const el = document.getElementById('authError');
   if (!el) return;
-  el.textContent = msg || (type === 'success' ? 'Tudo certo' : 'Erro de autenticaÃ§Ã£o');
+  el.textContent = msg || (type === 'success' ? 'Tudo certo' : 'Erro de autenticação');
   el.classList.toggle('success', type === 'success');
   el.style.display = 'block';
 }
@@ -6777,7 +6834,7 @@ async function submitLogin(ev) {
     };
     const r = await fetch('/api/auth/login', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
     const data = await r.json().catch(() => ({}));
-    if (!r.ok) throw new Error(data.detail || data.message || 'Login invÃ¡lido');
+    if (!r.ok) throw new Error(data.detail || data.message || 'Login inválido');
     AUTH_TOKEN = data.access_token;
     AUTH_USER = data.user;
     localStorage.setItem('scout_auth_token', AUTH_TOKEN);
@@ -6881,7 +6938,7 @@ async function initAuth() {
   try {
     const r = await authFetch('/api/auth/me');
     const data = await r.json().catch(() => ({}));
-    if (!r.ok) throw new Error(data.detail || 'SessÃ£o expirada');
+    if (!r.ok) throw new Error(data.detail || 'Sessão expirada');
     AUTH_USER = data.user;
     localStorage.setItem('scout_auth_user', JSON.stringify(AUTH_USER));
     updateAuthHeader();
@@ -6893,56 +6950,56 @@ async function initAuth() {
 }
 
 const PLAYSTYLE_CATALOG = [
-  {name:'Chute colocado', code:'Finesse Shot', group:'FinalizaÃ§Ã£o', desc:'Chutes colocados com curva e precisÃ£o.'},
-  {name:'Cavadinha', code:'Chip Shot', group:'FinalizaÃ§Ã£o', desc:'Cavadinhas e finalizaÃ§Ãµes por cobertura mais eficientes.'},
-  {name:'Superchute', code:'Power Shot', group:'FinalizaÃ§Ã£o', desc:'Chutes fortes de mÃ©dia/longa distÃ¢ncia com mais potÃªncia.'},
-  {name:'Bola parada', code:'Dead Ball', group:'FinalizaÃ§Ã£o', desc:'Faltas, escanteios e bolas paradas com mais curva e precisÃ£o.'},
-  {name:'Cabeceio preciso', code:'Precision Header', group:'FinalizaÃ§Ã£o', desc:'Cabeceios ofensivos mais precisos e fortes.'},
-  {name:'AcrobÃ¡tico', code:'Acrobatic', group:'FinalizaÃ§Ã£o', desc:'Voleios, bicicletas e aÃ§Ãµes acrobÃ¡ticas.'},
-  {name:'Chute rasteiro', code:'Low Driven Shot', group:'FinalizaÃ§Ã£o', desc:'Chutes rasteiros com velocidade e precisÃ£o.'},
-  {name:'Vanguarda', code:'Gamechanger', group:'FinalizaÃ§Ã£o', desc:'FinalizaÃ§Ãµes criativas e imprevisÃ­veis em momentos decisivos.'},
+  {name:'Chute colocado', code:'Finesse Shot', group:'Finalização', desc:'Chutes colocados com curva e precisão.'},
+  {name:'Cavadinha', code:'Chip Shot', group:'Finalização', desc:'Cavadinhas e finalizações por cobertura mais eficientes.'},
+  {name:'Superchute', code:'Power Shot', group:'Finalização', desc:'Chutes fortes de média/longa distância com mais potência.'},
+  {name:'Bola parada', code:'Dead Ball', group:'Finalização', desc:'Faltas, escanteios e bolas paradas com mais curva e precisão.'},
+  {name:'Cabeceio preciso', code:'Precision Header', group:'Finalização', desc:'Cabeceios ofensivos mais precisos e fortes.'},
+  {name:'Acrobático', code:'Acrobatic', group:'Finalização', desc:'Voleios, bicicletas e ações acrobáticas.'},
+  {name:'Chute rasteiro', code:'Low Driven Shot', group:'Finalização', desc:'Chutes rasteiros com velocidade e precisão.'},
+  {name:'Vanguarda', code:'Gamechanger', group:'Finalização', desc:'Finalizações criativas e imprevisíveis em momentos decisivos.'},
   {name:'Passe incisivo', code:'Incisive Pass', group:'Passe', desc:'Enfiadas e passes que quebram linhas.'},
   {name:'Passe forte', code:'Pinged Pass', group:'Passe', desc:'Passes rasteiros fortes com velocidade e controle.'},
-  {name:'Passe longo', code:'Long Ball Pass', group:'Passe', desc:'LanÃ§amentos longos mais precisos.'},
-  {name:'Tiki Taka', code:'Tiki Taka', group:'Passe', desc:'Passes curtos de primeira e combinaÃ§Ãµes rÃ¡pidas.'},
+  {name:'Passe longo', code:'Long Ball Pass', group:'Passe', desc:'Lançamentos longos mais precisos.'},
+  {name:'Tiki Taka', code:'Tiki Taka', group:'Passe', desc:'Passes curtos de primeira e combinações rápidas.'},
   {name:'Cruzamento preciso', code:'Whipped Pass', group:'Passe', desc:'Cruzamentos com curva, velocidade e perigo.'},
-  {name:'Criativo', code:'Inventive', group:'Passe', desc:'Passes criativos, imprevisÃ­veis e combinaÃ§Ãµes nÃ£o convencionais.'},
-  {name:'Cercar', code:'Jockey', group:'Defesa', desc:'Jockey lateral e marcaÃ§Ã£o em jockey mais eficiente.'},
+  {name:'Criativo', code:'Inventive', group:'Passe', desc:'Passes criativos, imprevisíveis e combinações não convencionais.'},
+  {name:'Cercar', code:'Jockey', group:'Defesa', desc:'Jockey lateral e marcação em jockey mais eficiente.'},
   {name:'Barreira', code:'Block', group:'Defesa', desc:'Bloqueios defensivos mais eficazes.'},
-  {name:'InterceptaÃ§Ã£o', code:'Intercept', group:'Defesa', desc:'InterceptaÃ§Ãµes e cortes de passe melhores.'},
-  {name:'AntecipaÃ§Ã£o', code:'Anticipate', group:'Defesa', desc:'Botes em pÃ© e antecipaÃ§Ãµes mais limpos.'},
-  {name:'Carrinho', code:'Slide Tackle', group:'Defesa', desc:'Carrinhos com maior alcance e precisÃ£o.'},
-  {name:'ForÃ§a aÃ©rea', code:'Aerial Fortress', group:'Defesa', desc:'DomÃ­nio de disputas aÃ©reas ofensivas e defensivas.'},
-  {name:'ConduÃ§Ã£o Ã¡gil', code:'Technical', group:'Controle de bola', desc:'ConduÃ§Ã£o tÃ©cnica e dribles controlados.'},
+  {name:'Interceptação', code:'Intercept', group:'Defesa', desc:'Interceptações e cortes de passe melhores.'},
+  {name:'Antecipação', code:'Anticipate', group:'Defesa', desc:'Botes em pé e antecipações mais limpos.'},
+  {name:'Carrinho', code:'Slide Tackle', group:'Defesa', desc:'Carrinhos com maior alcance e precisão.'},
+  {name:'Força aérea', code:'Aerial Fortress', group:'Defesa', desc:'Domínio de disputas aéreas ofensivas e defensivas.'},
+  {name:'Condução ágil', code:'Technical', group:'Controle de bola', desc:'Condução técnica e dribles controlados.'},
   {name:'Veloz', code:'Rapid', group:'Controle de bola', desc:'Corridas em velocidade com a bola.'},
-  {name:'DomÃ­nio', code:'First Touch', group:'Controle de bola', desc:'Primeiro toque orientado e domÃ­nio sob pressÃ£o.'},
+  {name:'Domínio', code:'First Touch', group:'Controle de bola', desc:'Primeiro toque orientado e domínio sob pressão.'},
   {name:'Ilusionista', code:'Trickster', group:'Controle de bola', desc:'Dribles especiais e movimentos de habilidade.'},
-  {name:'CabeÃ§a fria', code:'Press Proven', group:'Controle de bola', desc:'Protege a bola melhor sob pressÃ£o.'},
-  {name:'Impulso', code:'Quick Step', group:'FÃ­sico', desc:'ExplosÃ£o nos primeiros metros.'},
-  {name:'IncansÃ¡vel', code:'Relentless', group:'FÃ­sico', desc:'FÃ´lego, recomposiÃ§Ã£o e pressÃ£o por mais tempo.'},
-  {name:'Lateral longo', code:'Long Throw', group:'FÃ­sico', desc:'Laterais longos para Ã¡rea ou profundidade.'},
-  {name:'Xerife', code:'Bruiser', group:'FÃ­sico', desc:'Duelos fÃ­sicos e disputas de corpo mais fortes.'},
-  {name:'Arremesso longo', code:'Far Throw', group:'Goleiro', desc:'ReposiÃ§Ã£o longa com as mÃ£os.'},
-  {name:'Defesa com os pÃ©s', code:'Footwork', group:'Goleiro', desc:'Defesas com os pÃ©s e ajustes curtos.'},
-  {name:'SaÃ­da aÃ©rea', code:'Cross Claimer', group:'Goleiro', desc:'SaÃ­das em cruzamentos.'},
-  {name:'SaÃ­da mano a mano', code:'Rush Out', group:'Goleiro', desc:'SaÃ­das rÃ¡pidas do gol para abafar.'},
+  {name:'Cabeça fria', code:'Press Proven', group:'Controle de bola', desc:'Protege a bola melhor sob pressão.'},
+  {name:'Impulso', code:'Quick Step', group:'Físico', desc:'Explosão nos primeiros metros.'},
+  {name:'Incansável', code:'Relentless', group:'Físico', desc:'Fôlego, recomposição e pressão por mais tempo.'},
+  {name:'Lateral longo', code:'Long Throw', group:'Físico', desc:'Laterais longos para área ou profundidade.'},
+  {name:'Xerife', code:'Bruiser', group:'Físico', desc:'Duelos físicos e disputas de corpo mais fortes.'},
+  {name:'Arremesso longo', code:'Far Throw', group:'Goleiro', desc:'Reposição longa com as mãos.'},
+  {name:'Defesa com os pés', code:'Footwork', group:'Goleiro', desc:'Defesas com os pés e ajustes curtos.'},
+  {name:'Saída aérea', code:'Cross Claimer', group:'Goleiro', desc:'Saídas em cruzamentos.'},
+  {name:'Saída mano a mano', code:'Rush Out', group:'Goleiro', desc:'Saídas rápidas do gol para abafar.'},
   {name:'Joga luva', code:'Far Reach', group:'Goleiro', desc:'Alcance em defesas no canto.'},
   {name:'Espalma', code:'Deflector', group:'Goleiro', desc:'Espalmadas para zonas mais seguras.'},
 ];
 const ARCHETYPE_CATALOG = [
-  {name:'CapitÃ£', code:'Finisher', group:'Atacantes', desc:'Atacante de decisÃ£o: posicionamento, chute e frieza para transformar chance em gol.'},
-  {name:'Alvo', code:'Target', group:'Atacantes', desc:'Atacante de referÃªncia: pivÃ´, jogo aÃ©reo, proteÃ§Ã£o e presenÃ§a na Ã¡rea.'},
-  {name:'Bruxo', code:'Magician', group:'Atacantes', desc:'Atacante criativo: mobilidade, improviso, Ãºltimo passe e finalizaÃ§Ã£o diferente.'},
-  {name:'CÃ©rebro', code:'Creator', group:'Meio-campistas', desc:'Criador de chances: visÃ£o, passe incisivo, assistÃªncia e jogo entre linhas.'},
-  {name:'Maestro', code:'Maestro', group:'Meio-campistas', desc:'Controlador de ritmo: passe curto, circulaÃ§Ã£o, pausa e organizaÃ§Ã£o.'},
-  {name:'Compasso', code:'Recycler', group:'Meio-campistas', desc:'Meio-campista de equilÃ­brio: recupera, protege e recoloca a bola em jogo com seguranÃ§a.'},
-  {name:'Gatilho', code:'Spark', group:'Meio-campistas', desc:'Jogador explosivo: aceleraÃ§Ã£o, drible, 1x1 e desequilÃ­brio pelo lado.'},
-  {name:'Chefia', code:'Boss', group:'Defensores', desc:'LÃ­der defensivo: organiza a linha, ganha duelos, protege a Ã¡rea e domina pelo alto.'},
-  {name:'Comandante', code:'Marauder', group:'Defensores', desc:'Defensor dominante: impÃµe presenÃ§a, pressiona, vence contatos e sustenta a linha.'},
-  {name:'Ambivalente', code:'Progressor', group:'Defensores', desc:'Defensor versÃ¡til: antecipa, conduz, progride a saÃ­da e ajuda na construÃ§Ã£o.'},
-  {name:'Motorzinho', code:'Engine', group:'Defensores', desc:'Defensor de energia: cobertura, ritmo, combate e presenÃ§a em vÃ¡rias zonas.'},
-  {name:'Muralha', code:'Shot Stopper', group:'Goleiros', desc:'Goleiro de reflexo: foco em defesa de chutes, alcance e seguranÃ§a na meta.'},
-  {name:'GL-Linha', code:'Sweeper Keeper', group:'Goleiros', desc:'Goleiro-lÃ­bero: sai do gol, cobre profundidade e inicia jogadas.'},
+  {name:'Capitã', code:'Finisher', group:'Atacantes', desc:'Atacante de decisão: posicionamento, chute e frieza para transformar chance em gol.'},
+  {name:'Alvo', code:'Target', group:'Atacantes', desc:'Atacante de referência: pivô, jogo aéreo, proteção e presença na área.'},
+  {name:'Bruxo', code:'Magician', group:'Atacantes', desc:'Atacante criativo: mobilidade, improviso, último passe e finalização diferente.'},
+  {name:'Cérebro', code:'Creator', group:'Meio-campistas', desc:'Criador de chances: visão, passe incisivo, assistência e jogo entre linhas.'},
+  {name:'Maestro', code:'Maestro', group:'Meio-campistas', desc:'Controlador de ritmo: passe curto, circulação, pausa e organização.'},
+  {name:'Compasso', code:'Recycler', group:'Meio-campistas', desc:'Meio-campista de equilíbrio: recupera, protege e recoloca a bola em jogo com segurança.'},
+  {name:'Gatilho', code:'Spark', group:'Meio-campistas', desc:'Jogador explosivo: aceleração, drible, 1x1 e desequilíbrio pelo lado.'},
+  {name:'Chefia', code:'Boss', group:'Defensores', desc:'Líder defensivo: organiza a linha, ganha duelos, protege a área e domina pelo alto.'},
+  {name:'Comandante', code:'Marauder', group:'Defensores', desc:'Defensor dominante: impõe presença, pressiona, vence contatos e sustenta a linha.'},
+  {name:'Ambivalente', code:'Progressor', group:'Defensores', desc:'Defensor versátil: antecipa, conduz, progride a saída e ajuda na construção.'},
+  {name:'Motorzinho', code:'Engine', group:'Defensores', desc:'Defensor de energia: cobertura, ritmo, combate e presença em várias zonas.'},
+  {name:'Muralha', code:'Shot Stopper', group:'Goleiros', desc:'Goleiro de reflexo: foco em defesa de chutes, alcance e segurança na meta.'},
+  {name:'GL-Linha', code:'Sweeper Keeper', group:'Goleiros', desc:'Goleiro-líbero: sai do gol, cobre profundidade e inicia jogadas.'},
 ];
 function isQuitMatch(m) {
   if (String((m && m.match_type) || '').toLowerCase() !== 'amistoso') return false;
@@ -7019,7 +7076,7 @@ function setPeriod(p, ev) {
   if (ev && ev.target) ev.target.classList.add('active');
   if (!isAdmin()) {
     document.querySelectorAll('.tab').forEach(el => {
-      if (['JOGADORES','COMPARAR','CONFRONTOS','CADASTRO','CONFIG','USUÃRIOS','USUARIOS','ADVERSÃRIOS','ADVERSARIOS','ADVERS&Aacute;RIOS'].includes((el.textContent || '').trim())) el.remove();
+      if (['JOGADORES','COMPARAR','CONFRONTOS','CADASTRO','CONFIG','USUÁRIOS','USUARIOS','ADVERSÁRIOS','ADVERSARIOS','ADVERS&Aacute;RIOS'].includes((el.textContent || '').trim())) el.remove();
     });
   }
   render();
@@ -7032,7 +7089,7 @@ function setMatchType(t, ev) {
   if (ev && ev.target) ev.target.classList.add('active');
   if (!isAdmin()) {
     document.querySelectorAll('.tab').forEach(el => {
-      if (['JOGADORES','COMPARAR','CONFRONTOS','CADASTRO','CONFIG','USUÃRIOS','USUARIOS','ADVERSÃRIOS','ADVERSARIOS','ADVERS&Aacute;RIOS'].includes((el.textContent || '').trim())) el.remove();
+      if (['JOGADORES','COMPARAR','CONFRONTOS','CADASTRO','CONFIG','USUÁRIOS','USUARIOS','ADVERSÁRIOS','ADVERSARIOS','ADVERS&Aacute;RIOS'].includes((el.textContent || '').trim())) el.remove();
     });
   }
   renderTab();
@@ -7337,7 +7394,7 @@ async function loadPlayerProfiles() {
   try {
     const r = await authFetch('/api/player-profiles');
     const data = await r.json();
-    // Ordem importa: o ajuste manual salvo no navegador e na sessÃ£o atual vence o cache/API da EA apÃ³s sincronizar.
+    // Ordem importa: o ajuste manual salvo no navegador e na sessão atual vence o cache/API da EA após sincronizar.
     PLAYER_PROFILES = {...dashboardProfiles, ...localProfiles, ...(PLAYER_PROFILES || {}), ...(data.profiles || {})};
   } catch (e) {
     PLAYER_PROFILES = {...dashboardProfiles, ...localProfiles, ...(PLAYER_PROFILES || {})};
@@ -7410,12 +7467,12 @@ function renderClubImageEditor() {
   const url = clubImageUrl();
   return `
     <div class="club-settings-panel">
-      <div class="club-logo-label">ConfiguraÃ§Ãµes do Clube</div>
+      <div class="club-logo-label">Configurações do Clube</div>
       <div class="club-logo-config">
         <div class="club-logo-preview">${url ? `<img src="${escapeAttr(url)}" alt="Foto atual do clube">` : '<span>Sem foto</span>'}</div>
         <div>
           <div class="club-logo-label" style="margin-bottom:6px;">Foto atual do clube</div>
-          <div class="club-logo-hint">Formatos aceitos: PNG, JPG ou WEBP<br>Tamanho mÃ¡ximo: 2MB</div>
+          <div class="club-logo-hint">Formatos aceitos: PNG, JPG ou WEBP<br>Tamanho máximo: 2MB</div>
           <div class="club-logo-actions">
             <input id="clubLogoFile" type="file" accept="image/png,image/jpeg,image/webp" style="display:none" onchange="uploadClubLogo(this.files && this.files[0])">
             <button class="btn-mini" type="button" onclick="document.getElementById('clubLogoFile').click()">Alterar foto</button>
@@ -7464,7 +7521,7 @@ async function uploadClubLogo(file) {
 
 async function removeClubLogo() {
   if (!clubImageUrl()) {
-    setClubImageStatus('O clube ainda nÃ£o tem foto', 'error');
+    setClubImageStatus('O clube ainda não tem foto', 'error');
     return;
   }
   if (!confirm('Remover a foto atual do clube?')) return;
@@ -7487,14 +7544,14 @@ async function removeClubLogo() {
 }
 function renderConfiguracoesClube() {
   return `
-    <div class="section-title">ConfiguraÃ§Ãµes do Clube</div>
+    <div class="section-title">Configurações do Clube</div>
     <div style="color:var(--text-2);font-size:12px;line-height:1.5;margin-bottom:14px;">Somente administradores podem alterar a foto do clube. Jogadores apenas visualizam a imagem nas telas do scout.</div>
     <div class="club-card" style="padding:0;margin:0 0 18px;">
       <div class="club-info">
         ${renderClubShield()}
         <div style="flex:1;min-width:0;">
           <div class="club-name">${DATA && DATA.club ? escapeAttr(DATA.club.name || 'Clube') : 'Clube'}</div>
-          <div class="club-meta">Foto exibida para todos os usuÃ¡rios do clube</div>
+          <div class="club-meta">Foto exibida para todos os usuários do clube</div>
         </div>
       </div>
     </div>
@@ -7510,7 +7567,7 @@ function render() {
       <div class="empty-state">
         <div class="empty-icon">âš½</div>
         <div class="empty-title">Nenhum clube sincronizado</div>
-        <div class="empty-text">Clique no botÃ£o abaixo para sincronizar seu clube EA FC</div>
+        <div class="empty-text">Clique no botão abaixo para sincronizar seu clube EA FC</div>
         <button class="btn-primary" onclick="startSync()">â†» SINCRONIZAR CLUBE</button>
       </div>`;
     return;
@@ -7556,7 +7613,7 @@ function render() {
           ${[1,2,3,4,5,6,7].map(n => `<button type="button" class="period-menu-item ${CURRENT_PERIOD==="ult"+n?"active":""}" onclick="setPeriod('ult${n}', event)">Ultimos ${n} jogo${n>1?"s":""}</button>`).join('')}
         </div>
       </div>
-      <div class="period ${CURRENT_PERIOD==='ult10'?'active':''}" onclick="setPeriod('ult10', event)">ÃšLT. 10</div>
+      <div class="period ${CURRENT_PERIOD==='ult10'?'active':''}" onclick="setPeriod('ult10', event)">ÚLT. 10</div>
       <div class="period ${CURRENT_PERIOD==='semana'?'active':''}" onclick="setPeriod('semana', event)">SEMANA</div>
       <div class="period ${CURRENT_PERIOD==='mes'?'active':''}" onclick="setPeriod('mes', event)">MÃŠS</div>
     </div>
@@ -7581,7 +7638,7 @@ function render() {
   
   if (!isAdmin()) {
     document.querySelectorAll('.tab').forEach(el => {
-      if (['JOGADORES','COMPARAR','CONFRONTOS','CADASTRO','CONFIG','USUÃRIOS','USUARIOS','ADVERSÃRIOS','ADVERSARIOS','ADVERS&Aacute;RIOS'].includes((el.textContent || '').trim())) el.remove();
+      if (['JOGADORES','COMPARAR','CONFRONTOS','CADASTRO','CONFIG','USUÁRIOS','USUARIOS','ADVERSÁRIOS','ADVERSARIOS','ADVERS&Aacute;RIOS'].includes((el.textContent || '').trim())) el.remove();
     });
   }
   renderTab();
@@ -7600,7 +7657,7 @@ function setTab(t, ev) {
   if (target && target.classList) target.classList.add('active');
   if (!isAdmin()) {
     document.querySelectorAll('.tab').forEach(el => {
-      if (['JOGADORES','COMPARAR','CONFRONTOS','CADASTRO','CONFIG','USUÃRIOS','USUARIOS','ADVERSÃRIOS','ADVERSARIOS','ADVERS&Aacute;RIOS'].includes((el.textContent || '').trim())) el.remove();
+      if (['JOGADORES','COMPARAR','CONFRONTOS','CADASTRO','CONFIG','USUÁRIOS','USUARIOS','ADVERSÁRIOS','ADVERSARIOS','ADVERS&Aacute;RIOS'].includes((el.textContent || '').trim())) el.remove();
     });
   }
   renderTab();
@@ -7648,7 +7705,7 @@ function computeStatsFor(matches) {
 function calcOpponentAvgClient(matches) {
   const byOpp = {};
   (matches || []).forEach(m => {
-    const opp = m.opponent || 'AdversÃ¡rio';
+    const opp = m.opponent || 'Adversário';
     if (!byOpp[opp]) byOpp[opp] = {games:0, gf:0, ga:0};
     byOpp[opp].games += 1;
     byOpp[opp].gf += Number(m.goals_for || 0);
@@ -7752,7 +7809,7 @@ function renderVisao() {
       </div>
       <div class="stat-card">
         <div class="stat-value green">${s.goals_for || 0}</div>
-        <div class="stat-label">Gols PrÃ³</div>
+        <div class="stat-label">Gols Pró</div>
       </div>
       <div class="stat-card">
         <div class="stat-value red">${s.goals_against || 0}</div>
@@ -7795,20 +7852,20 @@ function renderVisao() {
       <div style="font-size:32px;color:var(--yellow);">â­</div>
       <div>
         <div style="font-size:28px;font-weight:800;color:var(--green);">${s.best_streak || 0}</div>
-        <div class="stat-label">Melhor SequÃªncia de VitÃ³rias</div>
+        <div class="stat-label">Melhor Sequência de Vitórias</div>
       </div>
     </div>
   `;
 
   html += `
-    <div class="section-title">ðŸ“Œ MÃ©tricas Gerais do Clube no Filtro</div>
+    <div class="section-title">ðŸ“Œ Métricas Gerais do Clube no Filtro</div>
     <div class="stats-grid">
-      ${miniGeneralCard('MÃ©dia EA Elenco', adv.avg_ea || 0, 'green')}
-      ${miniGeneralCard('MÃ©dia Sofi', adv.avg_sofi || 0, 'green')}
+      ${miniGeneralCard('Média EA Elenco', adv.avg_ea || 0, 'green')}
+      ${miniGeneralCard('Média Sofi', adv.avg_sofi || 0, 'green')}
       ${miniGeneralCard('Jogadores/Jogo', adv.avg_players || 0)}
       ${miniGeneralCard('Chutes Totais', adv.total_shots || 0)}
-      ${miniGeneralCard('Pass% MÃ©dio', (adv.avg_pass_pct || 0) + '%')}
-      ${miniGeneralCard('Des% MÃ©dio', (adv.avg_tackle_pct || 0) + '%')}
+      ${miniGeneralCard('Pass% Médio', (adv.avg_pass_pct || 0) + '%')}
+      ${miniGeneralCard('Des% Médio', (adv.avg_tackle_pct || 0) + '%')}
       ${miniGeneralCard('Desarmes', adv.tackles_made || 0)}
       ${miniGeneralCard('Defesas', adv.saves || 0)}
       ${miniGeneralCard('MOMs', adv.moms || 0)}
@@ -7851,7 +7908,7 @@ function renderVisao() {
   const opponentsForFilter = calcOpponentAvgClient(matches);
   if (opponentsForFilter.length) {
     html += `
-      <div class="section-title">ðŸ“Š MÃ©dia de Gols por AdversÃ¡rio</div>
+      <div class="section-title">ðŸ“Š Média de Gols por Adversário</div>
       <div class="opponents-list">
     `;
     opponentsForFilter.forEach(o => {
@@ -7890,9 +7947,9 @@ function renderVisao() {
     html += '</div>';
   }
   
-  // Ãšltimas partidas com MOM
+  // Últimas partidas com MOM
   html += `
-    <div class="section-title">âš”ï¸ Ãšltimas Partidas</div>
+    <div class="section-title">âš”ï¸ Últimas Partidas</div>
     <div class="matches-list">
   `;
   matches.slice(0, 10).forEach(m => {
@@ -8067,7 +8124,7 @@ function renderMeuScout() {
         <div class="player-rating-big">${found.rating}</div>
         <div class="player-pos"><span class="player-pos-badge">${found.position} &middot; ${found.games}J no filtro</span></div>
         <div class="player-name">${found.name}</div>
-        <div style="color:var(--text-2);font-size:11px;text-align:center;margin:4px 0 8px;">PosiÃ§Ã£o cadastrada: <strong style="color:var(--green);">${profileForPlayer(found.name).manual_position || found.position}</strong></div>
+        <div style="color:var(--text-2);font-size:11px;text-align:center;margin:4px 0 8px;">Posição cadastrada: <strong style="color:var(--green);">${profileForPlayer(found.name).manual_position || found.position}</strong></div>
         <div style="text-align:center;margin-bottom:10px;">${profilePlaystyleBadges(found.name)}</div>
         <div class="player-stats">
           ${playerStatLine('Sofi', found.sofi_rating)}
@@ -8091,7 +8148,7 @@ function renderMeuScout() {
           ${playerStatLine('Win%', found.win_rate, '%')}
           ${playerStatLine('Verm.', found.reds)}
         </div>
-        <button class="btn-primary" style="width:100%;margin-top:14px;padding:10px 16px;" onclick="event.stopPropagation();showPlayerDetail('${safeName}')">Abrir anÃ¡lise completa</button>
+        <button class="btn-primary" style="width:100%;margin-top:14px;padding:10px 16px;" onclick="event.stopPropagation();showPlayerDetail('${safeName}')">Abrir análise completa</button>
       </div>
     </div>
     ${renderMyScoutProfileEditor(found.name)}
@@ -8153,11 +8210,11 @@ function renderRankings() {
     amistoso: 'amistosos'
   }[CURRENT_MATCH_TYPE] || 'filtro de tipo atual';
   const periodLabel = {
-    todos: 'todo o histÃ³rico salvo',
-    ult5: 'Ãºltimas 5 partidas',
-    ult10: 'Ãºltimas 10 partidas',
-    semana: 'Ãºltimos 7 dias',
-    mes: 'Ãºltimos 30 dias'
+    todos: 'todo o histórico salvo',
+    ult5: 'últimas 5 partidas',
+    ult10: 'últimas 10 partidas',
+    semana: 'últimos 7 dias',
+    mes: 'últimos 30 dias'
   }[CURRENT_PERIOD] || 'filtro atual';
 
   if (!players.length) {
@@ -8322,8 +8379,8 @@ function renderCompareBars() {
 }
 
 function renderConfrontos() {
-  // Confrontos usa o histÃ³rico completo salvo do tipo selecionado.
-  // O filtro de perÃ­odo continua valendo para VisÃ£o, mas aqui nÃ£o corta em Ãšlt.5/Ãšlt.10.
+  // Confrontos usa o histórico completo salvo do tipo selecionado.
+  // O filtro de período continua valendo para Visão, mas aqui não corta em Últ.5/Últ.10.
   const matches = playerStatMatches();
   if (!matches.length) {
     return '<div class="empty-state">Nenhuma partida salva para este tipo de partida</div>';
@@ -8379,7 +8436,7 @@ function inferPlayerPositionIntel(player) {
   const registered = normalizePlayerFamily(player.favorite_position || player.position);
   const last = normalizePlayerFamily(player.last_match_position || '');
   let family = registered;
-  let source = 'posiÃ§Ã£o favorita EA';
+  let source = 'posição favorita EA';
 
   if (apps > 0) {
     const sorted = Object.entries(counts).sort((a,b) => b[1] - a[1]);
@@ -8389,13 +8446,13 @@ function inferPlayerPositionIntel(player) {
     const maxOutfield = Math.max(counts.DEF || 0, counts.MID || 0, counts.FWD || 0);
     if (registered === 'GK' || ((counts.GK || 0) >= 2 && gkShare >= 0.5 && (counts.GK || 0) >= maxOutfield)) {
       family = 'GK';
-      source = registered === 'GK' ? 'posiÃ§Ã£o favorita EA' : 'histÃ³rico como GK';
+      source = registered === 'GK' ? 'posição favorita EA' : 'histórico como GK';
     } else if (top && top[1] >= 2 && topShare >= 0.45 && top[0] !== 'GK') {
       family = top[0];
-      source = 'Ãºltimos jogos';
+      source = 'últimos jogos';
     } else if (last && last !== 'GK') {
       family = last;
-      source = 'Ãºltimo jogo';
+      source = 'último jogo';
     }
   }
   return {family, label: familyToPositionLabel(family), source, apps, counts};
@@ -8429,17 +8486,17 @@ const ROLE_COORDS = {
 };
 
 const ROLE_DESC = {
-  GK:'Goleiro - protege a meta e inicia a saÃ­da de bola.',
+  GK:'Goleiro - protege a meta e inicia a saída de bola.',
   LB:'Lateral esquerdo - amplitude, cobertura e apoio pela esquerda.', RB:'Lateral direito - amplitude, cobertura e apoio pela direita.',
-  LWB:'Ala esquerdo - corredor inteiro, apoio ofensivo e recomposiÃ§Ã£o.', RWB:'Ala direito - corredor inteiro, apoio ofensivo e recomposiÃ§Ã£o.',
-  LCB:'Zagueiro pela esquerda - cobertura e primeira construÃ§Ã£o.', CB:'Zagueiro central - lidera a linha defensiva.', RCB:'Zagueiro pela direita - cobertura e duelos laterais.',
-  CDM:'Volante - protege a defesa e organiza a saÃ­da.', LDM:'Volante esquerdo - equilÃ­brio, cobertura e passe curto.', RDM:'Volante direito - equilÃ­brio, cobertura e pressÃ£o.',
-  LCM:'Meia central esquerdo - conexÃ£o, apoio e chegada.', CM:'Meia central - dita ritmo e liga defesa/ataque.', RCM:'Meia central direito - conexÃ£o, apoio e chegada.',
-  LM:'Meia/ala esquerdo - amplitude e criaÃ§Ã£o pelo lado.', RM:'Meia/ala direito - amplitude e criaÃ§Ã£o pelo lado.',
+  LWB:'Ala esquerdo - corredor inteiro, apoio ofensivo e recomposição.', RWB:'Ala direito - corredor inteiro, apoio ofensivo e recomposição.',
+  LCB:'Zagueiro pela esquerda - cobertura e primeira construção.', CB:'Zagueiro central - lidera a linha defensiva.', RCB:'Zagueiro pela direita - cobertura e duelos laterais.',
+  CDM:'Volante - protege a defesa e organiza a saída.', LDM:'Volante esquerdo - equilíbrio, cobertura e passe curto.', RDM:'Volante direito - equilíbrio, cobertura e pressão.',
+  LCM:'Meia central esquerdo - conexão, apoio e chegada.', CM:'Meia central - dita ritmo e liga defesa/ataque.', RCM:'Meia central direito - conexão, apoio e chegada.',
+  LM:'Meia/ala esquerdo - amplitude e criação pelo lado.', RM:'Meia/ala direito - amplitude e criação pelo lado.',
   CAM:'Meia ofensivo - cria chances entre linhas.', LAM:'Meia ofensivo esquerdo - corta para dentro e cria.', RAM:'Meia ofensivo direito - corta para dentro e cria.',
-  LW:'Ponta esquerda - profundidade e finalizaÃ§Ã£o pelo lado.', RW:'Ponta direita - profundidade e finalizaÃ§Ã£o pelo lado.',
+  LW:'Ponta esquerda - profundidade e finalização pelo lado.', RW:'Ponta direita - profundidade e finalização pelo lado.',
   LF:'Atacante/ponta interior esquerdo - ataca meia-lua e profundidade.', RF:'Atacante/ponta interior direito - ataca meia-lua e profundidade.',
-  ST:'Centroavante - referÃªncia, gols e ataque Ã  Ã¡rea.', LST:'Atacante esquerdo - ataca espaÃ§os e combina por dentro.', RST:'Atacante direito - ataca espaÃ§os e combina por dentro.',
+  ST:'Centroavante - referência, gols e ataque Ã  área.', LST:'Atacante esquerdo - ataca espaços e combina por dentro.', RST:'Atacante direito - ataca espaços e combina por dentro.',
 };
 
 const ROLE_PREF = {
@@ -8505,7 +8562,7 @@ function applyManualLineup(team) {
     const fit = p.family === wanted[0] ? 'natural' : wanted.includes(p.family) ? 'adaptado' : 'manual';
     picked.push({...p, role:slot, field_pos:slot, x, y, fit, role_description: ROLE_DESC[slot], selection_score: Math.round(roleScore(p, wanted[0]) * 10) / 10});
   });
-  return {formation: IDEAL_FORMATION, formation_name:`FormaÃ§Ã£o ${IDEAL_FORMATION}`, slots, players:picked, missing_slots:slots.filter(s => !picked.some(p => p.role === s)), manual:true};
+  return {formation: IDEAL_FORMATION, formation_name:`Formação ${IDEAL_FORMATION}`, slots, players:picked, missing_slots:slots.filter(s => !picked.some(p => p.role === s)), manual:true};
 }
 function profilePlaystyleBadges(name, limit=3) {
   const profile = profileForPlayer(name);
@@ -8517,7 +8574,7 @@ async function exportIdealJpeg() {
   const target = document.getElementById('idealExportArea');
   if (!target) return;
   try {
-    if (typeof html2canvas === 'undefined') throw new Error('Biblioteca de exportaÃ§Ã£o ainda nÃ£o carregou');
+    if (typeof html2canvas === 'undefined') throw new Error('Biblioteca de exportação ainda não carregou');
     const canvas = await html2canvas(target, {backgroundColor:'#050805', scale:2, useCORS:true});
     const a = document.createElement('a');
     a.href = canvas.toDataURL('image/jpeg', 0.92);
@@ -8543,7 +8600,7 @@ function buildIdealTeamClient(formation) {
       if (p.family === wanted[0]) fitBonus = 18;
       else if (wanted.includes(p.family)) fitBonus = 9;
       else fitBonus = -18;
-      // GK continua protegido. Nas outras posiÃ§Ãµes, se faltar natural/adaptado,
+      // GK continua protegido. Nas outras posições, se faltar natural/adaptado,
       // completa o XI com o melhor jogador restante em vez de deixar buraco no campo.
       const score = roleScore(p, wanted[0]) + fitBonus;
       if (score > bestScore) { bestScore = score; best = p; }
@@ -8555,7 +8612,7 @@ function buildIdealTeamClient(formation) {
       picked.push({...best, role:slot, field_pos:slot, x, y, fit, role_description: ROLE_DESC[slot], selection_score: Math.round(bestScore * 10) / 10});
     }
   });
-  const autoTeam = {formation, formation_name:`FormaÃ§Ã£o ${formation}`, slots, players:picked, missing_slots:slots.filter(s => !picked.some(p => p.role === s))};
+  const autoTeam = {formation, formation_name:`Formação ${formation}`, slots, players:picked, missing_slots:slots.filter(s => !picked.some(p => p.role === s))};
   return IDEAL_MODE === 'manual' ? applyManualLineup(autoTeam) : autoTeam;
 }
 
@@ -8563,7 +8620,7 @@ function setIdealFormation(value) {
   IDEAL_FORMATION = value;
   if (!isAdmin()) {
     document.querySelectorAll('.tab').forEach(el => {
-      if (['JOGADORES','COMPARAR','CONFRONTOS','CADASTRO','CONFIG','USUÃRIOS','USUARIOS','ADVERSÃRIOS','ADVERSARIOS','ADVERS&Aacute;RIOS'].includes((el.textContent || '').trim())) el.remove();
+      if (['JOGADORES','COMPARAR','CONFRONTOS','CADASTRO','CONFIG','USUÁRIOS','USUARIOS','ADVERSÁRIOS','ADVERSARIOS','ADVERS&Aacute;RIOS'].includes((el.textContent || '').trim())) el.remove();
     });
   }
   renderTab();
@@ -8577,34 +8634,34 @@ function playstyleIcon(nameOrCode) {
     'power shot':'ðŸ’¥', 'chute forte':'ðŸ’¥',
     'dead ball':'ðŸŽ¯', 'bola parada':'ðŸŽ¯',
     'precision header':'ðŸ¦…', 'cabeceio forte':'ðŸ¦…', 'power header':'ðŸ¦…',
-    'acrobatic':'ðŸ¤¸', 'acrobÃ¡tico':'ðŸ¤¸',
+    'acrobatic':'ðŸ¤¸', 'acrobático':'ðŸ¤¸',
     'low driven shot':'â¬‡', 'chute rasteiro':'â¬‡',
     'gamechanger':'âš¡', 'decisivo':'âš¡',
     'incisive pass':'ðŸ§­', 'passe incisivo':'ðŸ§­',
     'pinged pass':'âž¡', 'passe pingado':'âž¡',
-    'long ball pass':'â†—', 'lanÃ§amento longo':'â†—', 'bola longa':'â†—',
+    'long ball pass':'â†—', 'lançamento longo':'â†—', 'bola longa':'â†—',
     'tiki taka':'ðŸ”', 'tiki-taka':'ðŸ”',
     'whipped pass':'ã€°', 'cruzamento tenso':'ã€°',
     'inventive':'ðŸŽ©', 'inventivo':'ðŸŽ©', 'trivela':'ðŸŽ©', 'flair':'ðŸŽ©',
-    'jockey':'ðŸ•º', 'contenÃ§Ã£o':'ðŸ•º',
+    'jockey':'ðŸ•º', 'contenção':'ðŸ•º',
     'block':'ðŸš§', 'bloqueio':'ðŸš§',
-    'intercept':'ðŸª', 'interceptaÃ§Ã£o':'ðŸª',
-    'anticipate':'ðŸ¦Š', 'antecipaÃ§Ã£o':'ðŸ¦Š',
+    'intercept':'ðŸª', 'interceptação':'ðŸª',
+    'anticipate':'ðŸ¦Š', 'antecipação':'ðŸ¦Š',
     'slide tackle':'ðŸ›', 'carrinho':'ðŸ›',
-    'aerial fortress':'ðŸ›¡', 'fortaleza aÃ©rea':'ðŸ›¡', 'jogo aÃ©reo':'ðŸ›¡', 'aerial':'ðŸ›¡',
-    'technical':'ðŸŽ®', 'tÃ©cnico':'ðŸŽ®',
-    'rapid':'ðŸ’¨', 'rÃ¡pido com bola':'ðŸ’¨',
+    'aerial fortress':'ðŸ›¡', 'fortaleza aérea':'ðŸ›¡', 'jogo aéreo':'ðŸ›¡', 'aerial':'ðŸ›¡',
+    'technical':'ðŸŽ®', 'técnico':'ðŸŽ®',
+    'rapid':'ðŸ’¨', 'rápido com bola':'ðŸ’¨',
     'first touch':'ðŸ§²', 'primeiro toque':'ðŸ§²',
     'trickster':'âœ¨', 'driblador':'âœ¨',
-    'press proven':'ðŸ§±', 'resistente Ã  pressÃ£o':'ðŸ§±',
+    'press proven':'ðŸ§±', 'resistente Ã  pressão':'ðŸ§±',
     'quick step':'ðŸš€', 'arranque':'ðŸš€',
-    'relentless':'â™¾', 'incansÃ¡vel':'â™¾',
+    'relentless':'â™¾', 'incansável':'â™¾',
     'long throw':'ðŸ™Œ', 'arremesso longo':'ðŸ™Œ',
     'bruiser':'ðŸ’ª', 'brigador':'ðŸ’ª',
-        'far throw':'ðŸŽ¯', 'reposiÃ§Ã£o longa':'ðŸŽ¯',
-    'footwork':'ðŸ¦¶', 'defesa com os pÃ©s':'ðŸ¦¶',
+        'far throw':'ðŸŽ¯', 'reposição longa':'ðŸŽ¯',
+    'footwork':'ðŸ¦¶', 'defesa com os pés':'ðŸ¦¶',
     'cross claimer':'ðŸ§¤', 'pegador de cruzamento':'ðŸ§¤',
-    'rush out':'ðŸƒ', 'saÃ­da rÃ¡pida':'ðŸƒ',
+    'rush out':'ðŸƒ', 'saída rápida':'ðŸƒ',
     'far reach':'ðŸª½', 'alcance longo':'ðŸª½',
     'deflector':'ðŸªž', 'defletor':'ðŸªž'
   };
@@ -8614,11 +8671,11 @@ function playstyleIcon(nameOrCode) {
 function archetypeIcon(name) {
   const key = String(name || '').toLowerCase();
   const map = {
-    'finisher':'ðŸŽ¯', 'finalizador':'ðŸŽ¯', 'target':'ðŸ—¼', 'referÃªncia':'ðŸ—¼', 'referencia':'ðŸ—¼', 'magician':'ðŸŽ©', 'mago':'ðŸŽ©',
-    'creator':'ðŸ§ ', 'criador':'ðŸ§ ', 'maestro':'ðŸŽ¼', 'recycler':'â™»ï¸', 'reciclador':'â™»ï¸', 'spark':'âš¡', 'faÃ­sca':'âš¡', 'faisca':'âš¡',
+    'finisher':'ðŸŽ¯', 'finalizador':'ðŸŽ¯', 'target':'ðŸ—¼', 'referência':'ðŸ—¼', 'referencia':'ðŸ—¼', 'magician':'ðŸŽ©', 'mago':'ðŸŽ©',
+    'creator':'ðŸ§ ', 'criador':'ðŸ§ ', 'maestro':'ðŸŽ¼', 'recycler':'â™»ï¸', 'reciclador':'â™»ï¸', 'spark':'âš¡', 'faísca':'âš¡', 'faisca':'âš¡',
     'boss':'ðŸ›¡', 'chefia':'ðŸ›¡', 'marauder':'â†•', 'saqueador':'â†•', 'progressor':'â†—', 'engine':'âš™', 'motor':'âš™',
-    'shot stopper':'ðŸ§±', 'goleiro muralha':'ðŸ§±', 'sweeper keeper':'ðŸ§¤', 'goleiro lÃ­bero':'ðŸ§¤', 'goleiro libero':'ðŸ§¤',
-    'chefia':'ðŸ›¡', 'lÃ­bero':'â†—', 'libero':'â†—', 'motor':'âš™', 'paredÃ£o':'ðŸ§±', 'goleiro lÃ­bero':'ðŸ§¤'
+    'shot stopper':'ðŸ§±', 'goleiro muralha':'ðŸ§±', 'sweeper keeper':'ðŸ§¤', 'goleiro líbero':'ðŸ§¤', 'goleiro libero':'ðŸ§¤',
+    'chefia':'ðŸ›¡', 'líbero':'â†—', 'libero':'â†—', 'motor':'âš™', 'paredão':'ðŸ§±', 'goleiro líbero':'ðŸ§¤'
   };
   return map[key] || 'â—†';
 }
@@ -8632,21 +8689,21 @@ function normalizePlaystyleName(value) {
   const map = {
     'Chute colocado':'Finesse Shot', 'Finesse Shot':'Finesse Shot', 'Finesse':'Finesse Shot',
     'Cavadinha':'Chip Shot', 'Chip Shot':'Chip Shot', 'Superchute':'Power Shot', 'Chute forte':'Power Shot', 'Power Shot':'Power Shot',
-    'Bola parada':'Dead Ball', 'Dead Ball':'Dead Ball', 'Cabeceio preciso':'Precision Header', 'CabeÃ§ada precisa':'Precision Header', 'Precision Header':'Precision Header',
-    'AcrobÃ¡tico':'Acrobatic', 'Acrobata':'Acrobatic', 'Acrobatic':'Acrobatic', 'Chute rasteiro':'Low Driven Shot', 'Low Driven Shot':'Low Driven Shot',
+    'Bola parada':'Dead Ball', 'Dead Ball':'Dead Ball', 'Cabeceio preciso':'Precision Header', 'Cabeçada precisa':'Precision Header', 'Precision Header':'Precision Header',
+    'Acrobático':'Acrobatic', 'Acrobata':'Acrobatic', 'Acrobatic':'Acrobatic', 'Chute rasteiro':'Low Driven Shot', 'Low Driven Shot':'Low Driven Shot',
     'Vanguarda':'Gamechanger', 'Decisivo':'Gamechanger', 'Gamechanger':'Gamechanger', 'Passe incisivo':'Incisive Pass', 'Incisive Pass':'Incisive Pass',
-    'Passe forte':'Pinged Pass', 'Passe pingado':'Pinged Pass', 'Pinged Pass':'Pinged Pass', 'Passe longo':'Long Ball Pass', 'LanÃ§amento longo':'Long Ball Pass', 'Long Ball Pass':'Long Ball Pass',
+    'Passe forte':'Pinged Pass', 'Passe pingado':'Pinged Pass', 'Pinged Pass':'Pinged Pass', 'Passe longo':'Long Ball Pass', 'Lançamento longo':'Long Ball Pass', 'Long Ball Pass':'Long Ball Pass',
     'Tiki Taka':'Tiki Taka', 'Cruzamento preciso':'Whipped Pass', 'Cruzamento tenso':'Whipped Pass', 'Whipped Pass':'Whipped Pass', 'Criativo':'Inventive', 'Inventivo':'Inventive', 'Inventive':'Inventive',
-    'Cercar':'Jockey', 'Jockey':'Jockey', 'Barreira':'Block', 'Bloqueio':'Block', 'Block':'Block', 'InterceptaÃ§Ã£o':'Intercept', 'Interceptacao':'Intercept', 'Intercept':'Intercept',
-    'AntecipaÃ§Ã£o':'Anticipate', 'Antecipacao':'Anticipate', 'Antecipar':'Anticipate', 'Anticipate':'Anticipate', 'Carrinho':'Slide Tackle', 'Slide Tackle':'Slide Tackle',
-    'ForÃ§a aÃ©rea':'Aerial Fortress', 'Forca aerea':'Aerial Fortress', 'Fortaleza aÃ©rea':'Aerial Fortress', 'Jogo aÃ©reo':'Aerial Fortress', 'Aerial Fortress':'Aerial Fortress',
-    'ConduÃ§Ã£o Ã¡gil':'Technical', 'Conducao agil':'Technical', 'TÃ©cnico':'Technical', 'Tecnico':'Technical', 'Technical':'Technical', 'Veloz':'Rapid', 'RÃ¡pido':'Rapid', 'Rapido':'Rapid', 'Rapid':'Rapid',
-    'DomÃ­nio':'First Touch', 'Dominio':'First Touch', 'Primeiro toque':'First Touch', 'First Touch':'First Touch', 'Ilusionista':'Trickster', 'Malabarista':'Trickster', 'Trickster':'Trickster',
-    'CabeÃ§a fria':'Press Proven', 'Cabeca fria':'Press Proven', 'Resistente Ã  pressÃ£o':'Press Proven', 'Resistente a pressao':'Press Proven', 'Press Proven':'Press Proven',
-    'Impulso':'Quick Step', 'Passo rÃ¡pido':'Quick Step', 'Passo rapido':'Quick Step', 'Quick Step':'Quick Step', 'IncansÃ¡vel':'Relentless', 'Incansavel':'Relentless', 'Relentless':'Relentless',
+    'Cercar':'Jockey', 'Jockey':'Jockey', 'Barreira':'Block', 'Bloqueio':'Block', 'Block':'Block', 'Interceptação':'Intercept', 'Interceptacao':'Intercept', 'Intercept':'Intercept',
+    'Antecipação':'Anticipate', 'Antecipacao':'Anticipate', 'Antecipar':'Anticipate', 'Anticipate':'Anticipate', 'Carrinho':'Slide Tackle', 'Slide Tackle':'Slide Tackle',
+    'Força aérea':'Aerial Fortress', 'Forca aerea':'Aerial Fortress', 'Fortaleza aérea':'Aerial Fortress', 'Jogo aéreo':'Aerial Fortress', 'Aerial Fortress':'Aerial Fortress',
+    'Condução ágil':'Technical', 'Conducao agil':'Technical', 'Técnico':'Technical', 'Tecnico':'Technical', 'Technical':'Technical', 'Veloz':'Rapid', 'Rápido':'Rapid', 'Rapido':'Rapid', 'Rapid':'Rapid',
+    'Domínio':'First Touch', 'Dominio':'First Touch', 'Primeiro toque':'First Touch', 'First Touch':'First Touch', 'Ilusionista':'Trickster', 'Malabarista':'Trickster', 'Trickster':'Trickster',
+    'Cabeça fria':'Press Proven', 'Cabeca fria':'Press Proven', 'Resistente Ã  pressão':'Press Proven', 'Resistente a pressao':'Press Proven', 'Press Proven':'Press Proven',
+    'Impulso':'Quick Step', 'Passo rápido':'Quick Step', 'Passo rapido':'Quick Step', 'Quick Step':'Quick Step', 'Incansável':'Relentless', 'Incansavel':'Relentless', 'Relentless':'Relentless',
     'Lateral longo':'Long Throw', 'Arremesso lateral longo':'Long Throw', 'Long Throw':'Long Throw', 'Xerife':'Bruiser', 'Brigador':'Bruiser', 'Bruiser':'Bruiser',
-    'Arremesso longo':'Far Throw', 'Far Throw':'Far Throw', 'Defesa com os pÃ©s':'Footwork', 'Defesa com os pes':'Footwork', 'Footwork':'Footwork',
-    'SaÃ­da aÃ©rea':'Cross Claimer', 'Saida aerea':'Cross Claimer', 'Pegador de cruzamento':'Cross Claimer', 'Cross Claimer':'Cross Claimer', 'SaÃ­da mano a mano':'Rush Out', 'Saida mano a mano':'Rush Out', 'SaÃ­da rÃ¡pida':'Rush Out', 'Saida rapida':'Rush Out', 'Rush Out':'Rush Out',
+    'Arremesso longo':'Far Throw', 'Far Throw':'Far Throw', 'Defesa com os pés':'Footwork', 'Defesa com os pes':'Footwork', 'Footwork':'Footwork',
+    'Saída aérea':'Cross Claimer', 'Saida aerea':'Cross Claimer', 'Pegador de cruzamento':'Cross Claimer', 'Cross Claimer':'Cross Claimer', 'Saída mano a mano':'Rush Out', 'Saida mano a mano':'Rush Out', 'Saída rápida':'Rush Out', 'Saida rapida':'Rush Out', 'Rush Out':'Rush Out',
     'Joga luva':'Far Reach', 'Alcance longo':'Far Reach', 'Far Reach':'Far Reach', 'Espalma':'Deflector', 'Espalmador':'Deflector', 'Deflector':'Deflector'
   };
   return map[v] || v;
@@ -8657,12 +8714,12 @@ function normalizeArchetypeName(value) {
   const found = ARCHETYPE_CATALOG.find(a => a.code === v || a.name === v);
   if (found) return found.code;
   const map = {
-    'CapitÃ£':'Finisher', 'Capita':'Finisher', 'Finalizador':'Finisher', 'Finisher':'Finisher', 'Alvo':'Target', 'ReferÃªncia':'Target', 'Referencia':'Target', 'Target':'Target',
-    'Bruxo':'Magician', 'Mago':'Magician', 'Magician':'Magician', 'CÃ©rebro':'Creator', 'Cerebro':'Creator', 'Criador':'Creator', 'Creator':'Creator', 'Maestro':'Maestro',
-    'Compasso':'Recycler', 'Reciclador':'Recycler', 'Recycler':'Recycler', 'Gatilho':'Spark', 'FaÃ­sca':'Spark', 'Faisca':'Spark', 'Spark':'Spark',
-    'Chefia':'Boss', 'Boss':'Boss', 'LÃ­der':'Boss', 'Lider':'Boss',
+    'Capitã':'Finisher', 'Capita':'Finisher', 'Finalizador':'Finisher', 'Finisher':'Finisher', 'Alvo':'Target', 'Referência':'Target', 'Referencia':'Target', 'Target':'Target',
+    'Bruxo':'Magician', 'Mago':'Magician', 'Magician':'Magician', 'Cérebro':'Creator', 'Cerebro':'Creator', 'Criador':'Creator', 'Creator':'Creator', 'Maestro':'Maestro',
+    'Compasso':'Recycler', 'Reciclador':'Recycler', 'Recycler':'Recycler', 'Gatilho':'Spark', 'Faísca':'Spark', 'Faisca':'Spark', 'Spark':'Spark',
+    'Chefia':'Boss', 'Boss':'Boss', 'Líder':'Boss', 'Lider':'Boss',
     'Comandante':'Marauder', 'Saqueador':'Marauder', 'Marauder':'Marauder', 'Ambivalente':'Progressor', 'Progressor':'Progressor', 'Motorzinho':'Engine', 'Motor':'Engine', 'Engine':'Engine',
-    'Muralha':'Shot Stopper', 'Goleiro muralha':'Shot Stopper', 'Shot Stopper':'Shot Stopper', 'GL-Linha':'Sweeper Keeper', 'GL Linha':'Sweeper Keeper', 'Goleiro lÃ­bero':'Sweeper Keeper', 'Goleiro libero':'Sweeper Keeper', 'Sweeper Keeper':'Sweeper Keeper'
+    'Muralha':'Shot Stopper', 'Goleiro muralha':'Shot Stopper', 'Shot Stopper':'Shot Stopper', 'GL-Linha':'Sweeper Keeper', 'GL Linha':'Sweeper Keeper', 'Goleiro líbero':'Sweeper Keeper', 'Goleiro libero':'Sweeper Keeper', 'Sweeper Keeper':'Sweeper Keeper'
   };
   return map[v] || v;
 }
@@ -8688,7 +8745,7 @@ function playstyleSelectOptions(selected='') {
 
 function archetypeSelectOptions(selected='') {
   selected = normalizeArchetypeName(selected);
-  return ['<option value="">ArquÃ©tipo</option>'].concat(
+  return ['<option value="">Arquétipo</option>'].concat(
     ARCHETYPE_CATALOG.map(a => `<option value="${a.code}" ${selected === a.code ? 'selected' : ''}>${archetypeIcon(a.code)} ${a.name} &middot; ${a.group}</option>`)
   ).join('');
 }
@@ -8699,7 +8756,7 @@ async function loadClubUsers() {
   try {
     const r = await authFetch('/api/admin/users');
     const data = await r.json().catch(() => ({}));
-    if (!r.ok) throw new Error(data.detail || 'Erro ao carregar usuÃ¡rios');
+    if (!r.ok) throw new Error(data.detail || 'Erro ao carregar usuários');
     CLUB_USERS = data.users || [];
   } catch (e) {
     console.warn('Erro ao carregar usuarios do clube', e);
@@ -8709,11 +8766,11 @@ async function loadClubUsers() {
 }
 
 async function deleteClubUser(userId, nome) {
-  if (!confirm(`Excluir o acesso de ${nome || 'este usuÃ¡rio'}?`)) return;
+  if (!confirm(`Excluir o acesso de ${nome || 'este usuário'}?`)) return;
   try {
     const r = await authFetch('/api/admin/users/' + encodeURIComponent(userId), {method:'DELETE'});
     const data = await r.json().catch(() => ({}));
-    if (!r.ok) throw new Error(data.detail || 'Erro ao excluir usuÃ¡rio');
+    if (!r.ok) throw new Error(data.detail || 'Erro ao excluir usuário');
     await loadClubUsers();
     renderTab();
   } catch (e) {
@@ -8858,8 +8915,8 @@ function renderClubUsersAdmin() {
   }).join('');
   return `
     <div class="section-title">Usu&aacute;rios cadastrados no clube</div>
-    <div style="color:var(--text-2);font-size:12px;margin-bottom:12px;line-height:1.5;">Aqui o admin vÃª todos os acessos cadastrados no clube. O ideal Ã© o usuÃ¡rio ser igual ao ID/nome do FIFA/EA FC para o Meu Scout puxar automaticamente as estat&iacute;sticas certas.</div>
-    <div class="profile-list">${rows || '<div class="empty-state" style="padding:30px 20px;">Nenhum usuÃ¡rio cadastrado encontrado.</div>'}</div>
+    <div style="color:var(--text-2);font-size:12px;margin-bottom:12px;line-height:1.5;">Aqui o admin vê todos os acessos cadastrados no clube. O ideal é o usuário ser igual ao ID/nome do FIFA/EA FC para o Meu Scout puxar automaticamente as estat&iacute;sticas certas.</div>
+    <div class="profile-list">${rows || '<div class="empty-state" style="padding:30px 20px;">Nenhum usuário cadastrado encontrado.</div>'}</div>
   `;
 }
 
@@ -8970,7 +9027,7 @@ async function loadOwnerUsers() {
   try {
     const r = await authFetch('/api/owner/users');
     const data = await r.json().catch(() => ({}));
-    if (!r.ok) throw new Error(data.detail || 'Erro ao carregar usuÃ¡rios');
+    if (!r.ok) throw new Error(data.detail || 'Erro ao carregar usuários');
     OWNER_USERS = data.users || [];
   } catch (e) {
     console.warn('Erro ao carregar usuarios globais', e);
@@ -8987,24 +9044,24 @@ async function updateOwnerUser(userId, patch) {
       body: JSON.stringify(patch)
     });
     const data = await r.json().catch(() => ({}));
-    if (!r.ok) throw new Error(data.detail || 'Erro ao atualizar usuÃ¡rio');
+    if (!r.ok) throw new Error(data.detail || 'Erro ao atualizar usuário');
     await loadOwnerUsers();
     renderTab();
-    alert('UsuÃ¡rio atualizado.');
+    alert('Usuário atualizado.');
   } catch (e) {
     alert(e.message);
   }
 }
 
 async function deleteOwnerUser(userId, nome) {
-  if (!confirm(`Excluir definitivamente ${nome || 'este usuÃ¡rio'}?`)) return;
+  if (!confirm(`Excluir definitivamente ${nome || 'este usuário'}?`)) return;
   try {
     const r = await authFetch('/api/owner/users/' + encodeURIComponent(userId), {method:'DELETE'});
     const data = await r.json().catch(() => ({}));
-    if (!r.ok) throw new Error(data.detail || 'Erro ao excluir usuÃ¡rio');
+    if (!r.ok) throw new Error(data.detail || 'Erro ao excluir usuário');
     await loadOwnerUsers();
     renderTab();
-    alert('UsuÃ¡rio excluÃ­do.');
+    alert('Usuário excluído.');
   } catch (e) {
     alert(e.message);
   }
@@ -9018,7 +9075,7 @@ function renderOwnerUsersAdmin() {
       <div class="profile-row profile-user-row owner-user-row">
         <div>
           <div class="profile-name">${escapeAttr(u.nome || '-')}</div>
-          <div class="profile-meta">UsuÃ¡rio/ID FIFA: ${escapeAttr(u.usuario || '-')}</div>
+          <div class="profile-meta">Usuário/ID FIFA: ${escapeAttr(u.usuario || '-')}</div>
         </div>
         <div><div class="profile-meta">Clube</div>${escapeAttr(u.clube || '')}</div>
         <select class="btn-mini" onchange="updateOwnerUser('${escapeAttr(u.id)}', {cargo:this.value})" ${self ? 'disabled' : ''}>
@@ -9035,9 +9092,9 @@ function renderOwnerUsersAdmin() {
       </div>`;
   }).join('');
   return `
-    <div class="section-title">Painel sennasant Â· todos os usuÃ¡rios</div>
-    <div style="color:var(--text-2);font-size:12px;margin-bottom:12px;line-height:1.5;">Tela exclusiva do login <strong>sennasant</strong>. Aqui vocÃª muda jogador/admin, ativa/desativa login e exclui usuÃ¡rios de qualquer clube cadastrado.</div>
-    <div class="profile-list">${rows || '<div class="empty-state" style="padding:30px 20px;">Nenhum usuÃ¡rio cadastrado encontrado.</div>'}</div>
+    <div class="section-title">Painel sennasant · todos os usuários</div>
+    <div style="color:var(--text-2);font-size:12px;margin-bottom:12px;line-height:1.5;">Tela exclusiva do login <strong>sennasant</strong>. Aqui você muda jogador/admin, ativa/desativa login e exclui usuários de qualquer clube cadastrado.</div>
+    <div class="profile-list">${rows || '<div class="empty-state" style="padding:30px 20px;">Nenhum usuário cadastrado encontrado.</div>'}</div>
   `;
 }
 function renderCadastroJogadores() {
@@ -9077,7 +9134,7 @@ function renderCadastroJogadores() {
   return `
     <div class="section-title">Cadastro de Jogadores</div>
     <div style="color:var(--text-2);font-size:12px;margin-bottom:12px;line-height:1.5;">
-      O script sugere posiÃ§Ã£o pela posiÃ§Ã£o favorita da EA e pelas posiÃ§Ãµes dos Ãºltimos jogos. Se errar, ajuste aqui uma vez e o Time Ideal passa a obedecer. As estat&iacute;sticas continuam sempre sÃ³ do clube pesquisado.
+      O script sugere posição pela posição favorita da EA e pelas posições dos últimos jogos. Se errar, ajuste aqui uma vez e o Time Ideal passa a obedecer. As estat&iacute;sticas continuam sempre só do clube pesquisado.
     </div>
     <div class="profile-list">${rowsHtml}</div>
     ${renderClubUsersAdmin()}
@@ -9132,12 +9189,12 @@ async function saveProfileFromRow(name) {
 
 function findPlaystyle(name) {
   const code = normalizePlaystyleName(name);
-  return PLAYSTYLE_CATALOG.find(p => p.code === code || p.name === name) || {name: playstyleLabel(name), code, group:'', desc:'Estilo recomendado para complementar a funÃ§Ã£o.'};
+  return PLAYSTYLE_CATALOG.find(p => p.code === code || p.name === name) || {name: playstyleLabel(name), code, group:'', desc:'Estilo recomendado para complementar a função.'};
 }
 
 function findArchetype(name) {
   const code = normalizeArchetypeName(name);
-  return ARCHETYPE_CATALOG.find(a => a.code === code || a.name === name) || {name: archetypeLabel(name), code, group:'', desc:'Perfil tÃ¡tico recomendado para a funÃ§Ã£o descrita.'};
+  return ARCHETYPE_CATALOG.find(a => a.code === code || a.name === name) || {name: archetypeLabel(name), code, group:'', desc:'Perfil tático recomendado para a função descrita.'};
 }
 
 function uniqueStyleNames(names) {
@@ -9154,13 +9211,13 @@ function suggestBuildRecipe(position, text) {
   const t = inputText.toLowerCase();
   const has = (re) => re.test(t);
   const wants = {
-    gk: has(/\b(gk|goleiro)\b|reflex|sair do gol|defesa com os pÃ©s|defesa com os pes|reposi|mÃ£os|maos/),
-    cb: has(/zague|defensor|defesa|marcar|antecip|desarme|xerife|chefia|chefe|cobertura|a[eÃ©]re|cabe[cÃ§]|combate/),
+    gk: has(/\b(gk|goleiro)\b|reflex|sair do gol|defesa com os pés|defesa com os pes|reposi|mãos|maos/),
+    cb: has(/zague|defensor|defesa|marcar|antecip|desarme|xerife|chefia|chefe|cobertura|a[eé]re|cabe[cç]|combate/),
     fullback: has(/lateral|ala|cruz|corredor|linha de fundo|apoio|amplitude/),
-    cdm: has(/volante|cdm|cÃ£o|cao|protege|marca|roubar|intercept|recupera/),
-    creator: has(/cam|meia|criador|armador|passe|assist|maestro|10|achar passe|vis[aÃ£]o/),
+    cdm: has(/volante|cdm|cão|cao|protege|marca|roubar|intercept|recupera/),
+    creator: has(/cam|meia|criador|armador|passe|assist|maestro|10|achar passe|vis[aã]o/),
     winger: has(/ponta|drible|veloc|1x1|aberto|profundidade|arranque/),
-    striker: has(/atac|st|gol|final|chute|artilheiro|matador|pivÃ´|pivo|referencia|referÃªncia/),
+    striker: has(/atac|st|gol|final|chute|artilheiro|matador|pivô|pivo|referencia|referência/),
   };
   let role = 'equilibrado';
   if (inputText) {
@@ -9173,47 +9230,47 @@ function suggestBuildRecipe(position, text) {
     else if (wants.gk) role = 'goleiro';
   }
 
-  const commonExplain = 'Os nÃºmeros abaixo sÃ£o metas prÃ¡ticas de atributo, nÃ£o custo exato de PA. No FC 26, cada ArquÃ©tipo tem mÃ­nimos/mÃ¡ximos prÃ³prios, atributos-chave mais baratos e custo crescente conforme o atributo sobe. Por isso a regra Ã©: primeiro atingir os atributos que liberam/fortalecem a funÃ§Ã£o, depois completar conforto e luxo.';
+  const commonExplain = 'Os números abaixo são metas práticas de atributo, não custo exato de PA. No FC 26, cada Arquétipo tem mínimos/máximos próprios, atributos-chave mais baratos e custo crescente conforme o atributo sobe. Por isso a regra é: primeiro atingir os atributos que liberam/fortalecem a função, depois completar conforto e luxo.';
   const recipes = {
     goleiro: {
-      archetype: has(/linha|sair|pÃ©|pe|reposi/) ? 'Sweeper Keeper' : 'Shot Stopper',
+      archetype: has(/linha|sair|pé|pe|reposi/) ? 'Sweeper Keeper' : 'Shot Stopper',
       main: ['Footwork','Far Reach','Rush Out'],
       silver: ['Cross Claimer','Far Throw','Relentless','First Touch','Pinged Pass','Long Ball Pass','Press Proven','Aerial Fortress'],
-      why: 'Goleiro precisa primeiro defender. Se o texto pede saÃ­da, a build vira mais lÃ­bero; se nÃ£o, prioriza reflexo e seguranÃ§a.',
+      why: 'Goleiro precisa primeiro defender. Se o texto pede saída, a build vira mais líbero; se não, prioriza reflexo e segurança.',
       attributes: [
-        ['Goleiro','Reflexos','92-95','1','Base para defesas rÃ¡pidas e 1x1.'], ['Goleiro','Alcance/Posicionamento','90-94','1','Ajuda em chutes colocados e bolas cruzadas.'], ['Goleiro','Jogo com os pÃ©s','80-86','2','Para repor curto e iniciar jogadas.'], ['FÃ­sico','ReaÃ§Ã£o','88-92','2','Melhora resposta em bola viva.'], ['Passe','Passe curto','75-82','3','SÃ³ o bastante para nÃ£o entregar saÃ­da.']
+        ['Goleiro','Reflexos','92-95','1','Base para defesas rápidas e 1x1.'], ['Goleiro','Alcance/Posicionamento','90-94','1','Ajuda em chutes colocados e bolas cruzadas.'], ['Goleiro','Jogo com os pés','80-86','2','Para repor curto e iniciar jogadas.'], ['Físico','Reação','88-92','2','Melhora resposta em bola viva.'], ['Passe','Passe curto','75-82','3','Só o bastante para não entregar saída.']
       ],
-      phases: ['Primeiro suba atributos de defesa de goleiro atÃ© 90+.', 'Depois invista em reaÃ§Ã£o e reposiÃ§Ã£o.', 'SÃ³ gaste em passe/controle se o time realmente usa saÃ­da curta.']
+      phases: ['Primeiro suba atributos de defesa de goleiro até 90+.', 'Depois invista em reação e reposição.', 'Só gaste em passe/controle se o time realmente usa saída curta.']
     },
     zagueiro: {
       archetype: 'Boss',
       main: ['Anticipate','Intercept','Block'],
       silver: ['Aerial Fortress','Jockey','Bruiser','Slide Tackle','Relentless','Pinged Pass','Long Ball Pass','Press Proven'],
-      why: 'Zagueiro competitivo precisa parar jogada antes do chute, ganhar duelo fÃ­sico e ainda sair simples quando recuperar a bola.',
+      why: 'Zagueiro competitivo precisa parar jogada antes do chute, ganhar duelo físico e ainda sair simples quando recuperar a bola.',
       attributes: [
-        ['Defesa','Intercept','90-94','1','Corta passe antes de virar chance clara.'], ['Defesa','Cabeceio','90-94','1','Ganha bola aÃ©rea defensiva e vira ameaÃ§a no escanteio.'], ['Defesa','NoÃ§Ã£o defensiva','90-94','1','MantÃ©m posicionamento e leitura da linha.'], ['Defesa','Dividida em pÃ©','88-92','1','Desarme principal; nÃ£o deixe baixo.'], ['FÃ­sico','ForÃ§a','90-95','1','Sustenta contato e disputa corporal.'], ['FÃ­sico','ImpulsÃ£o','88-93','2','Combina com cabeceio para dominar bolas altas.'], ['FÃ­sico','Combatividade','88-92','2','Ajuda pressÃ£o, choque e recuperaÃ§Ã£o.'], ['Ritmo','AceleraÃ§Ã£o/Pique','86-90','2','Suficiente para cobrir profundidade sem torrar tudo.'], ['Passe','Passe curto','78-84','3','SaÃ­da simples apÃ³s recuperar.'], ['Passe','LanÃ§amento','80-86','3','Virada e bola longa quando houver tempo.'], ['Controle','Agilidade/ReaÃ§Ã£o','84-90','3','Virar o corpo e responder rÃ¡pido sem virar build de meia.']
+        ['Defesa','Intercept','90-94','1','Corta passe antes de virar chance clara.'], ['Defesa','Cabeceio','90-94','1','Ganha bola aérea defensiva e vira ameaça no escanteio.'], ['Defesa','Noção defensiva','90-94','1','Mantém posicionamento e leitura da linha.'], ['Defesa','Dividida em pé','88-92','1','Desarme principal; não deixe baixo.'], ['Físico','Força','90-95','1','Sustenta contato e disputa corporal.'], ['Físico','Impulsão','88-93','2','Combina com cabeceio para dominar bolas altas.'], ['Físico','Combatividade','88-92','2','Ajuda pressão, choque e recuperação.'], ['Ritmo','Aceleração/Pique','86-90','2','Suficiente para cobrir profundidade sem torrar tudo.'], ['Passe','Passe curto','78-84','3','Saída simples após recuperar.'], ['Passe','Lançamento','80-86','3','Virada e bola longa quando houver tempo.'], ['Controle','Agilidade/Reação','84-90','3','Virar o corpo e responder rápido sem virar build de meia.']
       ],
-      phases: ['Feche primeiro Defesa + ForÃ§a: interceptaÃ§Ã£o, cabeceio, noÃ§Ã£o defensiva, dividida em pÃ© e forÃ§a.', 'Depois busque impulsÃ£o, combatividade e ritmo atÃ© uma faixa segura.', 'Por Ãºltimo, coloque passe curto/lanÃ§amento para sair jogando sem sacrificar a identidade defensiva.']
+      phases: ['Feche primeiro Defesa + Força: interceptação, cabeceio, noção defensiva, dividida em pé e força.', 'Depois busque impulsão, combatividade e ritmo até uma faixa segura.', 'Por último, coloque passe curto/lançamento para sair jogando sem sacrificar a identidade defensiva.']
     },
     volante: {
       archetype: has(/box|chegar|ida|volta|motor/) ? 'Engine' : 'Recycler',
       main: ['Intercept','Anticipate','Relentless'],
       silver: ['Pinged Pass','Tiki Taka','Press Proven','Jockey','Bruiser','Long Ball Pass','First Touch','Block'],
-      why: 'Volante bom recupera, protege a zaga e entrega limpo. NÃ£o adianta roubar se perde a bola no passe seguinte.',
+      why: 'Volante bom recupera, protege a zaga e entrega limpo. Não adianta roubar se perde a bola no passe seguinte.',
       attributes: [
-        ['Defesa','Intercept','88-92','1','Corta passe por dentro.'], ['Defesa','Dividida em pÃ©','86-90','1','Bote seguro.'], ['Passe','Passe curto','84-90','1','SaÃ­da limpa sob pressÃ£o.'], ['Passe','VisÃ£o','82-88','2','Acha passe vertical.'], ['FÃ­sico','FÃ´lego','88-94','1','MantÃ©m pressÃ£o o jogo todo.'], ['FÃ­sico','Combatividade','86-92','2','Ganha segunda bola.'], ['Controle','ReaÃ§Ã£o','84-90','2','Decide rÃ¡pido apÃ³s recuperar.'], ['Ritmo','AceleraÃ§Ã£o','82-88','3','Para cobrir lados curtos.']
+        ['Defesa','Intercept','88-92','1','Corta passe por dentro.'], ['Defesa','Dividida em pé','86-90','1','Bote seguro.'], ['Passe','Passe curto','84-90','1','Saída limpa sob pressão.'], ['Passe','Visão','82-88','2','Acha passe vertical.'], ['Físico','Fôlego','88-94','1','Mantém pressão o jogo todo.'], ['Físico','Combatividade','86-92','2','Ganha segunda bola.'], ['Controle','Reação','84-90','2','Decide rápido após recuperar.'], ['Ritmo','Aceleração','82-88','3','Para cobrir lados curtos.']
       ],
-      phases: ['Primeiro defesa, passe curto e fÃ´lego.', 'Depois visÃ£o/reaÃ§Ã£o para acelerar transiÃ§Ã£o.', 'Finalize com ritmo e fÃ­sico extra.']
+      phases: ['Primeiro defesa, passe curto e fôlego.', 'Depois visão/reação para acelerar transição.', 'Finalize com ritmo e físico extra.']
     },
     lateral: {
       archetype: 'Marauder',
       main: ['Whipped Pass','Relentless','Quick Step'],
       silver: ['Rapid','Pinged Pass','Tiki Taka','Intercept','Jockey','First Touch','Long Ball Pass','Aerial Fortress'],
-      why: 'Lateral precisa repetir corredor: defender, correr, cruzar e voltar. A build deve evitar ficar boa sÃ³ atacando.',
+      why: 'Lateral precisa repetir corredor: defender, correr, cruzar e voltar. A build deve evitar ficar boa só atacando.',
       attributes: [
-        ['Ritmo','AceleraÃ§Ã£o/Pique','88-92','1','Corredor inteiro.'], ['FÃ­sico','FÃ´lego','90-95','1','RepetiÃ§Ã£o de sprint.'], ['Passe','Cruzamento','84-90','1','Entrega pelo lado.'], ['Defesa','Dividida em pÃ©','82-88','2','NÃ£o ser avenida.'], ['Defesa','Intercept','82-88','2','Cortar passe lateral.'], ['Controle','ConduÃ§Ã£o','82-88','2','AvanÃ§ar sem perder bola.'], ['Passe','Passe curto','80-86','3','Tabela por fora.']
+        ['Ritmo','Aceleração/Pique','88-92','1','Corredor inteiro.'], ['Físico','Fôlego','90-95','1','Repetição de sprint.'], ['Passe','Cruzamento','84-90','1','Entrega pelo lado.'], ['Defesa','Dividida em pé','82-88','2','Não ser avenida.'], ['Defesa','Intercept','82-88','2','Cortar passe lateral.'], ['Controle','Condução','82-88','2','Avançar sem perder bola.'], ['Passe','Passe curto','80-86','3','Tabela por fora.']
       ],
-      phases: ['Priorize ritmo, fÃ´lego e cruzamento.', 'Depois suba defesa bÃ¡sica.', 'Finalize com conduÃ§Ã£o e passe curto.']
+      phases: ['Priorize ritmo, fôlego e cruzamento.', 'Depois suba defesa básica.', 'Finalize com condução e passe curto.']
     },
     criador: {
       archetype: has(/ritmo|controle|maestro|cm|meio/) ? 'Maestro' : 'Creator',
@@ -9221,53 +9278,53 @@ function suggestBuildRecipe(position, text) {
       silver: ['First Touch','Long Ball Pass','Pinged Pass','Technical','Relentless','Inventive','Finesse Shot','Whipped Pass'],
       why: 'Criador precisa receber pressionado, virar o corpo e transformar posse em chance clara.',
       attributes: [
-        ['Passe','VisÃ£o','88-94','1','Passe que quebra linha.'], ['Passe','Passe curto','88-94','1','Tabela e posse segura.'], ['Passe','LanÃ§amento','84-90','2','InversÃ£o e bola longa.'], ['Controle','Controle de bola','86-92','1','Receber sob pressÃ£o.'], ['Controle','ReaÃ§Ã£o','86-92','2','Decidir rÃ¡pido.'], ['Controle','Agilidade/EquilÃ­brio','84-90','2','Girar e proteger.'], ['FinalizaÃ§Ã£o','Chute de longe','75-84','3','Punir espaÃ§o na entrada da Ã¡rea.']
+        ['Passe','Visão','88-94','1','Passe que quebra linha.'], ['Passe','Passe curto','88-94','1','Tabela e posse segura.'], ['Passe','Lançamento','84-90','2','Inversão e bola longa.'], ['Controle','Controle de bola','86-92','1','Receber sob pressão.'], ['Controle','Reação','86-92','2','Decidir rápido.'], ['Controle','Agilidade/Equilíbrio','84-90','2','Girar e proteger.'], ['Finalização','Chute de longe','75-84','3','Punir espaço na entrada da área.']
       ],
-      phases: ['Primeiro visÃ£o, passe curto e controle.', 'Depois reaÃ§Ã£o/agilidade para jogar pressionado.', 'Finalize com lanÃ§amento e chute de longe se sobrar PA.']
+      phases: ['Primeiro visão, passe curto e controle.', 'Depois reação/agilidade para jogar pressionado.', 'Finalize com lançamento e chute de longe se sobrar PA.']
     },
     ponta: {
       archetype: 'Spark',
       main: ['Rapid','Technical','Quick Step'],
       silver: ['First Touch','Finesse Shot','Whipped Pass','Incisive Pass','Inventive','Relentless','Trickster','Press Proven'],
-      why: 'Ponta Ãºtil vence 1x1 e decide depois: cruzar, tocar ou finalizar.',
+      why: 'Ponta útil vence 1x1 e decide depois: cruzar, tocar ou finalizar.',
       attributes: [
-        ['Ritmo','AceleraÃ§Ã£o/Pique','90-95','1','Separar do marcador.'], ['Controle','ConduÃ§Ã£o','88-94','1','Carregar em velocidade.'], ['Controle','Agilidade/EquilÃ­brio','88-94','1','Corte seco e mudanÃ§a de direÃ§Ã£o.'], ['Passe','Cruzamento','82-88','2','Bola final pelo lado.'], ['FinalizaÃ§Ã£o','FinalizaÃ§Ã£o','80-88','2','Atacar diagonal.'], ['Passe','Passe curto','78-84','3','Tabela curta.'], ['FÃ­sico','FÃ´lego','84-90','3','Repetir corrida.']
+        ['Ritmo','Aceleração/Pique','90-95','1','Separar do marcador.'], ['Controle','Condução','88-94','1','Carregar em velocidade.'], ['Controle','Agilidade/Equilíbrio','88-94','1','Corte seco e mudança de direção.'], ['Passe','Cruzamento','82-88','2','Bola final pelo lado.'], ['Finalização','Finalização','80-88','2','Atacar diagonal.'], ['Passe','Passe curto','78-84','3','Tabela curta.'], ['Físico','Fôlego','84-90','3','Repetir corrida.']
       ],
-      phases: ['Primeiro ritmo e conduÃ§Ã£o.', 'Depois finalizaÃ§Ã£o/cruzamento conforme seu lado.', 'Finalize com passe curto e fÃ´lego.']
+      phases: ['Primeiro ritmo e condução.', 'Depois finalização/cruzamento conforme seu lado.', 'Finalize com passe curto e fôlego.']
     },
     atacante: {
-      archetype: has(/pivo|refer|alto|cabe/) ? 'Target' : has(/criar|falso|sair da area|sair da Ã¡rea/) ? 'Magician' : 'Finisher',
+      archetype: has(/pivo|refer|alto|cabe/) ? 'Target' : has(/criar|falso|sair da area|sair da área/) ? 'Magician' : 'Finisher',
       main: ['Finesse Shot','Power Shot','First Touch'],
       silver: ['Precision Header','Inventive','Incisive Pass','Rapid','Technical','Press Proven','Acrobatic','Relentless'],
-      why: 'Atacante precisa transformar poucas chances em gol e dominar rÃ¡pido dentro da Ã¡rea.',
+      why: 'Atacante precisa transformar poucas chances em gol e dominar rápido dentro da área.',
       attributes: [
-        ['FinalizaÃ§Ã£o','FinalizaÃ§Ã£o','90-95','1','Chance clara precisa virar gol.'], ['FinalizaÃ§Ã£o','Posicionamento','88-94','1','Atacar espaÃ§o certo.'], ['FinalizaÃ§Ã£o','ForÃ§a do chute','86-92','1','Finalizar com potÃªncia.'], ['Controle','Primeiro toque/controle','84-90','2','Dominar e bater rÃ¡pido.'], ['Ritmo','AceleraÃ§Ã£o/Pique','86-92','2','Atacar profundidade.'], ['FÃ­sico','ForÃ§a','78-88','3','Segurar zagueiro se fizer pivÃ´.'], ['Passe','Passe curto','75-82','3','Parede e tabela.']
+        ['Finalização','Finalização','90-95','1','Chance clara precisa virar gol.'], ['Finalização','Posicionamento','88-94','1','Atacar espaço certo.'], ['Finalização','Força do chute','86-92','1','Finalizar com potência.'], ['Controle','Primeiro toque/controle','84-90','2','Dominar e bater rápido.'], ['Ritmo','Aceleração/Pique','86-92','2','Atacar profundidade.'], ['Físico','Força','78-88','3','Segurar zagueiro se fizer pivô.'], ['Passe','Passe curto','75-82','3','Parede e tabela.']
       ],
-      phases: ['Primeiro finalizaÃ§Ã£o, posicionamento e forÃ§a do chute.', 'Depois primeiro toque e ritmo.', 'SÃ³ entÃ£o coloque passe/fÃ­sico conforme seu estilo.']
+      phases: ['Primeiro finalização, posicionamento e força do chute.', 'Depois primeiro toque e ritmo.', 'Só então coloque passe/físico conforme seu estilo.']
     },
     equilibrado: {
       archetype: 'Engine',
       main: ['First Touch','Relentless','Tiki Taka'],
       silver: ['Pinged Pass','Press Proven','Intercept','Quick Step','Technical','Incisive Pass','Long Ball Pass','Finesse Shot'],
-      why: 'Quando a descriÃ§Ã£o estÃ¡ aberta, a build segura Ã© um jogador completo, Ãºtil e sem desperdÃ­cio pesado em atributo de luxo.',
+      why: 'Quando a descrição está aberta, a build segura é um jogador completo, útil e sem desperdício pesado em atributo de luxo.',
       attributes: [
-        ['Controle','ReaÃ§Ã£o','84-90','1','Base universal para responder rÃ¡pido.'], ['Passe','Passe curto','84-90','1','NÃ£o quebrar jogada simples.'], ['FÃ­sico','FÃ´lego','86-92','1','Participar o jogo todo.'], ['Ritmo','AceleraÃ§Ã£o','84-90','2','Chegar antes no lance.'], ['Defesa','Intercept','78-86','2','Ajudar sem bola.'], ['Controle','Controle de bola','82-88','2','Receber sob pressÃ£o.']
+        ['Controle','Reação','84-90','1','Base universal para responder rápido.'], ['Passe','Passe curto','84-90','1','Não quebrar jogada simples.'], ['Físico','Fôlego','86-92','1','Participar o jogo todo.'], ['Ritmo','Aceleração','84-90','2','Chegar antes no lance.'], ['Defesa','Intercept','78-86','2','Ajudar sem bola.'], ['Controle','Controle de bola','82-88','2','Receber sob pressão.']
       ],
-      phases: ['Monte uma base segura: reaÃ§Ã£o, passe curto e fÃ´lego.', 'Depois ajuste ritmo/controle.', 'Por fim especialize conforme a funÃ§Ã£o que o time mais precisa.']
+      phases: ['Monte uma base segura: reação, passe curto e fôlego.', 'Depois ajuste ritmo/controle.', 'Por fim especialize conforme a função que o time mais precisa.']
     }
   };
 
   let recipe = recipes[role] || recipes.equilibrado;
   if (role === 'zagueiro') {
-    const wantsChief = has(/chefia|chefe|boss|lider|xerife|comando|capitao|capit[aÃ£]o|organiza/);
-    const wantsAerialWall = has(/a[eÃ©]re|area|aereo|altura|cabe[cÃ§]|for[cÃ§]a|combate|fisic|disputa|duelo/);
-    const wantsBuildUp = has(/sair jogando|sa[iÃ­]da|constru|passe|lan[cÃ§]amento|virada|bola longa/);
+    const wantsChief = has(/chefia|chefe|boss|lider|xerife|comando|capitao|capit[aã]o|organiza/);
+    const wantsAerialWall = has(/a[eé]re|area|aereo|altura|cabe[cç]|for[cç]a|combate|fisic|disputa|duelo/);
+    const wantsBuildUp = has(/sair jogando|sa[ií]da|constru|passe|lan[cç]amento|virada|bola longa/);
     if (wantsChief) {
-      recipe = {...recipe, archetype:'Boss', main:['Anticipate','Intercept','Block'], why:'O texto pede zagueiro de comando. Boss prioriza leitura, organizaÃ§Ã£o da linha, interceptaÃ§Ã£o e bloqueio; use fÃ­sico e cabeceio como sustentaÃ§Ã£o.'};
+      recipe = {...recipe, archetype:'Boss', main:['Anticipate','Intercept','Block'], why:'O texto pede zagueiro de comando. Boss prioriza leitura, organização da linha, interceptação e bloqueio; use físico e cabeceio como sustentação.'};
     } else if (wantsAerialWall) {
-      recipe = {...recipe, archetype:'Boss', main:['Aerial Fortress','Anticipate','Bruiser'], why:'O texto descreve um zagueiro forte, lÃ­der, dominante em duelos e jogo aÃ©reo. A base correta Ã© Boss/ChefÃ£o: comandar a defesa, proteger a Ã¡rea e vencer contato; saÃ­da de bola entra como complemento, nÃ£o como identidade principal.'};
+      recipe = {...recipe, archetype:'Boss', main:['Aerial Fortress','Anticipate','Bruiser'], why:'O texto descreve um zagueiro forte, líder, dominante em duelos e jogo aéreo. A base correta é Boss/Chefão: comandar a defesa, proteger a área e vencer contato; saída de bola entra como complemento, não como identidade principal.'};
     } else if (wantsBuildUp) {
-      recipe = {...recipe, archetype:'Progressor', main:['Anticipate','Pinged Pass','Long Ball Pass'], why:'O texto pede zagueiro que sai jogando. Progressor mantÃ©m leitura defensiva, mas investe mais cedo em passe rasteiro forte e bola longa.'};
+      recipe = {...recipe, archetype:'Progressor', main:['Anticipate','Pinged Pass','Long Ball Pass'], why:'O texto pede zagueiro que sai jogando. Progressor mantém leitura defensiva, mas investe mais cedo em passe rasteiro forte e bola longa.'};
     }
   }
   const mainNames = uniqueStyleNames(recipe.main).slice(0, 3);
@@ -9282,7 +9339,7 @@ function suggestBuildRecipe(position, text) {
     attributes: recipe.attributes.map(([group,name,target,priority,reason]) => ({group,name,target,priority,reason})),
     phases: recipe.phases,
     explanation: commonExplain,
-    practical: 'Preencha de cima para baixo. NÃ£o tente colocar tudo em 95: depois de 88-90 o custo sobe muito. Pare nas faixas alvo, garanta os PlayStyles necessÃ¡rios e use o resto para corrigir fraquezas reais da funÃ§Ã£o.'
+    practical: 'Preencha de cima para baixo. Não tente colocar tudo em 95: depois de 88-90 o custo sobe muito. Pare nas faixas alvo, garanta os PlayStyles necessários e use o resto para corrigir fraquezas reais da função.'
   };
 }
 function suggestPlaystylesLocal(position, text) {
@@ -9309,9 +9366,9 @@ function runPlaystyleSimulator() {
   </tr>`).join('');
   const phasesHtml = (build.phases || []).map((p, i) => `<div class="attr-phase"><div class="attr-phase-title">Etapa ${i+1}</div><p>${p}</p></div>`).join('');
   document.getElementById('sim-result').innerHTML = `
-    <div class="section-title" style="grid-column:1/-1;margin-top:8px;">ArquÃ©tipo recomendado</div>
+    <div class="section-title" style="grid-column:1/-1;margin-top:8px;">Arquétipo recomendado</div>
     <div class="build-card primary" style="grid-column:1/-1;">
-      <div class="style-card-head">${styleIconHtml(archetypeIcon(build.archetype.code || build.archetype.name))}<div><div class="style-card-title">${build.archetype.name}</div><div class="style-card-code">${build.archetype.group} &middot; funÃ§Ã£o detectada: ${build.role}</div></div></div>
+      <div class="style-card-head">${styleIconHtml(archetypeIcon(build.archetype.code || build.archetype.name))}<div><div class="style-card-title">${build.archetype.name}</div><div class="style-card-code">${build.archetype.group} &middot; função detectada: ${build.role}</div></div></div>
       <div style="color:var(--text-2);font-size:13px;line-height:1.55;">${build.archetype.desc}</div>
       <div class="build-why">Por que: ${build.why}</div>
     </div>
@@ -9324,7 +9381,7 @@ function runPlaystyleSimulator() {
     <div class="attr-build-table-wrap"><table class="attr-build-table"><thead><tr><th>Grupo</th><th>Qualidade</th><th>Meta</th><th>Prioridade</th><th>Por que investir</th></tr></thead><tbody>${attrHtml}</tbody></table></div>
     <div class="section-title" style="grid-column:1/-1;">Ordem para gastar os pontos</div>
     <div class="attr-phase-grid">${phasesHtml}</div>
-    <div class="build-card" style="grid-column:1/-1;"><div class="style-card-title">Como montar sem desperdiÃ§ar PA</div><div class="build-note" style="margin-top:8px;">${build.practical}</div></div>
+    <div class="build-card" style="grid-column:1/-1;"><div class="style-card-title">Como montar sem desperdiçar PA</div><div class="build-note" style="margin-top:8px;">${build.practical}</div></div>
   `;
 }
 function renderPlaystyles() {
@@ -9343,24 +9400,24 @@ function renderPlaystyles() {
   const archGroups = {};
   ARCHETYPE_CATALOG.forEach(a => { if (!archGroups[a.group]) archGroups[a.group] = []; archGroups[a.group].push(a); });
   const archetypes = Object.entries(archGroups).map(([group, list]) => `
-    <div class="section-title">ArquÃ©tipos - ${group}</div>
+    <div class="section-title">Arquétipos - ${group}</div>
     <div class="players-grid">
       ${list.map(a => `<div class="player-card" style="cursor:default;">
         <div class="style-card-group">${a.group}</div>
-        <div class="style-card-head">${styleIconHtml(archetypeIcon(a.code || a.name))}<div><div class="style-card-title">${a.name}</div><div class="style-card-code">ArquÃ©tipo</div></div></div>
+        <div class="style-card-head">${styleIconHtml(archetypeIcon(a.code || a.name))}<div><div class="style-card-title">${a.name}</div><div class="style-card-code">Arquétipo</div></div></div>
         <div style="color:var(--text-2);font-size:12px;line-height:1.5;">${a.desc}</div>
       </div>`).join('')}
     </div>
   `).join('');
   return `
-    <div class="section-title">Simulador de ArquÃ©tipo, Estilos e Qualidades</div>
-    <div style="color:var(--text-2);font-size:12px;margin-bottom:12px;line-height:1.55;">Escreva do jeito que vocÃª falaria para um colega: posiÃ§Ã£o, funÃ§Ã£o, pontos fortes desejados e o que o jogador precisa fazer em campo. Exemplo: "zagueiro Boss forte no jogo aÃ©reo, bom desarme, saÃ­da simples e forÃ§a para combate".</div>
+    <div class="section-title">Simulador de Arquétipo, Estilos e Qualidades</div>
+    <div style="color:var(--text-2);font-size:12px;margin-bottom:12px;line-height:1.55;">Escreva do jeito que você falaria para um colega: posição, função, pontos fortes desejados e o que o jogador precisa fazer em campo. Exemplo: "zagueiro Boss forte no jogo aéreo, bom desarme, saída simples e força para combate".</div>
     <div class="agenda-form" style="grid-template-columns:repeat(6,1fr);">
-      <textarea id="sim-text" style="grid-column:span 6;min-height:92px;" placeholder="Descreva o jogador que vocÃª quer montar: zagueiro Boss forte no jogo aÃ©reo e desarme; volante que rouba e passa simples; atacante matador rÃ¡pido; meia que cria e protege a bola..."></textarea>
+      <textarea id="sim-text" style="grid-column:span 6;min-height:92px;" placeholder="Descreva o jogador que você quer montar: zagueiro Boss forte no jogo aéreo e desarme; volante que rouba e passa simples; atacante matador rápido; meia que cria e protege a bola..."></textarea>
       <div class="full"><button type="button" class="btn-primary" onclick="runPlaystyleSimulator()">Sugerir build completo</button></div>
     </div><div id="sim-result" class="build-result-grid"></div>
-    <div class="section-title">Legenda de ArquÃ©tipos</div>
-    <div style="color:var(--text-2);font-size:12px;margin-bottom:12px;line-height:1.5;">ArquÃ©tipo Ã© o perfil tÃ¡tico/manual do jogador no seu elenco. Ele ajuda a IA, a anÃ¡lise scout e o Time Ideal a entenderem a funÃ§Ã£o real do jogador, mesmo quando a API da EA erra a posiÃ§Ã£o.</div>
+    <div class="section-title">Legenda de Arquétipos</div>
+    <div style="color:var(--text-2);font-size:12px;margin-bottom:12px;line-height:1.5;">Arquétipo é o perfil tático/manual do jogador no seu elenco. Ele ajuda a IA, a análise scout e o Time Ideal a entenderem a função real do jogador, mesmo quando a API da EA erra a posição.</div>
     ${archetypes}
     <div class="section-title">Legenda de Estilos de Jogo do Pro Clubs</div>
     ${legend}
@@ -9420,13 +9477,13 @@ function renderTimeIdeal() {
         ${formations.map(f => `<option value="${f}" ${f === formation ? 'selected' : ''}>${f}</option>`).join('')}
       </select>
       <select onchange="setIdealMode(this.value)" style="background:var(--bg-card);color:var(--text);border:1px solid var(--green-dim);border-radius:8px;padding:10px 12px;font-weight:700;">
-        <option value="auto" ${IDEAL_MODE === 'auto' ? 'selected' : ''}>AutomÃ¡tica</option>
+        <option value="auto" ${IDEAL_MODE === 'auto' ? 'selected' : ''}>Automática</option>
         <option value="manual" ${IDEAL_MODE === 'manual' ? 'selected' : ''}>Manual do treinador</option>
       </select>
       <button class="btn-primary" style="padding:10px 16px;" onclick="renderTab()">Ajustar Melhor 11</button>
       <button class="btn-mini" style="padding:10px 16px;" onclick="exportIdealJpeg()">Exportar JPEG</button>
     </div>
-    ${IDEAL_MODE === 'manual' ? `<div class="section-title">EscalaÃ§Ã£o manual do treinador</div><div class="profile-list" style="margin-bottom:18px;">${manualControls}</div>` : ''}
+    ${IDEAL_MODE === 'manual' ? `<div class="section-title">Escalação manual do treinador</div><div class="profile-list" style="margin-bottom:18px;">${manualControls}</div>` : ''}
 
     <div id="idealExportArea" class="formation-wrapper">
       <div class="formation-title">${team.formation_name} &middot; ${players.length}/11 jogadores</div>
@@ -9437,33 +9494,33 @@ function renderTimeIdeal() {
         <div class="field-spot bottom"></div>
         ${fieldHtml}
       </div>
-      <div class="formation-label">${IDEAL_MODE === 'manual' ? 'EscalaÃ§Ã£o manual do treinador' : 'Escolha automÃ¡tica por funÃ§Ã£o, nota e encaixe posicional'}</div>
+      <div class="formation-label">${IDEAL_MODE === 'manual' ? 'Escalação manual do treinador' : 'Escolha automática por função, nota e encaixe posicional'}</div>
     </div>
 
-    <div class="section-title">EscalaÃ§Ã£o e FunÃ§Ã£o TÃ¡tica</div>
+    <div class="section-title">Escalação e Função Tática</div>
     <div style="background:var(--bg-card);border:1px solid var(--border);border-radius:12px;overflow:hidden;margin-bottom:18px;">
       ${listHtml}
     </div>
 
-    ${team.missing_slots.length ? `<div style="color:var(--yellow);font-size:12px;margin-bottom:14px;">AtenÃ§Ã£o: faltou jogador para ${team.missing_slots.join(', ')}. Se houver menos de 11 no filtro, mude para TODOS ou ajuste o cadastro.</div>` : ''}
+    ${team.missing_slots.length ? `<div style="color:var(--yellow);font-size:12px;margin-bottom:14px;">Atenção: faltou jogador para ${team.missing_slots.join(', ')}. Se houver menos de 11 no filtro, mude para TODOS ou ajuste o cadastro.</div>` : ''}
 
-    <div class="section-title">AnÃ¡lise TÃ¡tica</div>
-    <button class="btn-primary" onclick="analyzeTeam()">Gerar AnÃ¡lise com IA</button>
+    <div class="section-title">Análise Tática</div>
+    <button class="btn-primary" onclick="analyzeTeam()">Gerar Análise com IA</button>
   `;
 }
 
 function renderAdversarios() {
   const results = renderOpponentScouts();
   return `
-    <div class="section-title">PrÃ³ximos AdversÃ¡rios</div>
-    <div style="color:var(--text-2);font-size:12px;line-height:1.5;margin-bottom:12px;">Cadastre atÃ© 5 clubes rivais para uma leitura rÃ¡pida: forÃ§a do time, estilo provÃ¡vel, principais jogadores, pontos fortes/fracos e plano de jogo.</div>
+    <div class="section-title">Próximos Adversários</div>
+    <div style="color:var(--text-2);font-size:12px;line-height:1.5;margin-bottom:12px;">Cadastre até 5 clubes rivais para uma leitura rápida: força do time, estilo provável, principais jogadores, pontos fortes/fracos e plano de jogo.</div>
     <div class="opponent-form">
-      <input class="opp-scout-input" type="text" placeholder="Clube adversÃ¡rio 1">
-      <input class="opp-scout-input" type="text" placeholder="Clube adversÃ¡rio 2">
-      <input class="opp-scout-input" type="text" placeholder="Clube adversÃ¡rio 3">
-      <input class="opp-scout-input" type="text" placeholder="Clube adversÃ¡rio 4">
-      <input class="opp-scout-input" type="text" placeholder="Clube adversÃ¡rio 5">
-      <div class="full"><button type="button" class="btn-primary" id="oppScoutBtn" onclick="scoutOpponents()">Analisar adversÃ¡rios</button></div>
+      <input class="opp-scout-input" type="text" placeholder="Clube adversário 1">
+      <input class="opp-scout-input" type="text" placeholder="Clube adversário 2">
+      <input class="opp-scout-input" type="text" placeholder="Clube adversário 3">
+      <input class="opp-scout-input" type="text" placeholder="Clube adversário 4">
+      <input class="opp-scout-input" type="text" placeholder="Clube adversário 5">
+      <div class="full"><button type="button" class="btn-primary" id="oppScoutBtn" onclick="scoutOpponents()">Analisar adversários</button></div>
     </div>
     <div id="opponentScoutStatus" style="color:var(--text-2);font-size:12px;margin-bottom:10px;"></div>
     <div id="opponentScoutResults" class="opponent-results">${results}</div>
@@ -9471,9 +9528,9 @@ function renderAdversarios() {
 }
 
 function renderOpponentScouts() {
-  if (!OPPONENT_SCOUTS || !OPPONENT_SCOUTS.length) return '<div class="empty-state" style="padding:44px 20px;"><div class="empty-text">Nenhum adversÃ¡rio analisado ainda.</div></div>';
+  if (!OPPONENT_SCOUTS || !OPPONENT_SCOUTS.length) return '<div class="empty-state" style="padding:44px 20px;"><div class="empty-text">Nenhum adversário analisado ainda.</div></div>';
   return OPPONENT_SCOUTS.map(o => {
-    if (!o.found) return `<div class="opponent-card"><div class="opponent-name">${escapeAttr(o.name || 'Clube')}</div><div class="empty-text" style="margin-top:6px;">${escapeAttr(o.error || 'NÃ£o encontrado')}</div></div>`;
+    if (!o.found) return `<div class="opponent-card"><div class="opponent-name">${escapeAttr(o.name || 'Clube')}</div><div class="empty-text" style="margin-top:6px;">${escapeAttr(o.error || 'Não encontrado')}</div></div>`;
     const s = o.stats || {};
     const top = (o.top_players || []).slice(0, 5).map((p, i) => `${i+1}. ${escapeAttr(p.name)} (${escapeAttr(p.position || '-')}) &middot; nota ${escapeAttr(p.rating)} &middot; ${escapeAttr(p.goals || 0)}G/${escapeAttr(p.assists || 0)}A`).join('<br>') || 'Sem jogadores retornados pela EA';
     const strengths = (o.strengths || []).map(x => `<li>${escapeAttr(x)}</li>`).join('');
@@ -9482,7 +9539,7 @@ function renderOpponentScouts() {
       <div class="opponent-card">
         <div class="opponent-head"><div><div class="opponent-name">${escapeAttr(o.name)}</div><div class="opponent-style"><span class="scout-pill">${escapeAttr(o.style)}</span> &middot; ID ${escapeAttr(o.club_id)} &middot; ${escapeAttr(o.platform)}</div></div><div class="opponent-grade"><div class="rank">${escapeAttr(o.rank)}</div><div class="score">${escapeAttr(o.grade)}/100</div></div></div>
         <div class="opponent-table-wrap"><table class="opponent-table"><thead><tr><th>Jogos</th><th>V/E/D</th><th>Win</th><th>Gols</th><th>G/J</th><th>Sofre/J</th><th>Saldo</th><th>Top 5 jogadores</th></tr></thead><tbody><tr><td data-label="Jogos">${escapeAttr(s.matches || 0)}</td><td data-label="V/E/D">${escapeAttr(s.wins || 0)} / ${escapeAttr(s.draws || 0)} / ${escapeAttr(s.losses || 0)}</td><td data-label="Win">${escapeAttr(s.win_rate || 0)}%</td><td data-label="Gols">${escapeAttr(s.goals_for || 0)}-${escapeAttr(s.goals_against || 0)}</td><td data-label="G/J">${escapeAttr(s.goals_per_match || 0)}</td><td data-label="Sofre/J">${escapeAttr(s.goals_against_per_match || 0)}</td><td data-label="Saldo">${escapeAttr(s.goal_diff || 0)}</td><td data-label="Top 5 jogadores">${top}</td></tr></tbody></table></div>
-        <div class="scout-cols"><div class="scout-box"><h4>Pontos fortes</h4><ul>${strengths}</ul></div><div class="scout-box"><h4>Pontos fracos</h4><ul>${weaknesses}</ul></div><div class="scout-box"><h4>EstratÃ©gia sugerida</h4><p>${escapeAttr(o.strategy || '')}</p></div></div>
+        <div class="scout-cols"><div class="scout-box"><h4>Pontos fortes</h4><ul>${strengths}</ul></div><div class="scout-box"><h4>Pontos fracos</h4><ul>${weaknesses}</ul></div><div class="scout-box"><h4>Estratégia sugerida</h4><p>${escapeAttr(o.strategy || '')}</p></div></div>
       </div>`;
   }).join('');
 }
@@ -9491,28 +9548,28 @@ async function scoutOpponents() {
   const names = Array.from(document.querySelectorAll('.opp-scout-input')).map(i => i.value.trim()).filter(Boolean).slice(0, 5);
   const status = document.getElementById('opponentScoutStatus');
   const btn = document.getElementById('oppScoutBtn');
-  if (!names.length) { if (status) status.textContent = 'Informe pelo menos um clube adversÃ¡rio.'; return; }
+  if (!names.length) { if (status) status.textContent = 'Informe pelo menos um clube adversário.'; return; }
   if (status) status.textContent = 'Buscando clubes na EA e montando scouting...';
   if (btn) { btn.disabled = true; btn.textContent = 'Analisando...'; }
   try {
     const r = await authFetch('/api/opponents/scout', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({names, platform: 'auto'}) });
-    if (!r.ok) throw new Error('Erro ao analisar adversÃ¡rios');
+    if (!r.ok) throw new Error('Erro ao analisar adversários');
     const data = await r.json();
     OPPONENT_SCOUTS = data.opponents || [];
     const target = document.getElementById('opponentScoutResults');
     if (target) target.innerHTML = renderOpponentScouts();
-    if (status) status.textContent = `${OPPONENT_SCOUTS.length} adversÃ¡rio(s) analisado(s).`;
+    if (status) status.textContent = `${OPPONENT_SCOUTS.length} adversário(s) analisado(s).`;
   } catch (e) {
     if (status) status.textContent = 'Erro: ' + e.message;
   } finally {
-    if (btn) { btn.disabled = false; btn.textContent = 'Analisar adversÃ¡rios'; }
+    if (btn) { btn.disabled = false; btn.textContent = 'Analisar adversários'; }
   }
 }
 function renderAgenda() {
   return `
     <div class="section-title">âœï¸ ${AGENDA_EDIT_ID ? 'Editar Agendamento' : 'Novo Agendamento'}</div>
     <form class="agenda-form" onsubmit="saveAgenda(event)">
-      <input id="ag-opp" type="text" placeholder="AdversÃ¡rio" required style="grid-column: span 3;">
+      <input id="ag-opp" type="text" placeholder="Adversário" required style="grid-column: span 3;">
       <input id="ag-date" type="date" required style="grid-column: span 2;">
       <input id="ag-time" type="time" style="grid-column: span 1;">
       <select id="ag-type" style="grid-column: span 2;">
@@ -9521,13 +9578,13 @@ function renderAgenda() {
         <option value="amistoso">Amistoso</option>
       </select>
       <input id="ag-loc" type="text" placeholder="Local (opcional)" style="grid-column: span 4;">
-      <textarea id="ag-notes" placeholder="ObservaÃ§Ãµes (opcional)"></textarea>
+      <textarea id="ag-notes" placeholder="Observações (opcional)"></textarea>
       <div class="full">
         ${AGENDA_EDIT_ID ? '<button type="button" class="btn-mini" onclick="cancelAgendaEdit()">Cancelar</button>' : ''}
-        <button type="submit" class="btn-primary" style="padding:8px 18px;">${AGENDA_EDIT_ID ? 'Salvar AlteraÃ§Ãµes' : 'Adicionar'}</button>
+        <button type="submit" class="btn-primary" style="padding:8px 18px;">${AGENDA_EDIT_ID ? 'Salvar Alterações' : 'Adicionar'}</button>
       </div>
     </form>
-    <div class="section-title">ðŸ“… PrÃ³ximos Jogos</div>
+    <div class="section-title">ðŸ“… Próximos Jogos</div>
     <div id="agenda-list" class="agenda-list">${renderAgendaList()}</div>
   `;
 }
@@ -9589,7 +9646,7 @@ function cancelAgendaEdit() {
   AGENDA_EDIT_ID = null;
   if (!isAdmin()) {
     document.querySelectorAll('.tab').forEach(el => {
-      if (['JOGADORES','COMPARAR','CONFRONTOS','CADASTRO','CONFIG','USUÃRIOS','USUARIOS','ADVERSÃRIOS','ADVERSARIOS','ADVERS&Aacute;RIOS'].includes((el.textContent || '').trim())) el.remove();
+      if (['JOGADORES','COMPARAR','CONFRONTOS','CADASTRO','CONFIG','USUÁRIOS','USUARIOS','ADVERSÁRIOS','ADVERSARIOS','ADVERS&Aacute;RIOS'].includes((el.textContent || '').trim())) el.remove();
     });
   }
   renderTab();
@@ -9640,24 +9697,24 @@ function showMatchDetails(matchId) {
   const players = [...(m.players_ratings || [])].sort((a,b) => Number(b.sofi_rating || b.rating || 0) - Number(a.sofi_rating || a.rating || 0));
   const positives = [];
   const negatives = [];
-  if (m.result === 'V') positives.push('Resultado positivo e eficiÃªncia para vencer o confronto.');
+  if (m.result === 'V') positives.push('Resultado positivo e eficiência para vencer o confronto.');
   if (m.goals_for >= 3) positives.push(`Bom volume ofensivo: ${m.goals_for} gols marcados.`);
-  if (m.goals_against === 0) positives.push('Clean sheet coletivo: defesa nÃ£o sofreu gols.');
+  if (m.goals_against === 0) positives.push('Clean sheet coletivo: defesa não sofreu gols.');
   if (players.some(p => Number(p.sofi_rating || 0) >= 8)) positives.push('Houve destaque individual com nota Sofi acima de 8.');
-  if (m.result === 'D') negatives.push('Resultado negativo: revisar tomada de decisÃ£o e transiÃ§Ãµes.');
-  if (m.goals_against >= 3) negatives.push(`AtenÃ§Ã£o defensiva: ${m.goals_against} gols sofridos.`);
-  if (players.some(p => Number(p.red || 0) > 0)) negatives.push('CartÃ£o vermelho impactou o desempenho coletivo.');
-  if (players.filter(p => Number(p.rating || 0) < 6).length) negatives.push('Jogadores com nota EA abaixo de 6 indicam oscilaÃ§Ã£o individual.');
-  if (!positives.length) positives.push('Partida equilibrada, sem ponto positivo dominante nos dados disponÃ­veis.');
-  if (!negatives.length) negatives.push('Sem alerta grave nos dados disponÃ­veis.');
+  if (m.result === 'D') negatives.push('Resultado negativo: revisar tomada de decisão e transições.');
+  if (m.goals_against >= 3) negatives.push(`Atenção defensiva: ${m.goals_against} gols sofridos.`);
+  if (players.some(p => Number(p.red || 0) > 0)) negatives.push('Cartão vermelho impactou o desempenho coletivo.');
+  if (players.filter(p => Number(p.rating || 0) < 6).length) negatives.push('Jogadores com nota EA abaixo de 6 indicam oscilação individual.');
+  if (!positives.length) positives.push('Partida equilibrada, sem ponto positivo dominante nos dados disponíveis.');
+  if (!negatives.length) negatives.push('Sem alerta grave nos dados disponíveis.');
 
   let html = `
     <h2>VS ${String(m.opponent || '').toUpperCase()}</h2>
     ${isQuitMatch(m) ? '<p><strong>Status:</strong> Quitada automaticamente (maioria com nota EA abaixo de 6)</p>' : '<p><strong>Status:</strong> V&aacute;lida</p>'}
-    <p><strong>Resultado:</strong> ${m.result === 'V' ? 'VitÃ³ria' : m.result === 'E' ? 'Empate' : 'Derrota'} (${m.score})</p>
+    <p><strong>Resultado:</strong> ${m.result === 'V' ? 'Vitória' : m.result === 'E' ? 'Empate' : 'Derrota'} (${m.score})</p>
     <p><strong>Data:</strong> ${m.date} &middot; <strong>Tipo:</strong> ${m.match_type} &middot; <strong>ID:</strong> ${m.match_id}</p>
     <div class="analytics-cards" style="margin:14px 0;">
-      <div class="analytics-card"><div class="v">${m.goals_for}</div><div class="l">Gols PrÃ³</div></div>
+      <div class="analytics-card"><div class="v">${m.goals_for}</div><div class="l">Gols Pró</div></div>
       <div class="analytics-card"><div class="v">${m.goals_against}</div><div class="l">Gols Contra</div></div>
       <div class="analytics-card"><div class="v">${players.length}</div><div class="l">Jogadores</div></div>
       <div class="analytics-card"><div class="v">${m.mom_rating || '-'}</div><div class="l">Nota MOM</div></div>
@@ -9723,7 +9780,14 @@ async function showPlayerDetail(name) {
       period: CURRENT_PERIOD
     });
     const r = await authFetch('/api/player/' + encodeURIComponent(name) + '/analytics?' + qs.toString());
-    if (!r.ok) throw new Error('NÃ£o encontrado ou sem dados suficientes');
+    if (!r.ok) {
+      let msg = 'Não encontrado ou sem dados suficientes';
+      try {
+        const payload = await r.json();
+        if (payload && payload.detail) msg = payload.detail;
+      } catch (_) {}
+      throw new Error(msg);
+    }
     const data = await r.json();
     mc.innerHTML = renderPlayerDetailHTML(data);
     setTimeout(() => renderPlayerCharts(data), 80);
@@ -9751,8 +9815,8 @@ function renderHeatmap(heatmap) {
       </div>
       <div class="mini-insights">
         <div class="mini-insight"><div class="k">Perfil</div><div class="v">${heatmap?.profile || '-'}</div></div>
-        <div class="mini-insight"><div class="k">Leitura</div><div class="v">Quanto mais verde, maior a presenÃ§a estimada naquela zona.</div></div>
-        <div class="analytics-note">${heatmap?.disclaimer || 'Mapa estimado por perfil estatÃ­stico.'}</div>
+        <div class="mini-insight"><div class="k">Leitura</div><div class="v">Quanto mais verde, maior a presença estimada naquela zona.</div></div>
+        <div class="analytics-note">${heatmap?.disclaimer || 'Mapa estimado por perfil estatístico.'}</div>
       </div>
     </div>`;
 }
@@ -9806,21 +9870,21 @@ function renderPlayerDetailHTML(data) {
           ${psBadges ? `<div style="margin-top:8px;">${psBadges}</div>` : ''}
           <div class="analytics-note" style="margin-top:8px;">${plainScoutSummary(data.scout_report || '').slice(0, 360)}</div>
         </div>
-        <div class="analytics-score"><div class="num">${adv.analytic_score || 0}</div><div class="lab">AnalÃ­tica</div></div>
+        <div class="analytics-score"><div class="num">${adv.analytic_score || 0}</div><div class="lab">Analítica</div></div>
       </div>
 
       <div class="analytics-cards">
-        <div class="analytics-card"><div class="v">${avg.rating || '-'}</div><div class="l">MÃ©dia EA</div></div>
-        <div class="analytics-card"><div class="v">${avg.sofi_rating || '-'}</div><div class="l">MÃ©dia Sofi</div></div>
+        <div class="analytics-card"><div class="v">${avg.rating || '-'}</div><div class="l">Média EA</div></div>
+        <div class="analytics-card"><div class="v">${avg.sofi_rating || '-'}</div><div class="l">Média Sofi</div></div>
         <div class="analytics-card"><div class="v">${adv.analytic_score || 0}</div><div class="l">Final</div></div>
         <div class="analytics-card"><div class="v">${totals.goals || 0}</div><div class="l">Gols</div></div>
         <div class="analytics-card"><div class="v">${totals.assists || 0}</div><div class="l">Assist</div></div>
-        <div class="analytics-card"><div class="v">${totals.pre_assists || 0}</div><div class="l">PrÃ©-A</div></div>
+        <div class="analytics-card"><div class="v">${totals.pre_assists || 0}</div><div class="l">Pré-A</div></div>
         <div class="analytics-card"><div class="v">${totals.key_passes || 0}</div><div class="l">Passes-chave</div></div>
         <div class="analytics-card"><div class="v">${(totals.goals || 0) + (totals.assists || 0)}</div><div class="l">G+A</div></div>
         <div class="analytics-card"><div class="v">${avg.goals_per_game || 0}</div><div class="l">G/J</div></div>
         <div class="analytics-card"><div class="v">${avg.assists_per_game || 0}</div><div class="l">A/J</div></div>
-        <div class="analytics-card"><div class="v">${avg.pre_assists_per_game || 0}</div><div class="l">PrÃ©/J</div></div>
+        <div class="analytics-card"><div class="v">${avg.pre_assists_per_game || 0}</div><div class="l">Pré/J</div></div>
         <div class="analytics-card"><div class="v">${fmtStat(totals.shots)}</div><div class="l">Chutes</div></div>
         <div class="analytics-card"><div class="v">${fmtStat(avg.shots_per_game)}</div><div class="l">Chu/J</div></div>
         <div class="analytics-card"><div class="v">${fmtStat(avg.passes_pct, "%")}</div><div class="l">Pass%</div></div>
@@ -9841,33 +9905,33 @@ function renderPlayerDetailHTML(data) {
       </div>
 
       <div class="analytics-grid">
-        <div class="chart-box"><div class="chart-title">EvoluÃ§Ã£o EA</div><canvas id="ratingChart" width="420" height="210"></canvas></div>
-        <div class="chart-box"><div class="chart-title">EvoluÃ§Ã£o Sofi</div><canvas id="sofiChart" width="420" height="210"></canvas></div>
+        <div class="chart-box"><div class="chart-title">Evolução EA</div><canvas id="ratingChart" width="420" height="210"></canvas></div>
+        <div class="chart-box"><div class="chart-title">Evolução Sofi</div><canvas id="sofiChart" width="420" height="210"></canvas></div>
         <div class="chart-box"><div class="chart-title">Gols por partida</div><canvas id="goalsChart" width="420" height="210"></canvas></div>
-        <div class="chart-box"><div class="chart-title">AssistÃªncias por partida</div><canvas id="assistsChart" width="420" height="210"></canvas></div>
-        <div class="chart-box wide"><div class="chart-title">Radar tÃ©cnico</div><canvas id="radarChart" width="860" height="310"></canvas></div>
+        <div class="chart-box"><div class="chart-title">Assistências por partida</div><canvas id="assistsChart" width="420" height="210"></canvas></div>
+        <div class="chart-box wide"><div class="chart-title">Radar técnico</div><canvas id="radarChart" width="860" height="310"></canvas></div>
       </div>
 
       <div class="section-title">Mapa de Calor Estimado</div>
       ${renderHeatmap(data.heatmap)}
 
-      <div class="section-title">Melhor / Pior / TendÃªncia</div>
+      <div class="section-title">Melhor / Pior / Tendência</div>
       <div class="mini-insights" style="grid-template-columns:repeat(2,1fr);display:grid;">
         ${matchLine(data.best_match)}
         ${matchLine(data.worst_match)}
         <div class="mini-insight"><div class="k">Contra quem mais performou</div><div class="v">${data.best_opponent ? `${data.best_opponent.opponent} &middot; ${data.best_opponent.avg_sofi}` : '-'}</div></div>
         <div class="mini-insight"><div class="k">Contra quem menos performou</div><div class="v">${data.worst_opponent ? `${data.worst_opponent.opponent} &middot; ${data.worst_opponent.avg_sofi}` : '-'}</div></div>
-        <div class="mini-insight"><div class="k">ComparaÃ§Ã£o elenco</div><div class="v">Rating vs mÃ©dia: ${cmp.player_vs_team_rating || 0} &middot; G/J vs mÃ©dia: ${cmp.player_vs_team_goals_per_game || 0}</div></div>
-        <div class="mini-insight"><div class="k">AvanÃ§adas</div><div class="v">Ofensivo ${adv.offensive_impact || 0} &middot; Defensivo ${adv.defensive_impact || 0} &middot; Risco ${adv.risk || 0}</div></div>
+        <div class="mini-insight"><div class="k">Comparação elenco</div><div class="v">Rating vs média: ${cmp.player_vs_team_rating || 0} &middot; G/J vs média: ${cmp.player_vs_team_goals_per_game || 0}</div></div>
+        <div class="mini-insight"><div class="k">Avançadas</div><div class="v">Ofensivo ${adv.offensive_impact || 0} &middot; Defensivo ${adv.defensive_impact || 0} &middot; Risco ${adv.risk || 0}</div></div>
       </div>
 
-      <div class="section-title">RelatÃ³rio Scout Offline</div>
+      <div class="section-title">Relatório Scout Offline</div>
       <div class="analytics-note">${renderMarkdown(data.scout_report || '')}</div>
 
       <div class="section-title" style="margin-top:18px;">${h.length} partidas detalhadas salvas &middot; ${filterLabel}</div>
-      ${h.length === 0 ? '<div style="color:var(--text-2);padding:20px;text-align:center;">Nenhuma partida com participaÃ§Ã£o registrada.</div>' : `
+      ${h.length === 0 ? '<div style="color:var(--text-2);padding:20px;text-align:center;">Nenhuma partida com participação registrada.</div>' : `
       <table class="history-table">
-        <thead><tr><th>Data</th><th>Tipo</th><th>AdversÃ¡rio</th><th>Resultado</th><th>Pos</th><th>Sofi</th><th>EA</th><th>G</th><th>A</th><th>PrÃ©-A</th><th>Chave</th><th>Chu</th><th>Pass%</th><th>Des%</th><th>Des</th><th>Def</th><th>SG</th><th>Verm</th><th>MOM</th></tr></thead>
+        <thead><tr><th>Data</th><th>Tipo</th><th>Adversário</th><th>Resultado</th><th>Pos</th><th>Sofi</th><th>EA</th><th>G</th><th>A</th><th>Pré-A</th><th>Chave</th><th>Chu</th><th>Pass%</th><th>Des%</th><th>Des</th><th>Def</th><th>SG</th><th>Verm</th><th>MOM</th></tr></thead>
         <tbody>
           ${h.map(x => `<tr>
             <td>${x.date}</td><td><span class="tag ${x.match_type}">${x.match_type}</span></td><td>${x.opponent}</td>
@@ -9920,37 +9984,37 @@ function generateTeamAnalysisClient(team) {
   const adapted = players.filter(p => p.fit === 'adaptado');
   const missing = team.missing_slots || [];
   return [
-    `## Time Ideal - FormaÃ§Ã£o ${team.formation}`,
+    `## Time Ideal - Formação ${team.formation}`,
     '',
-    '### EscalaÃ§Ã£o',
-    lines || '- Nenhum jogador disponÃ­vel no filtro atual.',
+    '### Escalação',
+    lines || '- Nenhum jogador disponível no filtro atual.',
     '',
     '### Leitura do elenco',
-    `A escalaÃ§Ã£o acima usa exatamente o time que estÃ¡ no campinho agora, com estat&iacute;sticas somente do clube/filtro atual e respeitando posiÃ§Ãµes manuais salvas no Cadastro. MÃ©dia EA do XI: **${avg}**.`,
+    `A escalação acima usa exatamente o time que está no campinho agora, com estat&iacute;sticas somente do clube/filtro atual e respeitando posições manuais salvas no Cadastro. Média EA do XI: **${avg}**.`,
     '',
-    '### DistribuiÃ§Ã£o',
+    '### Distribuição',
     `- Goleiros: ${byRole.GK || 0}`,
     `- Defensores: ${byRole.DEF || 0}`,
     `- Meio-campistas: ${byRole.MID || 0}`,
     `- Atacantes: ${byRole.FWD || 0}`,
     '',
     '### Pontos fortes',
-    '- Escolha baseada em nota mÃ©dia, encaixe por funÃ§Ã£o e desempenho no clube pesquisado.',
-    '- Jogadores naturais foram priorizados nas posiÃ§Ãµes mais sensÃ­veis, especialmente GK e zaga.',
-    '- Ajustes manuais tÃªm prioridade sobre a posiÃ§Ã£o favorita da EA.',
+    '- Escolha baseada em nota média, encaixe por função e desempenho no clube pesquisado.',
+    '- Jogadores naturais foram priorizados nas posições mais sensíveis, especialmente GK e zaga.',
+    '- Ajustes manuais têm prioridade sobre a posição favorita da EA.',
     '',
     '### Alertas',
-    missing.length ? '- Faltou jogador compatÃ­vel para: ' + missing.join(', ') : '- Nenhuma posiÃ§Ã£o ficou sem jogador compatÃ­vel.',
-    adapted.length ? '- Adaptados: ' + adapted.map(p => `${p.name} em ${p.role}`).join(', ') : '- Sem adaptaÃ§Ãµes relevantes.',
-    improvised.length ? '- Improvisados: ' + improvised.map(p => `${p.name} em ${p.role}`).join(', ') : '- Sem improvisos crÃ­ticos.',
+    missing.length ? '- Faltou jogador compatível para: ' + missing.join(', ') : '- Nenhuma posição ficou sem jogador compatível.',
+    adapted.length ? '- Adaptados: ' + adapted.map(p => `${p.name} em ${p.role}`).join(', ') : '- Sem adaptações relevantes.',
+    improvised.length ? '- Improvisados: ' + improvised.map(p => `${p.name} em ${p.role}`).join(', ') : '- Sem improvisos críticos.',
     '',
-    '### RecomendaÃ§Ã£o prÃ¡tica',
-    'Use essa formaÃ§Ã£o se quiser preservar encaixe e nota mÃ©dia. Se algum jogador aparecer fora da funÃ§Ã£o real, corrija na aba **Cadastro**; essa correÃ§Ã£o passa a valer no campinho e nesta anÃ¡lise.'
+    '### Recomendação prática',
+    'Use essa formação se quiser preservar encaixe e nota média. Se algum jogador aparecer fora da função real, corrija na aba **Cadastro**; essa correção passa a valer no campinho e nesta análise.'
   ].join(nl);
 }
 
 async function analyzeTeam() {
-  document.getElementById('modalContent').innerHTML = '<div class="loading"><div class="spinner"></div> Gerando anÃ¡lise do time ideal...</div>';
+  document.getElementById('modalContent').innerHTML = '<div class="loading"><div class="spinner"></div> Gerando análise do time ideal...</div>';
   document.getElementById('modal').classList.add('active');
   try {
     const team = buildIdealTeamClient(IDEAL_FORMATION);
@@ -10012,7 +10076,7 @@ async function startSync() {
   if (DATA && DATA.club && DATA.matches) saveLocalMatchHistory(DATA.club, DATA.matches);
   await importLocalHistoryToServer();
   const clubName = ((AUTH_USER && AUTH_USER.clube) || (DATA && DATA.club && DATA.club.name) || '').trim();
-  if (!clubName) { stepEl.textContent = 'Clube do usuÃ¡rio nÃ£o encontrado'; return; }
+  if (!clubName) { stepEl.textContent = 'Clube do usuário não encontrado'; return; }
   const evt = new EventSource('/api/sync-stream?club_name=' + encodeURIComponent(clubName) + '&access_token=' + encodeURIComponent(AUTH_TOKEN));
   
   evt.onmessage = (e) => {
@@ -10033,7 +10097,7 @@ async function startSync() {
       if (data.done) {
         evt.close();
         if (data.success) {
-          stepEl.textContent = 'âœ… ConcluÃ­do!';
+          stepEl.textContent = 'âœ… Concluído!';
           fill.style.width = '100%';
           setTimeout(async () => {
             progress.classList.remove('active');
@@ -10057,7 +10121,7 @@ async function startSync() {
   
   evt.onerror = () => {
     evt.close();
-    stepEl.textContent = 'âŒ ConexÃ£o perdida';
+    stepEl.textContent = 'âŒ Conexão perdida';
   };
 }
 
@@ -10069,7 +10133,7 @@ async function startSilentSync() {
     if (DATA && DATA.club && DATA.matches) saveLocalMatchHistory(DATA.club, DATA.matches);
     await importLocalHistoryToServer();
     const clubName = ((DATA && DATA.club && DATA.club.name) || (AUTH_USER && AUTH_USER.clube) || '').trim();
-    if (!clubName) throw new Error('Clube nÃ£o encontrado para sincronizar');
+    if (!clubName) throw new Error('Clube não encontrado para sincronizar');
     await new Promise((resolve, reject) => {
       const evt = new EventSource('/api/sync-stream?club_name=' + encodeURIComponent(clubName) + '&access_token=' + encodeURIComponent(AUTH_TOKEN));
       evt.onmessage = (e) => {
@@ -10087,7 +10151,7 @@ async function startSilentSync() {
       };
       evt.onerror = () => {
         evt.close();
-        reject(new Error('ConexÃ£o perdida durante a sincronizaÃ§Ã£o'));
+        reject(new Error('Conexão perdida durante a sincronização'));
       };
     });
     const profileBackup = {...(PLAYER_PROFILES || {})};
