@@ -894,10 +894,6 @@ def save_players_supabase(club_id: str, players: list):
             "rating": _safe_float(p.get("rating")),
             "goals": _safe_int(p.get("goals")),
             "assists": _safe_int(p.get("assists")),
-            "pre_assists": _safe_int(p.get("pre_assists")),
-            "key_passes": _safe_int(p.get("key_passes")),
-            "pre_assists_per_game": _safe_float(p.get("pre_assists_per_game")),
-            "key_passes_per_game": _safe_float(p.get("key_passes_per_game")),
             "shots": _safe_int(p.get("shots")),
             "passes_made": _safe_int(p.get("passes_made")),
             "pass_pct": _safe_float(p.get("pass_pct")),
@@ -961,18 +957,6 @@ def save_matches_supabase(club_id: str, matches: list):
                 "sofi_rating": _safe_float(pr.get("sofi_rating", pr.get("rating"))),
                 "goals": _safe_int(pr.get("goals")),
                 "assists": _safe_int(pr.get("assists")),
-                "pre_assists": _safe_int(
-                    pr.get("pre_assists")
-                    or pr.get("preAssists")
-                    or pr.get("secondaryAssists")
-                    or pr.get("hockeyAssists")
-                ),
-                "key_passes": _safe_int(
-                    pr.get("key_passes")
-                    or pr.get("keyPasses")
-                    or pr.get("chancesCreated")
-                    or pr.get("shotAssists")
-                ),
                 "shots": _safe_int(pr.get("shots")),
                 "passes_made": _safe_int(pr.get("passes_made")),
                 "pass_pct": _safe_float(pr.get("pass_pct")),
@@ -1002,18 +986,16 @@ def save_matches_supabase(club_id: str, matches: list):
             saved_players += len(chunk)
         except Exception as e:
             msg = str(e)
-            if any(col in msg for col in ("pre_assists", "key_passes", "event_aggregates")):
+            if any(col in msg for col in ("event_aggregates",)):
                 fallback_chunk = []
                 for row in chunk:
                     clean = dict(row)
-                    clean.pop("pre_assists", None)
-                    clean.pop("key_passes", None)
                     clean.pop("event_aggregates", None)
                     fallback_chunk.append(clean)
                 try:
                     sb.table("match_players").upsert(fallback_chunk, on_conflict="match_id,player_name").execute()
                     saved_players += len(fallback_chunk)
-                    print("[SUPABASE] match_players salvo sem colunas avançadas; rode o SQL das pré-assistências.")
+                    print("[SUPABASE] match_players salvo sem campos avancados opcionais.")
                     continue
                 except Exception as retry_err:
                     print(f"[SUPABASE] Aviso ao salvar atuações sem campos avançados: {type(retry_err).__name__}: {retry_err}")
@@ -1697,22 +1679,6 @@ def parse_matches(matches_raw, our_club_id):
                 player_name = pdata.get("playername", "Unknown")
                 p_goals = int(float(pdata.get("goals", 0) or 0))
                 p_assists = int(float(pdata.get("assists", 0) or 0))
-                p_pre_assists = 0
-                for _key in ("preassists", "preAssists", "pre_assists", "secondaryAssists", "secondaryassists", "secondAssists", "secondassists", "hockeyAssists", "hockeyassists", "assists2", "secondassist", "secondAssist"):
-                    if _key in pdata:
-                        try:
-                            p_pre_assists = int(float(pdata.get(_key, 0) or 0))
-                            break
-                        except Exception:
-                            pass
-                p_key_passes = 0
-                for _key in ("keyPasses", "keypasses", "key_passes", "passesToShot", "passesToShots", "passestoshooting", "chancesCreated", "chancescreated"):
-                    if _key in pdata:
-                        try:
-                            p_key_passes = int(float(pdata.get(_key, 0) or 0))
-                            break
-                        except Exception:
-                            pass
                 p_shots = int(float(pdata.get("shots", 0) or 0))
                 p_passes_made = int(float(pdata.get("passesmade", pdata.get("passesMade", 0)) or 0))
                 p_pass_att = int(float(pdata.get("passattempts", pdata.get("passAttempts", 0)) or 0))
@@ -1776,8 +1742,6 @@ def parse_matches(matches_raw, our_club_id):
                     "pos": p_pos,
                     "goals": p_goals,
                     "assists": p_assists,
-                    "pre_assists": p_pre_assists,
-                    "key_passes": p_key_passes,
                     "shots": p_shots,
                     "passes_made": p_passes_made,
                     "pass_pct": pass_pct,
@@ -2629,44 +2593,59 @@ def import_history(payload: HistoryImportPayload, current_user: dict = Depends(r
 
 @app.get("/api/dashboard")
 def get_dashboard(current_user: dict = Depends(get_current_user)):
-    """Retorna dados do dashboard do clube do usuário e recarrega histórico completo de partidas."""
+    """Retorna dados do Supabase; JSON/SQLite ficam apenas como fallback."""
     user_club_id = str((current_user or {}).get("club_id") or "").strip()
-    cache = load_cache()
-    if cache and user_club_id and str((cache.get("club") or {}).get("id") or "") != user_club_id:
-        cache = None
+
+    cache = None
+    if user_club_id:
+        cache = load_latest_club_data_supabase(user_club_id)
     if not cache:
-        cache = load_latest_club_data_supabase(user_club_id) if user_club_id else load_latest_club_data_supabase()
-        if cache:
-            try:
-                save_cache(cache)
-                save_club_json_history(str((cache.get("club") or {}).get("id") or user_club_id or "default"), cache)
-            except Exception as e:
-                print(f"[SUPABASE] Dashboard carregou, mas fallback local falhou: {e}")
+        cache = load_latest_club_data_supabase()
+    if not cache:
+        cache = load_cache()
+        if cache and user_club_id and str((cache.get("club") or {}).get("id") or "") != user_club_id:
+            cache = None
+
     if cache:
         club_id = user_club_id or str((cache.get("club") or {}).get("id") or "")
         try:
-            supabase_matches = load_matches_supabase(club_id, limit=5000) if club_id else []
+            supabase_matches = load_matches_supabase(club_id, limit=10000) if club_id else []
             if supabase_matches:
-                cache_matches = cache.get("matches") or []
-                cache["matches"] = merge_match_lists_for_storage(club_id, supabase_matches, cache_matches)
-                cache["matchtype_summary"] = summarize_matches_by_type(cache["matches"])
-                print(f"[DASHBOARD] Historico de partidas recarregado do Supabase: {len(cache['matches'])}")
+                cache["matches"] = merge_match_lists_for_storage(club_id, supabase_matches, cache.get("matches") or [])
+                print(f"[DASHBOARD] Historico carregado do Supabase: {len(cache['matches'])} partidas")
         except Exception as e:
             print(f"[DASHBOARD] Aviso ao recarregar historico Supabase: {type(e).__name__}: {e}")
-        if cache.get("players") and (
-            not cache.get("ideal_team")
-            or not cache["ideal_team"].get("players")
-        ):
-            cache["ideal_team"] = build_ideal_team(cache["players"], "3-5-2")
-            save_cache(cache)
-        try:
-            cache["player_profiles"] = load_player_profiles(club_id or "default")
-        except Exception as e:
-            print(f"[profiles] dashboard sem perfis: {e}")
-            cache.setdefault("player_profiles", {})
-        return cache
-    return {"club": None, "stats": None, "players": [], "matches": [], "opponents": [], "ideal_team": None, "player_profiles": {}}
 
+        matches = cache.get("matches") or []
+        cache["matchtype_summary"] = summarize_matches_by_type(matches)
+        cache["opponents"] = calc_opponent_avg(matches)
+        try:
+            cache["stats"] = calc_club_stats(None, None, matches)
+        except Exception as e:
+            print(f"[DASHBOARD] Aviso ao recalcular estatisticas: {e}")
+
+        try:
+            profiles = load_player_profiles(club_id or "default")
+            cache["player_profiles"] = profiles
+            if cache.get("players"):
+                if "apply_profiles_to_players" in globals():
+                    cache["players"] = apply_profiles_to_players(cache.get("players") or [], profiles)
+                try:
+                    cache["ideal_team"] = build_ideal_team(cache["players"], "3-5-2", profiles)
+                except TypeError:
+                    cache["ideal_team"] = build_ideal_team(cache["players"], "3-5-2")
+        except Exception as e:
+            print(f"[DASHBOARD] Aviso ao aplicar perfis: {e}")
+            cache.setdefault("player_profiles", {})
+
+        try:
+            save_cache(cache)
+            save_club_json_history(str((cache.get("club") or {}).get("id") or club_id or "default"), cache)
+        except Exception as e:
+            print(f"[DASHBOARD] Aviso ao salvar fallback local: {e}")
+        return cache
+
+    return {"club": None, "stats": None, "players": [], "matches": [], "opponents": [], "ideal_team": None, "player_profiles": {}, "matchtype_summary": summarize_matches_by_type([])}
 
 def _load_club_data_for_settings(club_id: str, current_user: Optional[dict] = None) -> dict:
     club_data = load_latest_club_data_supabase(club_id) or load_cache() or {}
@@ -3643,8 +3622,6 @@ def build_player_analytics(player_name, cache, match_type="todos", match_status=
                     "rating": float(pr.get("rating", 0) or 0),
                     "sofi_rating": float(pr.get("sofi_rating", pr.get("rating", 0)) or 0),
                     "goals": int(pr.get("goals", 0) or 0), "assists": int(pr.get("assists", 0) or 0),
-                    "pre_assists": _analytics_int_alias(pr, ("pre_assists", "preAssists", "preassists", "secondaryAssists", "secondaryassists", "secondAssists", "secondassists", "hockeyAssists", "hockeyassists", "assists2", "secondassist", "secondAssist")),
-                    "key_passes": _analytics_int_alias(pr, ("key_passes", "keyPasses", "keypasses", "passesToShot", "passesToShots", "passestoshooting", "chancesCreated", "chancescreated", "chances", "shotAssists", "shotassists")),
                     "shots": int(pr.get("shots", 0) or 0), "passes_made": int(pr.get("passes_made", 0) or 0),
                     "pass_pct": float(pr.get("pass_pct", 0) or 0), "tackles_made": int(pr.get("tackles_made", 0) or 0),
                     "tackle_pct": float(pr.get("tackle_pct", 0) or 0), "saves": int(pr.get("saves", 0) or 0),
@@ -3662,8 +3639,6 @@ def build_player_analytics(player_name, cache, match_type="todos", match_status=
     sofi = [h["sofi_rating"] for h in history]
     goals = sum(h["goals"] for h in history)
     assists = sum(h["assists"] for h in history)
-    pre_assists = sum(h.get("pre_assists", 0) for h in history)
-    key_passes = sum(h.get("key_passes", 0) for h in history)
     shots = sum(h["shots"] for h in history)
     tackles = sum(h["tackles_made"] for h in history)
     saves = sum(h["saves"] for h in history)
@@ -3678,9 +3653,21 @@ def build_player_analytics(player_name, cache, match_type="todos", match_status=
         for pr in (m.get("players_ratings") or []):
             nm = pr.get("name") or "Unknown"
             row = club_player_rows.setdefault(nm, {
-                "name": nm, "position": pr.get("pos") or "?", "games": 0,
-                "rating_sum": 0.0, "sofi_sum": 0.0, "goals": 0, "assists": 0, "pre_assists": 0, "key_passes": 0, "shots": 0,
-                "pass_pct_sum": 0.0, "tackle_pct_sum": 0.0, "mom": 0,
+                "name": nm,
+                "position": pr.get("pos") or "?",
+                "games": 0,
+                "rating_sum": 0.0,
+                "sofi_sum": 0.0,
+                "goals": 0,
+                "assists": 0,
+                "shots": 0,
+                "pass_pct_sum": 0.0,
+                "tackle_pct_sum": 0.0,
+                "tackles_made": 0,
+                "saves": 0,
+                "clean_sheets": 0,
+                "red_cards": 0,
+                "mom": 0,
             })
             row["games"] += 1
             row["position"] = pr.get("pos") or row["position"]
@@ -3688,11 +3675,13 @@ def build_player_analytics(player_name, cache, match_type="todos", match_status=
             row["sofi_sum"] += float(pr.get("sofi_rating", pr.get("rating", 0)) or 0)
             row["goals"] += int(pr.get("goals", 0) or 0)
             row["assists"] += int(pr.get("assists", 0) or 0)
-            row["pre_assists"] += _analytics_int_alias(pr, ("pre_assists", "preAssists", "preassists", "secondaryAssists", "secondaryassists", "secondAssists", "secondassists", "hockeyAssists", "hockeyassists", "assists2", "secondassist", "secondAssist"))
-            row["key_passes"] += _analytics_int_alias(pr, ("key_passes", "keyPasses", "keypasses", "passesToShot", "passesToShots", "passestoshooting", "chancesCreated", "chancescreated", "chances", "shotAssists", "shotassists"))
             row["shots"] += int(pr.get("shots", 0) or 0)
             row["pass_pct_sum"] += float(pr.get("pass_pct", 0) or 0)
             row["tackle_pct_sum"] += float(pr.get("tackle_pct", 0) or 0)
+            row["tackles_made"] += int(pr.get("tackles_made", pr.get("tackles", 0)) or 0)
+            row["saves"] += int(pr.get("saves", 0) or 0)
+            row["clean_sheets"] += int(pr.get("clean_sheet", pr.get("clean_sheets", 0)) or 0)
+            row["red_cards"] += int(pr.get("red", pr.get("red_cards", 0)) or 0)
             row["mom"] += int(pr.get("mom", 0) or 0)
 
     club_players = []
@@ -3706,16 +3695,16 @@ def build_player_analytics(player_name, cache, match_type="todos", match_status=
             "sofi_rating": round(row["sofi_sum"] / gp, 2),
             "goals": row["goals"],
             "assists": row["assists"],
-            "pre_assists": row.get("pre_assists", 0),
-            "key_passes": row.get("key_passes", 0),
             "shots": row["shots"],
             "pass_pct": round(row["pass_pct_sum"] / gp, 1),
             "tackle_pct": round(row["tackle_pct_sum"] / gp, 1),
+            "tackles_made": row.get("tackles_made", 0),
+            "saves": row.get("saves", 0),
+            "clean_sheets": row.get("clean_sheets", 0),
+            "red_cards": row.get("red_cards", 0),
             "mom": row["mom"],
             "goals_per_game": round(row["goals"] / gp, 2),
             "assists_per_game": round(row["assists"] / gp, 2),
-            "pre_assists_per_game": round(row.get("pre_assists", 0) / gp, 2),
-            "key_passes_per_game": round(row.get("key_passes", 0) / gp, 2),
         })
 
     player_club = _analytics_find_player_record(club_players, pname_raw, "name")
@@ -3738,8 +3727,6 @@ def build_player_analytics(player_name, cache, match_type="todos", match_status=
             "member_stats": {},
             "goals": 0,
             "assists": 0,
-            "pre_assists": 0,
-            "key_passes": 0,
             "shots": 0,
             "passes_made": 0,
             "pass_pct": 0,
@@ -3748,8 +3735,6 @@ def build_player_analytics(player_name, cache, match_type="todos", match_status=
             "mom": 0,
             "goals_per_game": 0,
             "assists_per_game": 0,
-            "pre_assists_per_game": 0,
-            "key_passes_per_game": 0,
         }
     else:
         print(f"[ANALYTICS] Jogador '{player_name}' nao achado em players/matches; devolvendo pacote vazio para nao quebrar o modal")
@@ -3763,8 +3748,6 @@ def build_player_analytics(player_name, cache, match_type="todos", match_status=
             "member_stats": {},
             "goals": 0,
             "assists": 0,
-            "pre_assists": 0,
-            "key_passes": 0,
             "shots": 0,
             "passes_made": 0,
             "pass_pct": 0,
@@ -3773,8 +3756,6 @@ def build_player_analytics(player_name, cache, match_type="todos", match_status=
             "mom": 0,
             "goals_per_game": 0,
             "assists_per_game": 0,
-            "pre_assists_per_game": 0,
-            "key_passes_per_game": 0,
         }
 
     team_rating_avg = _avg([p.get("rating", 0) for p in club_players], 0)
@@ -3832,12 +3813,21 @@ def build_player_analytics(player_name, cache, match_type="todos", match_status=
         "averages": {
             "rating": _avg(ratings, player.get("rating", 0)), "sofi_rating": _avg(sofi, player.get("rating", 0)),
             "goals_per_game": round(goals / max(games, 1), 2), "assists_per_game": round(assists / max(games, 1), 2),
-            "pre_assists_per_game": round(pre_assists / max(games, 1), 2), "key_passes_per_game": round(key_passes / max(games, 1), 2),
             "shots_per_game": round(shots / max(games, 1), 2), "passes_pct": _avg([h["pass_pct"] for h in history], player.get("pass_pct", 0)),
             "tackle_pct": _avg([h["tackle_pct"] for h in history], player.get("tackle_pct", 0)), "tackles_per_game": round(tackles / max(games, 1), 2),
             "saves_per_game": round(saves / max(games, 1), 2),
         },
-        "totals": {"goals": goals, "assists": assists, "pre_assists": pre_assists, "key_passes": key_passes, "shots": shots, "tackles": tackles, "moms": moms, "red_cards": reds, "clean_sheets": clean_sheets, "saves": saves},
+        "totals": {
+            "goals": goals,
+            "assists": assists,
+            "shots": shots,
+            "passes_made": sum(int(h.get("passes_made", 0) or 0) for h in history),
+            "tackles": tackles,
+            "saves": saves,
+            "clean_sheets": clean_sheets,
+            "red_cards": reds,
+            "moms": moms,
+        },
         "advanced": {"offensive_impact": round(offensive_impact, 1), "defensive_impact": round(defensive_impact, 1), "consistency": round(consistency, 1), "regularity": regularity, "clutch_score": round(clutch, 1), "risk": round(risk, 1), "analytic_score": analytic_score, "radar": radar},
         "ranking": {"position": rank_position, "total_players": len(club_players), "rating_rank_label": f"{rank_position}/{len(club_players)}" if rank_position else "-"},
         "team_comparison": {"team_avg_rating": team_rating_avg, "team_scope": "clube_atual", "player_vs_team_rating": round(float(player.get("rating", 0) or 0) - team_rating_avg, 2), "team_avg_goals_per_game": team_goal_avg, "player_vs_team_goals_per_game": round(float(player.get("goals_per_game", 0) or 0) - team_goal_avg, 2)},
@@ -3866,8 +3856,6 @@ def build_player_analytics(player_name, cache, match_type="todos", match_status=
             "sofi_rating": round(float(analytics["averages"].get("sofi_rating", member.get("rating", 0)) or member.get("rating", 0) or 0), 2),
             "goals_per_game": round(float(member.get("goals_per_game", 0) or 0), 2),
             "assists_per_game": round(float(member.get("assists_per_game", 0) or 0), 2),
-            "pre_assists_per_game": round(float(analytics["totals"].get("pre_assists", 0) or 0) / max(detail_games, 1), 2) if detail_games else 0,
-            "key_passes_per_game": round(float(analytics["totals"].get("key_passes", 0) or 0) / max(detail_games, 1), 2) if detail_games else 0,
             "shots_per_game": round(float(member.get("shots", 0) or 0) / max(club_total_games, 1), 2) if has_shot_stats else None,
             "passes_pct": round(float(member.get("pass_pct", 0) or 0), 1) if has_pass_stats else None,
             "tackle_pct": round(float(member.get("tackle_pct", 0) or 0), 1) if has_tackle_stats else None,
@@ -3877,8 +3865,6 @@ def build_player_analytics(player_name, cache, match_type="todos", match_status=
         analytics["display_totals"] = {
             "goals": int(member.get("goals", 0) or 0),
             "assists": int(member.get("assists", 0) or 0),
-            "pre_assists": int(analytics["totals"].get("pre_assists", 0) or 0),
-            "key_passes": int(analytics["totals"].get("key_passes", 0) or 0),
             "shots": int(member.get("shots", 0) or 0) if has_shot_stats else None,
             "tackles": int(member.get("tackles_made", 0) or 0) if has_tackle_stats else None,
             "moms": int(member.get("mom", 0) or 0),
@@ -3915,9 +3901,8 @@ def generate_player_scout_report_offline(analytics):
         strengths.append(f"Nota media alta ({avg['rating']}) e presenca confiavel.")
     if adv["regularity"] >= 70:
         strengths.append(f"Regularidade forte: {adv['regularity']}% dos jogos com rating >= 7.")
-    if totals["goals"] or totals["assists"] or totals.get("pre_assists"):
-        extra = f" e {totals.get('pre_assists', 0)} pre-assistencias" if totals.get("pre_assists") else ""
-        strengths.append(f"Impacto ofensivo direto: {totals['goals']} gols, {totals['assists']} assistencias{extra}.")
+    if totals["goals"] or totals["assists"]:
+        strengths.append(f"Impacto ofensivo direto: {totals['goals']} gols, {totals['assists']} assistencias.")
     if avg["passes_pct"] >= 75:
         strengths.append(f"Boa seguranca na circulacao: {avg['passes_pct']}% de passes.")
     if totals["tackles"] or totals["saves"] or totals["clean_sheets"]:
@@ -4241,7 +4226,6 @@ def get_player_detail(player_name: str, current_user: dict = Depends(get_current
     # Sem corte: usa todas as partidas salvas do jogador no clube/filtro
 
     # Estatisticas agregadas do historico
-    h_stats = {"games": len(history), "goals": 0, "assists": 0, "pre_assists": 0, "key_passes": 0, "avg_rating": 0, "avg_sofi": 0, "moms": 0}
     if history:
         h_stats["goals"] = sum(h["goals"] for h in history)
         h_stats["assists"] = sum(h["assists"] for h in history)
@@ -6805,6 +6789,61 @@ html, body { max-width: 100%; }
     overflow-wrap: anywhere;
   }
 }
+.alerts-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 14px;
+  align-items: start;
+}
+.alert-panel {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 16px;
+  min-width: 0;
+}
+.alert-panel-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+.alert-count {
+  min-width: 34px;
+  height: 34px;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--green);
+  border: 1px solid var(--green-dim);
+  background: rgba(0,255,115,0.08);
+  font-weight: 900;
+}
+.alert-list { display: grid; gap: 8px; }
+.alert-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 0;
+  border-top: 1px solid rgba(255,255,255,0.06);
+  min-width: 0;
+}
+.alert-row strong,
+.alert-row span {
+  display: block;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.alert-row span { color: var(--text-2); font-size: 12px; margin-top: 2px; }
+.empty-state.compact { padding: 24px 10px; font-size: 13px; color: var(--text-2); }
+@media (max-width: 720px) {
+  .alerts-grid { grid-template-columns: 1fr; }
+  .alert-row { align-items: flex-start; flex-direction: column; }
+}
+
 </style>
 </head>
 <body>
@@ -7235,7 +7274,6 @@ function computePlayersForMatches(matches) {
       favorite_position: p.position || '?',
       last_match_position: '',
       position_counts: {GK:0, DEF:0, MID:0, FWD:0},
-      games: 0, rating_sum: 0, sofi_sum: 0, goals: 0, assists: 0, pre_assists: 0, key_passes: 0, shots: 0,
       passes_pct_sum: 0, passes_made: 0, tackle_pct_sum: 0, tackles_made: 0, mom: 0, reds: 0, saves: 0, clean_sheet: 0, wins: 0, draws: 0, losses: 0
     };
   });
@@ -7245,7 +7283,6 @@ function computePlayersForMatches(matches) {
         byName[pr.name] = {
           name: pr.name, position: pr.pos || '?', favorite_position: pr.pos || '?', last_match_position: '',
           position_counts: {GK:0, DEF:0, MID:0, FWD:0},
-          games: 0, rating_sum: 0, sofi_sum: 0, goals: 0, assists: 0, pre_assists: 0, key_passes: 0, shots: 0,
           passes_pct_sum: 0, passes_made: 0, tackle_pct_sum: 0, tackles_made: 0, mom: 0, reds: 0, saves: 0, clean_sheet: 0, wins: 0, draws: 0, losses: 0
         };
       }
@@ -7258,8 +7295,6 @@ function computePlayersForMatches(matches) {
       p.sofi_sum += Number(pr.sofi_rating || pr.rating || 0);
       p.goals += Number(pr.goals || 0);
       p.assists += Number(pr.assists || 0);
-      p.pre_assists += Number(pr.pre_assists || pr.preAssists || pr.secondaryAssists || pr.secondaryassists || pr.hockeyAssists || pr.hockeyassists || 0);
-      p.key_passes += Number(pr.key_passes || pr.keyPasses || pr.keypasses || pr.chancesCreated || pr.chancescreated || 0);
       p.shots += Number(pr.shots || 0);
       p.passes_pct_sum += Number(pr.pass_pct || 0);
       p.passes_made += Number(pr.passes_made || 0);
@@ -7287,13 +7322,11 @@ function computePlayersForMatches(matches) {
         tackle_pct: +(p.tackle_pct_sum / Math.max(p.games, 1)).toFixed(1),
         goals_per_game: +(p.goals / Math.max(p.games, 1)).toFixed(2),
         assists_per_game: +(p.assists / Math.max(p.games, 1)).toFixed(2),
-        pre_assists_per_game: +(Number(p.pre_assists || 0) / Math.max(p.games, 1)).toFixed(2),
-        key_passes_per_game: +(Number(p.key_passes || 0) / Math.max(p.games, 1)).toFixed(2),
         shots_per_game: +(p.shots / Math.max(p.games, 1)).toFixed(2),
         tackles_per_game: +(p.tackles_made / Math.max(p.games, 1)).toFixed(2),
         saves_per_game: +(p.saves / Math.max(p.games, 1)).toFixed(2),
         goal_involvements: Number(p.goals || 0) + Number(p.assists || 0),
-        chance_involvements: Number(p.goals || 0) + Number(p.assists || 0) + Number(p.pre_assists || 0),
+        chance_involvements: Number(p.goals || 0) + Number(p.assists || 0),
         goal_involvements_per_game: +((Number(p.goals || 0) + Number(p.assists || 0)) / Math.max(p.games, 1)).toFixed(2),
         win_rate: +((Number(p.wins || 0) / Math.max(p.games, 1)) * 100).toFixed(1),
       };
@@ -7332,13 +7365,9 @@ function playersFromMemberTotals() {
       reds: d.reds || 0,
       saves: d.saves || 0,
       clean_sheet: d.clean_sheet || 0,
-      pre_assists: d.pre_assists || 0,
-      pre_assists_per_game: d.pre_assists_per_game || 0,
-      key_passes: d.key_passes || 0,
-      key_passes_per_game: d.key_passes_per_game || 0,
     };
     merged.goal_involvements = Number(merged.goals || 0) + Number(merged.assists || 0);
-    merged.chance_involvements = Number(merged.goals || 0) + Number(merged.assists || 0) + Number(merged.pre_assists || 0);
+    merged.chance_involvements = Number(merged.goals || 0) + Number(merged.assists || 0);
     merged.goal_involvements_per_game = +(merged.goal_involvements / games).toFixed(2);
     merged.shots_per_game = hasShotStats ? +Number(merged.shots_per_game || 0).toFixed(2) : null;
     merged.tackles_per_game = hasTackleStats ? +Number(merged.tackles_per_game || 0).toFixed(2) : null;
@@ -7385,13 +7414,9 @@ function emptyPlayerForCurrentFilter(base) {
     sofi_rating: 0,
     goals: 0,
     assists: 0,
-    pre_assists: 0,
-    key_passes: 0,
     goal_involvements: 0,
     goals_per_game: 0,
     assists_per_game: 0,
-    pre_assists_per_game: 0,
-    key_passes_per_game: 0,
     goal_involvements_per_game: 0,
     shots: 0,
     shots_per_game: 0,
@@ -8255,11 +8280,9 @@ function renderMeuScout() {
           ${playerStatLine('Sofi', found.sofi_rating)}
           ${playerStatLine('Gols', found.goals)}
           ${playerStatLine('Assist', found.assists)}
-          ${playerStatLine('Pr&eacute;-A', found.pre_assists)}
           ${playerStatLine('G+A', found.goal_involvements)}
           ${playerStatLine('G/J', found.goals_per_game)}
           ${playerStatLine('A/J', found.assists_per_game)}
-          ${playerStatLine('Pr&eacute;/J', found.pre_assists_per_game)}
           ${playerStatLine('Chutes', found.shots)}
           ${playerStatLine('Chu/J', found.shots_per_game)}
           ${playerStatLine('Pass%', found.pass_pct, '%')}
@@ -8299,11 +8322,9 @@ function renderJogadores() {
           ${playerStatLine('Sofi', p.sofi_rating)}
           ${playerStatLine('Gols', p.goals)}
           ${playerStatLine('Assist', p.assists)}
-          ${playerStatLine('Pr&eacute;-A', p.pre_assists)}
           ${playerStatLine('G+A', p.goal_involvements)}
           ${playerStatLine('G/J', p.goals_per_game)}
           ${playerStatLine('A/J', p.assists_per_game)}
-          ${playerStatLine('Pr&eacute;/J', p.pre_assists_per_game)}
           ${playerStatLine('Chutes', p.shots)}
           ${playerStatLine('Chu/J', p.shots_per_game)}
           ${playerStatLine('Pass%', p.pass_pct, '%')}
@@ -8350,8 +8371,6 @@ function renderRankings() {
     if (key === 'rating') return Number(p.rating || 0);
     if (key === 'goals') return Number(p.goals || 0);
     if (key === 'assists') return Number(p.assists || 0);
-    if (key === 'pre_assists') return Number(p.pre_assists || 0);
-    if (key === 'key_passes') return Number(p.key_passes || 0);
     if (key === 'pass_pct') return Number(p.pass_pct || 0);
     if (key === 'tackle_pct') return Number(p.tackle_pct || 0);
     if (key === 'mom') return Number(p.mom || 0);
@@ -8404,7 +8423,6 @@ function renderRankings() {
       ${topList('Top 5 Nota M&eacute;dia EA', '&#9733;', 'rating', '', 6)}
       ${topList('Top 5 Gols', '&#9917;', 'goals', '', 1, true)}
       ${topList('Top 5 Assist&ecirc;ncias', '&#9673;', 'assists', '', 1, true)}
-      ${topList('Top 5 Pr&eacute;-Assist&ecirc;ncias', '&#128161;', 'pre_assists', '', 1, true)}
       ${topList('Top 5 % Passes Certos', '&#10148;', 'pass_pct', '%', 6, true)}
       ${topList('Top 5 % Divididas', '&#9635;', 'tackle_pct', '%', 6, true)}
       ${topList('Top 5 MOM', '&#9819;', 'mom', '', 1, true)}
@@ -8897,211 +8915,90 @@ function profileConfiguredStatus(name) {
   };
 }
 
+
 function renderAlertList(title, help, rows, rowHtml) {
+  const safeRows = Array.isArray(rows) ? rows : [];
   return `
-    <div class="ranking-card alert-card">
-      <div class="ranking-title"><span class="ranking-title-icon">&#9888;</span>${title} <span class="tag amistoso" style="margin-left:8px;">${rows.length}</span></div>
-      <div class="profile-meta" style="margin-bottom:12px;line-height:1.5;">${help}</div>
-      <div class="profile-list">${rows.map(rowHtml).join('') || '<div class="empty-state" style="padding:24px 10px;">Tudo certo por aqui.</div>'}</div>
+    <div class="alert-panel">
+      <div class="alert-panel-head">
+        <div>
+          <div class="section-title" style="margin:0;">${title}</div>
+          <div class="muted">${help || ''}</div>
+        </div>
+        <span class="alert-count">${safeRows.length}</span>
+      </div>
+      ${safeRows.length ? `<div class="alert-list">${safeRows.map(rowHtml).join('')}</div>` : '<div class="empty-state compact">Tudo certo por aqui.</div>'}
     </div>
   `;
 }
 
 function renderAlertasAdmin() {
-  const players = computePlayersForMatches(DATA?.matches || []).filter(p => Number(p.games || 0) > 0);
-  const users = (CLUB_USERS || []).filter(u => String(u.club_id || DATA?.club?.id || '') === String(DATA?.club?.id || '') || !u.club_id);
-  const userKeys = new Set();
-  users.forEach(u => {
-    userKeys.add(normIdentity(u.usuario));
-    userKeys.add(normIdentity(u.nome));
-  });
+  if (!isAdmin()) return '<div class="empty-state">Acesso restrito ao administrador.</div>';
 
-  const noLogin = players
-    .filter(p => !userKeys.has(normIdentity(p.name)))
-    .sort((a,b) => Number(b.games || 0) - Number(a.games || 0));
+  const players = (typeof scopedPlayers === 'function' ? scopedPlayers() : (DATA?.players || []));
+  const profiles = DATA?.player_profiles || {};
+  const users = Array.isArray(CLUB_USERS) ? CLUB_USERS : [];
 
-  const missingProfile = players
-    .map(p => ({...p, _cfg: profileConfiguredStatus(p.name)}))
-    .filter(p => !p._cfg.complete)
-    .sort((a,b) => Number(b.games || 0) - Number(a.games || 0));
-
-  const usersWithoutPlayerData = users
-    .filter(u => !players.some(p => normIdentity(p.name) === normIdentity(u.usuario) || normIdentity(p.name) === normIdentity(u.nome)))
-    .sort((a,b) => String(a.nome || a.usuario || '').localeCompare(String(b.nome || b.usuario || '')));
-
-  const loginMissingProfile = users
-    .map(u => {
-      const linked = players.find(p => normIdentity(p.name) === normIdentity(u.usuario) || normIdentity(p.name) === normIdentity(u.nome));
-      const key = linked?.name || u.usuario || u.nome;
-      return {...u, linked_player: linked, _cfg: profileConfiguredStatus(key)};
-    })
-    .filter(u => !u._cfg.complete)
-    .sort((a,b) => String(a.nome || a.usuario || '').localeCompare(String(b.nome || b.usuario || '')));
-
-  const playerRow = (p) => `
-    <div class="profile-row profile-user-row">
-      <div><div class="profile-name">${escapeAttr(p.name)}</div><div class="profile-meta">${escapeAttr(p.position || '-')} &middot; ${p.games || 0} jogos salvos no clube</div></div>
-      <div><span class="tag ${p.games >= 6 ? 'liga' : 'amistoso'}">${p.games || 0} jogos</span></div>
-      <button class="btn-mini" onclick="setTab('cadastro')">Abrir cadastro</button>
-    </div>`;
-
-  const profileRow = (p) => {
-    const missing = [];
-    if (!p._cfg.has_position) missing.push('posi&ccedil;&atilde;o');
-    if (!p._cfg.has_archetype) missing.push('arqu&eacute;tipo');
-    if (!p._cfg.has_styles) missing.push('3 estilos');
-    return `
-      <div class="profile-row profile-user-row">
-        <div><div class="profile-name">${escapeAttr(p.name)}</div><div class="profile-meta">Falta: ${missing.join(', ') || '-'}</div></div>
-        <div><span class="tag d">incompleto</span></div>
-        <button class="btn-mini" onclick="setTab('cadastro')">Ajustar</button>
-      </div>`;
+  const identityKeys = (value) => {
+    const raw = String(value || '').trim();
+    const out = new Set();
+    if (!raw) return out;
+    out.add(normIdentity(raw));
+    out.add(normIdentity(raw.replace(/[_\-.]/g, ' ')));
+    out.add(normIdentity(raw.replace(/\s+/g, '')));
+    return out;
   };
 
-  const userRow = (u) => `
-    <div class="profile-row profile-user-row">
-      <div><div class="profile-name">${escapeAttr(u.nome || u.usuario || '-')}</div><div class="profile-meta">Usu&aacute;rio/ID FIFA: ${escapeAttr(u.usuario || '-')}</div></div>
-      <div><span class="tag ${u.is_active ? 'liga' : 'd'}">${u.is_active ? 'ativo' : 'bloqueado'}</span></div>
-      <button class="btn-mini" onclick="setTab('cadastro')">Abrir cadastro</button>
-    </div>`;
-
-  return `
-    <div class="section-title">Alertas do elenco</div>
-    <div style="color:var(--text-2);font-size:12px;margin-bottom:14px;line-height:1.5;">
-      Painel para o admin controlar quem joga, quem tem login e quem ainda precisa completar posi&ccedil;&atilde;o, arqu&eacute;tipo e estilos de jogo.
-    </div>
-    <div class="rankings-grid">
-      ${renderAlertList('Jogou, mas n&atilde;o tem login', 'Jogadores encontrados nas partidas salvas do clube que ainda n&atilde;o t&ecirc;m usu&aacute;rio cadastrado no app.', noLogin, playerRow)}
-      ${renderAlertList('Cadastro t&eacute;cnico incompleto', 'Jogadores com partidas salvas que ainda n&atilde;o t&ecirc;m posi&ccedil;&atilde;o manual, arqu&eacute;tipo ou 3 playstyles.', missingProfile, profileRow)}
-      ${renderAlertList('Login sem jogador encontrado', 'Usu&aacute;rios cadastrados cujo ID FIFA/usu&aacute;rio ainda n&atilde;o apareceu nas partidas salvas deste clube.', usersWithoutPlayerData, userRow)}
-      ${renderAlertList('Login sem build completa', 'Usu&aacute;rios do clube que precisam preencher/corrigir arqu&eacute;tipo e playstyles.', loginMissingProfile, userRow)}
-    </div>
-  `;
-}
-
-function renderClubUsersAdmin() {
-  const rows = (CLUB_USERS || []).map(u => {
-    const self = u.id === AUTH_USER?.id;
-    const active = !!u.is_active && (u.status || 'ativo') === 'ativo';
-    return `
-    <div class="profile-row profile-user-row">
-      <div><div class="profile-name">${escapeAttr(u.nome || '-')}</div><div class="profile-meta">Usu&aacute;rio/ID FIFA: ${escapeAttr(u.usuario || '-')}</div></div>
-      <div>${escapeAttr(u.clube || '')}</div>
-      <div><span class="tag ${u.cargo === 'admin' ? 'liga' : 'amistoso'}">${escapeAttr(u.cargo || 'jogador')}</span></div>
-      <div><span class="tag ${active ? 'liga' : (u.status === 'pendente' ? 'e' : 'd')}">${active ? 'ativo' : (u.status || 'inativo')}</span></div>
-      <button class="btn-mini ${active ? 'danger' : ''}" onclick="toggleClubUserLogin('${escapeAttr(u.id)}', ${active ? 'false' : 'true'}, '${escapeAttr(u.nome || u.usuario)}')" ${self ? 'disabled' : ''}>${active ? 'Desativar login' : 'Ativar login'}</button>
-      <button class="btn-mini danger" onclick="deleteClubUser('${escapeAttr(u.id)}','${escapeAttr(u.nome || u.usuario)}')" ${self ? 'disabled' : ''}>Excluir</button>
-    </div>`;
-  }).join('');
-  return `
-    <div class="section-title">Usu&aacute;rios cadastrados no clube</div>
-    <div style="color:var(--text-2);font-size:12px;margin-bottom:12px;line-height:1.5;">Aqui o admin vê todos os acessos cadastrados no clube. O ideal é o usuário ser igual ao ID/nome do FIFA/EA FC para o Meu Scout puxar automaticamente as estatisticas certas.</div>
-    <div class="profile-list">${rows || '<div class="empty-state" style="padding:30px 20px;">Nenhum usuário cadastrado encontrado.</div>'}</div>
-  `;
-}
-
-
-async function loadOwnerClubs() {
-  if (!isOwnerAdmin()) return [];
-  try {
-    const r = await authFetch('/api/owner/clubs');
-    const data = await r.json().catch(() => ({}));
-    if (!r.ok) throw new Error(data.detail || 'Erro ao carregar clubes');
-    OWNER_CLUBS = data.clubs || [];
-  } catch (e) {
-    console.warn('Erro ao carregar clubes liberados', e);
-    OWNER_CLUBS = [];
-  }
-  return OWNER_CLUBS;
-}
-
-async function addOwnerClub(ev) {
-  ev.preventDefault();
-  const input = document.getElementById('owner-club-name');
-  const msg = document.getElementById('owner-club-msg');
-  const clube = (input?.value || '').trim();
-  if (!clube) return;
-  if (msg) msg.textContent = 'Cadastrando clube...';
-  try {
-    const r = await authFetch('/api/owner/clubs', {
-      method:'POST',
-      headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({clube})
+  const userKeys = new Set();
+  users.forEach(u => {
+    [u.usuario, u.nome, u.player_name, u.fifa_id, u.pro_id].forEach(v => {
+      identityKeys(v).forEach(k => { if (k) userKeys.add(k); });
     });
-    const data = await r.json().catch(() => ({}));
-    if (!r.ok) throw new Error(data.detail || 'Erro ao cadastrar clube');
-    if (input) input.value = '';
-    await loadOwnerClubs();
-    renderTab();
-    alert('Clube liberado para cadastro.');
-  } catch (e) {
-    if (msg) msg.textContent = e.message;
-    alert(e.message);
-  }
-}
+  });
 
-async function deleteOwnerClub(clubId, clube) {
-  if (!confirm(`Remover ${clube || 'este clube'} da lista liberada? Novos cadastros serao bloqueados.`)) return;
-  try {
-    const r = await authFetch('/api/owner/clubs/' + encodeURIComponent(clubId), {method:'DELETE'});
-    const data = await r.json().catch(() => ({}));
-    if (!r.ok) throw new Error(data.detail || 'Erro ao excluir clube');
-    await loadOwnerClubs();
-    renderTab();
-    alert('Clube removido da lista liberada.');
-  } catch (e) {
-    alert(e.message);
-  }
-}
+  const playerHasUser = (p) => {
+    const keys = identityKeys(p?.name);
+    for (const k of keys) if (userKeys.has(k)) return true;
+    return false;
+  };
 
-async function allowExistingOwnerClub(clubId, clube) {
-  if (!clubId) return;
-  try {
-    const r = await authFetch('/api/owner/clubs', {
-      method:'POST',
-      headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({club_id: clubId, clube: clube || ''})
-    });
-    const data = await r.json().catch(() => ({}));
-    if (!r.ok) throw new Error(data.detail || 'Erro ao liberar clube');
-    await loadOwnerClubs();
-    renderTab();
-    alert('Clube liberado para cadastro.');
-  } catch (e) {
-    alert(e.message);
-  }
-}
+  const profileFor = (p) => {
+    const name = p?.name || '';
+    const key = normIdentity(name);
+    return profiles[name] || profiles[key] || profiles[String(name).toLowerCase()] || {};
+  };
 
-function renderOwnerClubsAdmin() {
-  const rows = (OWNER_CLUBS || []).map(c => {
-    const allowed = !!c.allowed;
-    const clubId = escapeAttr(c.club_id || '');
-    const clubName = escapeAttr(c.clube || '-');
-    return `
-    <div class="profile-row profile-user-row owner-user-row">
-      <div>
-        <div class="profile-name">${clubName}</div>
-        <div class="profile-meta">ID EA: ${clubId || '-'} &middot; ${escapeAttr(c.platform || 'common-gen5')}</div>
-      </div>
-      <div><div class="profile-meta">${allowed ? 'Liberado em' : 'Cadastrado em'}</div>${escapeAttr(formatDateTime(c.created_at || c.updated_at || ''))}</div>
-      <div><span class="tag ${allowed ? 'v' : 'd'}">${allowed ? 'Liberado' : 'Bloqueado'}</span></div>
-      ${allowed
-        ? `<button class="btn-mini danger" onclick="deleteOwnerClub('${clubId}','${clubName}')">Remover libera??o</button>`
-        : `<button class="btn-mini" onclick="allowExistingOwnerClub('${clubId}','${clubName}')">Liberar</button>`}
-    </div>`;
-  }).join('');
+  const profileComplete = (p) => {
+    const prof = profileFor(p);
+    const styles = Array.isArray(prof.playstyles) ? prof.playstyles.filter(Boolean) : [];
+    return Boolean((prof.manual_position || p.manual_position || p.position) && (prof.archetype || p.archetype) && styles.length >= 3);
+  };
+
+  const userHasPlayerData = (u) => {
+    const keys = new Set();
+    [u.usuario, u.nome, u.player_name, u.fifa_id, u.pro_id].forEach(v => identityKeys(v).forEach(k => keys.add(k)));
+    return players.some(p => keys.has(normIdentity(p.name)));
+  };
+
+  const noLogin = players.filter(p => !playerHasUser(p));
+  const incompleteProfiles = players.filter(p => !profileComplete(p));
+  const usersWithoutPlayerData = users.filter(u => !userHasPlayerData(u));
+
+  const playerRow = p => `<div class="alert-row"><div><strong>${escapeHtml(p.name)}</strong><span>${escapeHtml(p.position || 'posição não definida')}</span></div><button class="btn-mini" onclick="setTab('cadastro')">Abrir cadastro</button></div>`;
+  const userRow = u => `<div class="alert-row"><div><strong>${escapeHtml(u.nome || u.usuario)}</strong><span>${escapeHtml(u.usuario || '')} · ${escapeHtml(u.status || 'ativo')} · ${escapeHtml(u.cargo || 'jogador')}</span></div><button class="btn-mini" onclick="setTab('usuarios')">Ver usuário</button></div>`;
+
   return `
-    <div class="section-title">Painel sennasant &middot; clubes liberados</div>
-    <div style="color:var(--text-2);font-size:12px;margin-bottom:12px;line-height:1.5;">Cadastre aqui os clubes que podem receber novos usu?rios. Clubes que j? foram sincronizados aparecem na lista abaixo; basta clicar em Liberar.</div>
-    <form class="agenda-form" onsubmit="addOwnerClub(event)" style="grid-template-columns: 1fr auto;">
-      <input id="owner-club-name" type="text" placeholder="Nome do clube exatamente como aparece no Pro Clubs" required>
-      <button type="submit" class="btn-primary" style="padding:8px 18px;">Cadastrar / liberar clube</button>
-      <div id="owner-club-msg" class="profile-meta" style="grid-column:1 / -1;"></div>
-    </form>
-    <div class="section-title">Lista de clubes cadastrados</div>
-    <div class="profile-list">${rows || '<div class="empty-state" style="padding:30px 20px;">Nenhum clube cadastrado ainda.</div>'}</div>
+    <div class="section-title">Alertas do Clube</div>
+    <p class="muted">Controle rápido para cadastro, login e perfis dos jogadores do clube atual.</p>
+    <div class="alerts-grid">
+      ${renderAlertList('Jogadores sem login', 'Jogaram pelo clube, mas ainda não têm conta vinculada por nome ou usuário.', noLogin, playerRow)}
+      ${renderAlertList('Perfis incompletos', 'Sem posição manual, arquétipo ou 3 playstyles cadastradas.', incompleteProfiles, playerRow)}
+      ${renderAlertList('Logins sem dados de partida', 'Contas criadas que ainda não apareceram nas partidas salvas deste clube.', usersWithoutPlayerData, userRow)}
+    </div>
   `;
 }
+
+
 async function loadOwnerUsers() {
   if (!isOwnerAdmin()) return [];
   try {
@@ -9889,117 +9786,91 @@ function escapeHtml(value) {
   return String(value ?? '').replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
 }
 
+
 function findPlayerFallbackSource(name) {
-  const pools = [];
-  try { pools.push(...(typeof scopedPlayers === 'function' ? scopedPlayers() : [])); } catch (_) {}
-  try { pools.push(...(typeof playersFromMemberTotals === 'function' ? playersFromMemberTotals() : [])); } catch (_) {}
-  if (DATA && Array.isArray(DATA.players)) pools.push(...DATA.players);
-  if (DATA && Array.isArray(DATA.matches)) {
-    DATA.matches.forEach(m => (m.players_ratings || []).forEach(pr => pools.push({
-      name: pr.name,
-      position: pr.pos,
-      rating: pr.rating,
-      sofi_rating: pr.sofi_rating,
-      goals: pr.goals,
-      assists: pr.assists,
-      shots: pr.shots,
-      pass_pct: pr.pass_pct,
-      passes_made: pr.passes_made,
-      tackle_pct: pr.tackle_pct,
-      tackles_made: pr.tackles_made,
-      mom: pr.mom,
-      saves: pr.saves,
-      clean_sheet: pr.clean_sheet,
-      games: 1
-    })));
-  }
-  return pools.find(p => namesMatchLoose(p && p.name, name)) || null;
+  const needle = normIdentity(name);
+  const candidates = [];
+  try { candidates.push(...(typeof scopedPlayers === 'function' ? scopedPlayers() : [])); } catch(e) {}
+  try { candidates.push(...(DATA?.players || [])); } catch(e) {}
+  try { candidates.push(...computePlayersForMatches(DATA?.matches || [])); } catch(e) {}
+  return candidates.find(p => normIdentity(p.name) === needle || normIdentity(p.player_name) === needle) || null;
 }
 
-function renderPlayerFallbackHTML(p, errorMessage) {
-  const profile = (typeof profileForPlayer === 'function') ? (profileForPlayer(p.name || '') || {}) : {};
-  const playstyles = Array.isArray(profile.playstyles) ? profile.playstyles.filter(Boolean) : [];
-  const chips = playstyles.length
-    ? `<div style="margin:10px 0;display:flex;gap:6px;flex-wrap:wrap;justify-content:center;">${playstyles.map(x => `<span class="tag liga">${typeof playstyleIcon === 'function' ? playstyleIcon(x) : ''} ${escapeHtml(x)}</span>`).join('')}</div>`
-    : '';
-  const stat = (label, value) => `<div class="detail-stat"><div class="v">${escapeHtml(value ?? 0)}</div><div class="l">${escapeHtml(label)}</div></div>`;
-  return `
-    <div class="player-detail">
-      <div style="border:1px solid rgba(255,170,0,.35);background:rgba(255,170,0,.08);color:#ffaa00;border-radius:10px;padding:12px 14px;margin-bottom:16px;font-weight:700;">
-        Resumo consolidado do jogador. ${escapeHtml(errorMessage || '')}
-      </div>
-      <h2>${escapeHtml(p.name)} <span class="pos-tag">${escapeHtml(profile.manual_position || p.position || '-')}</span></h2>
-      <div style="color:var(--text-2);font-size:13px;">${escapeHtml(p.games || 0)} jogos no clube/filtro · nota ${escapeHtml(p.rating || p.sofi_rating || 0)}</div>
-      ${chips}
-      <div class="detail-grid">
-        ${stat('Média EA', p.rating || 0)}
-        ${stat('Média Sofi', p.sofi_rating || p.rating || 0)}
-        ${stat('Gols', p.goals || 0)}
-        ${stat('Assist', p.assists || 0)}
-        ${stat('G+A', (Number(p.goals || 0) + Number(p.assists || 0)))}
-        ${stat('Chutes', p.shots || 0)}
-        ${stat('Pass%', p.pass_pct != null ? `${p.pass_pct}%` : 'N/D')}
-        ${stat('Passes', p.passes_made || 0)}
-        ${stat('Des%', p.tackle_pct != null ? `${p.tackle_pct}%` : 'N/D')}
-        ${stat('Desarmes', p.tackles_made || 0)}
-        ${stat('Defesas', p.saves || 0)}
-        ${stat('MOMs', p.mom || 0)}
-      </div>
-    </div>`;
-}
 async function showPlayerDetail(name) {
   const mc = document.getElementById('modalContent');
-  mc.innerHTML = '<div class="loading"><div class="spinner"></div> Carregando análise...</div>';
+  mc.innerHTML = '<div class="loading"><div class="spinner"></div> Carregando histórico...</div>';
   document.getElementById('modal').classList.add('active');
-
-  const currentFilters = {
-    match_type: CURRENT_MATCH_TYPE || 'todos',
-    match_status: CURRENT_MATCH_STATUS || 'todas',
-    period: CURRENT_PERIOD || 'todos'
-  };
-  const immediateFallbackPlayer = findPlayerFallbackSource(name);
+  const fallbackPlayer = findPlayerFallbackSource(name);
 
   try {
+    const params = new URLSearchParams();
+    params.set('period', CURRENT_PERIOD || 'todos');
+    params.set('match_type', CURRENT_MATCH_TYPE || 'todos');
+    params.set('validity', CURRENT_VALIDITY || 'todas');
+    const r = await authFetch('/api/player/' + encodeURIComponent(name) + '/analytics?' + params.toString());
+    const rawText = await r.text();
     let data = null;
-    let usedFallback = false;
-
-    try {
-      data = await requestPlayerAnalytics(name, currentFilters);
-    } catch (firstErr) {
-      const hasActiveFilter =
-        currentFilters.match_type !== 'todos' ||
-        currentFilters.match_status !== 'todas' ||
-        currentFilters.period !== 'todos';
-
-      if (!hasActiveFilter) throw firstErr;
-
-      data = await requestPlayerAnalytics(name, {
-        match_type: 'todos',
-        match_status: 'todas',
-        period: 'todos'
-      });
-      usedFallback = true;
+    try { data = rawText ? JSON.parse(rawText) : null; } catch(e) {}
+    if (!r.ok || !data || data.error) {
+      if (fallbackPlayer) {
+        mc.innerHTML = renderPlayerFallbackHTML(fallbackPlayer, (data && (data.detail || data.error)) || rawText || 'Histórico detalhado indisponível');
+        return;
+      }
+      throw new Error((data && (data.detail || data.error)) || rawText || 'Não encontrado ou sem dados suficientes');
     }
-
-    if ((!data || !Array.isArray(data.history) || data.history.length === 0) && immediateFallbackPlayer) {
-      mc.innerHTML = renderPlayerFallbackHTML(immediateFallbackPlayer, 'Sem histórico detalhado para este filtro. Exibindo os dados consolidados do card.');
-      return;
-    }
-
-    const notice = usedFallback
-      ? '<div style="border:1px solid rgba(255,170,0,.35);background:rgba(255,170,0,.08);color:#ffaa00;border-radius:8px;padding:10px 12px;margin-bottom:14px;font-weight:700;">Sem partidas para este jogador no filtro atual. Exibindo todo o histórico salvo do clube.</div>'
-      : '';
-
-    mc.innerHTML = notice + renderPlayerDetailHTML(data);
-    setTimeout(() => renderPlayerCharts(data), 80);
+    mc.innerHTML = renderPlayerDetailHTML(data);
   } catch (e) {
-    const fallbackPlayer = immediateFallbackPlayer || findPlayerFallbackSource(name);
     if (fallbackPlayer) {
-      mc.innerHTML = renderPlayerFallbackHTML(fallbackPlayer, e.message);
+      mc.innerHTML = renderPlayerFallbackHTML(fallbackPlayer, e.message || 'Histórico detalhado indisponível');
       return;
     }
-    mc.innerHTML = `<div style="color:var(--red);border:1px solid rgba(255,51,68,.35);border-radius:10px;padding:18px;">Erro: ${escapeHtml(e.message)}</div>`;
+    mc.innerHTML = `<div class="error-box">Erro: ${escapeHtml(e.message || 'Não encontrado ou sem dados suficientes')}</div>`;
   }
+}
+
+
+
+function renderPlayerFallbackHTML(p, reason) {
+  const name = p?.name || p?.player_name || 'Jogador';
+  const pos = p?.manual_position || p?.position || p?.pos || '-';
+  const games = Number(p?.games || p?.games_in_scope || p?.club_games || 0);
+  const rating = Number(p?.rating || p?.avg_rating || 0);
+  const sofi = Number(p?.sofi_rating || p?.avg_sofi || rating || 0);
+  const goals = Number(p?.goals || 0);
+  const assists = Number(p?.assists || 0);
+  const shots = Number(p?.shots || 0);
+  const passes = Number(p?.passes_made || p?.passes || 0);
+  const passPct = Number(p?.pass_pct || 0);
+  const tackles = Number(p?.tackles_made || p?.tackles || p?.desarmes || 0);
+  const tacklePct = Number(p?.tackle_pct || 0);
+  const saves = Number(p?.saves || p?.defesas || 0);
+  const moms = Number(p?.mom || p?.moms || 0);
+  const profiles = DATA?.player_profiles || {};
+  const prof = profiles[name] || profiles[normIdentity(name)] || {};
+  const styles = Array.isArray(prof.playstyles || p.playstyles) ? (prof.playstyles || p.playstyles).filter(Boolean) : [];
+  const styleHtml = styles.length ? `<div class="style-tags">${styles.slice(0,3).map(s => `<span class="style-tag">${escapeHtml(s)}</span>`).join('')}</div>` : '';
+  return `
+    <div class="player-detail">
+      <div class="warning-box">O histórico detalhado não abriu pela rota de análise, então carreguei os dados salvos do card para não deixar a tela quebrar. Detalhe técnico: ${escapeHtml(reason || 'indisponível')}</div>
+      <h2>${escapeHtml(name)} <span class="pos-tag">${escapeHtml(pos)}</span></h2>
+      <div style="color:var(--text-2);font-size:13px;">${games || '-'} jogos no clube/filtro · nota ${rating ? rating.toFixed(2).replace(/\.00$/, '') : '-'}</div>
+      ${styleHtml}
+      <div class="detail-grid">
+        <div class="detail-stat"><div class="v">${rating ? rating.toFixed(2).replace(/\.00$/, '') : '-'}</div><div class="l">Média EA</div></div>
+        <div class="detail-stat"><div class="v">${sofi ? sofi.toFixed(2).replace(/\.00$/, '') : '-'}</div><div class="l">Média Sofi</div></div>
+        <div class="detail-stat"><div class="v">${goals}</div><div class="l">Gols</div></div>
+        <div class="detail-stat"><div class="v">${assists}</div><div class="l">Assist</div></div>
+        <div class="detail-stat"><div class="v">${goals + assists}</div><div class="l">G+A</div></div>
+        <div class="detail-stat"><div class="v">${shots}</div><div class="l">Chutes</div></div>
+        <div class="detail-stat"><div class="v">${passPct ? passPct.toFixed(1).replace(/\.0$/, '') + '%' : '0%'}</div><div class="l">Pass%</div></div>
+        <div class="detail-stat"><div class="v">${passes}</div><div class="l">Passes</div></div>
+        <div class="detail-stat"><div class="v">${tacklePct ? tacklePct.toFixed(1).replace(/\.0$/, '') + '%' : '0%'}</div><div class="l">Des%</div></div>
+        <div class="detail-stat"><div class="v">${tackles}</div><div class="l">Desarmes</div></div>
+        <div class="detail-stat"><div class="v">${saves}</div><div class="l">Defesas</div></div>
+        <div class="detail-stat"><div class="v">${moms}</div><div class="l">MOMs</div></div>
+      </div>
+    </div>
+  `;
 }
 
 function renderPlayerDetailHTML(data) {
@@ -10043,12 +9914,9 @@ function renderPlayerDetailHTML(data) {
         <div class="analytics-card"><div class="v">${adv.analytic_score || 0}</div><div class="l">Final</div></div>
         <div class="analytics-card"><div class="v">${totals.goals || 0}</div><div class="l">Gols</div></div>
         <div class="analytics-card"><div class="v">${totals.assists || 0}</div><div class="l">Assist</div></div>
-        <div class="analytics-card"><div class="v">${totals.pre_assists || 0}</div><div class="l">Pré-A</div></div>
-        <div class="analytics-card"><div class="v">${totals.key_passes || 0}</div><div class="l">Passes-chave</div></div>
         <div class="analytics-card"><div class="v">${(totals.goals || 0) + (totals.assists || 0)}</div><div class="l">G+A</div></div>
         <div class="analytics-card"><div class="v">${avg.goals_per_game || 0}</div><div class="l">G/J</div></div>
         <div class="analytics-card"><div class="v">${avg.assists_per_game || 0}</div><div class="l">A/J</div></div>
-        <div class="analytics-card"><div class="v">${avg.pre_assists_per_game || 0}</div><div class="l">Pré/J</div></div>
         <div class="analytics-card"><div class="v">${fmtStat(totals.shots)}</div><div class="l">Chutes</div></div>
         <div class="analytics-card"><div class="v">${fmtStat(avg.shots_per_game)}</div><div class="l">Chu/J</div></div>
         <div class="analytics-card"><div class="v">${fmtStat(avg.passes_pct, "%")}</div><div class="l">Pass%</div></div>
@@ -10095,12 +9963,10 @@ function renderPlayerDetailHTML(data) {
       <div class="section-title" style="margin-top:18px;">${h.length} partidas detalhadas salvas &middot; ${filterLabel}</div>
       ${h.length === 0 ? '<div style="color:var(--text-2);padding:20px;text-align:center;">Nenhuma partida com participação registrada.</div>' : `
       <table class="history-table">
-        <thead><tr><th>Data</th><th>Tipo</th><th>Adversário</th><th>Resultado</th><th>Pos</th><th>Sofi</th><th>EA</th><th>G</th><th>A</th><th>Pré-A</th><th>Chave</th><th>Chu</th><th>Pass%</th><th>Des%</th><th>Des</th><th>Def</th><th>SG</th><th>Verm</th><th>MOM</th></tr></thead>
         <tbody>
           ${h.map(x => `<tr>
             <td>${x.date}</td><td><span class="tag ${x.match_type}">${x.match_type}</span></td><td>${x.opponent}</td>
             <td><span class="tag ${x.result.toLowerCase()}">${x.result} ${x.score}</span></td><td>${x.position}</td>
-            <td><span class="sofi">${x.sofi_rating}</span></td><td>${x.rating}</td><td>${x.goals}</td><td>${x.assists}</td><td>${x.pre_assists || 0}</td><td>${x.key_passes || 0}</td><td>${x.shots}</td><td>${x.pass_pct}%</td><td>${x.tackle_pct}%</td><td>${x.tackles_made || 0}</td><td>${x.saves || 0}</td><td>${x.clean_sheet || 0}</td><td>${x.red || 0}</td><td>${x.mom ? '*' : ''}</td>
           </tr>`).join('')}
         </tbody>
       </table>`}
