@@ -7119,14 +7119,19 @@ function normPlayerKey(value) {
   return String(value || '').trim().toLowerCase();
 }
 
+function normPlayerKeys(value) {
+  const key = normPlayerKey(value);
+  const compact = key.replace(/[^a-z0-9]/g, '');
+  return [key, compact].filter(Boolean);
+}
+
 function inactivePlayerKeys() {
   const keys = new Set();
   (CLUB_USER_STATUS || []).forEach(u => {
     const active = !!u.is_active && String(u.status || 'ativo').trim().toLowerCase() === 'ativo';
     if (active) return;
     [u.usuario, u.nome].forEach(v => {
-      const k = normPlayerKey(v);
-      if (k) keys.add(k);
+      normPlayerKeys(v).forEach(k => keys.add(k));
     });
   });
   return keys;
@@ -7135,7 +7140,7 @@ function inactivePlayerKeys() {
 function filterActivePlayers(players) {
   const inactive = inactivePlayerKeys();
   if (!inactive.size) return players || [];
-  return (players || []).filter(p => !inactive.has(normPlayerKey(p.name)));
+  return (players || []).filter(p => !normPlayerKeys(p.name).some(k => inactive.has(k)));
 }
 
 function currentScopeLabel() {
@@ -8947,7 +8952,7 @@ function clubRosterForProfileAlerts() {
     const key = String(p.name).toLowerCase();
     if (!byName.has(key)) byName.set(key, p);
   });
-  return filterActivePlayers([...byName.values()].filter(p => p && p.name)).sort((a,b) => String(a.name).localeCompare(String(b.name)));
+  return [...byName.values()].filter(p => p && p.name).sort((a,b) => String(a.name).localeCompare(String(b.name)));
 }
 
 function profileMissingFields(profile) {
@@ -8958,7 +8963,16 @@ function profileMissingFields(profile) {
   return missing;
 }
 
+function clubUserForPlayer(name) {
+  const keys = new Set(normPlayerKeys(name));
+  if (!keys.size) return null;
+  return (CLUB_USER_STATUS || []).find(u => {
+    return normPlayerKeys(u.usuario).some(k => keys.has(k)) || normPlayerKeys(u.nome).some(k => keys.has(k));
+  }) || null;
+}
+
 async function refreshProfileAlerts() {
+  await loadClubUserStatus();
   await loadPlayerProfiles();
   if (DATA) DATA.player_profiles = {...PLAYER_PROFILES};
   renderTab();
@@ -8988,19 +9002,23 @@ function renderAlertasCadastro() {
   const semCadastro = [];
   const incompletos = [];
   roster.forEach(p => {
+    const user = clubUserForPlayer(p.name);
     const profile = profileForPlayer(p.name);
-    const hasAny = !!(profile && (profile.manual_position || profile.archetype || (profile.playstyles || []).length || profile.notes));
     const missing = profileMissingFields(profile);
     const games = Number(p.games || p.club_games || p.history_apps || 0);
-    if (!hasAny) semCadastro.push({name:p.name, games, meta:'Sem registro em player_profiles para este clube'});
-    else if (missing.length) incompletos.push({name:p.name, games, meta:'Falta: ' + missing.join(', ')});
+    if (!user) {
+      semCadastro.push({name:p.name, games, meta:'Sem login em app_users para este clube'});
+    } else if (missing.length) {
+      const status = (!!user.is_active && String(user.status || 'ativo').toLowerCase() === 'ativo') ? 'ativo' : (user.status || 'inativo');
+      incompletos.push({name:p.name, games, meta:`Login ${status}; falta: ${missing.join(', ')}`});
+    }
   });
   semCadastro.sort((a,b) => Number(b.games || 0) - Number(a.games || 0) || String(a.name).localeCompare(String(b.name)));
   incompletos.sort((a,b) => Number(b.games || 0) - Number(a.games || 0) || String(a.name).localeCompare(String(b.name)));
   return `
     <div class="section-title">Alertas de Cadastro</div>
     <div style="color:var(--text-2);font-size:12px;line-height:1.5;margin-bottom:12px;">
-      Controle de perfis salvo no banco do clube. O Time Ideal usa apenas jogador com posi&ccedil;&atilde;o/build, arqu&eacute;tipo e PlayStyles preenchidos.
+      Cadastro aqui significa login em app_users. Perfil incompleto significa que o login existe, mas ainda falta posi&ccedil;&atilde;o/build, arqu&eacute;tipo ou PlayStyles.
     </div>
     <div style="display:flex;justify-content:flex-end;margin-bottom:12px;">
       <button class="btn-mini" style="padding:10px 14px;" onclick="refreshProfileAlerts()">Atualizar do banco</button>
