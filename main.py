@@ -2232,6 +2232,26 @@ def admin_list_users(current_user: dict = Depends(require_admin)):
         raise HTTPException(500, "Erro ao listar usuarios")
 
 
+@app.get("/api/club/users-status")
+def club_users_status(current_user: dict = Depends(get_current_user)):
+    sb = get_supabase()
+    if not sb:
+        return {"users": []}
+    club_id = str(current_user.get("club_id") or "")
+    try:
+        resp = (
+            sb.table("app_users")
+            .select("id,nome,usuario,cargo,status,is_active")
+            .eq("club_id", club_id)
+            .execute()
+        )
+        rows = getattr(resp, "data", None) or []
+        return {"users": [_public_user(r) for r in rows]}
+    except Exception as e:
+        print(f"[AUTH] Erro listando status de usuarios do clube: {type(e).__name__}: {e}")
+        return {"users": []}
+
+
 @app.put("/api/admin/users/{user_id}/status")
 def admin_update_user_status(user_id: str, payload: AdminUserStatusPayload, current_user: dict = Depends(require_admin)):
     sb = get_supabase()
@@ -6604,6 +6624,7 @@ let COMPARE_B = null;
 let AGENDA = [];
 let OPPONENT_SCOUTS = [];
 let CLUB_USERS = [];
+let CLUB_USER_STATUS = [];
 let OWNER_USERS = [];
 let OWNER_CLUBS = [];
 let AGENDA_EDIT_ID = null;
@@ -7094,6 +7115,29 @@ function isFullPlayerScope() {
   return CURRENT_MATCH_TYPE === 'todos' && CURRENT_PERIOD === 'todos' && CURRENT_MATCH_STATUS === 'todas';
 }
 
+function normPlayerKey(value) {
+  return String(value || '').trim().toLowerCase();
+}
+
+function inactivePlayerKeys() {
+  const keys = new Set();
+  (CLUB_USER_STATUS || []).forEach(u => {
+    const active = !!u.is_active && String(u.status || 'ativo').trim().toLowerCase() === 'ativo';
+    if (active) return;
+    [u.usuario, u.nome].forEach(v => {
+      const k = normPlayerKey(v);
+      if (k) keys.add(k);
+    });
+  });
+  return keys;
+}
+
+function filterActivePlayers(players) {
+  const inactive = inactivePlayerKeys();
+  if (!inactive.size) return players || [];
+  return (players || []).filter(p => !inactive.has(normPlayerKey(p.name)));
+}
+
 function currentScopeLabel() {
   const periodLabel = {
     todos: 'todo o historico salvo',
@@ -7107,8 +7151,8 @@ function currentScopeLabel() {
 }
 
 function scopedPlayers() {
-  if (isFullPlayerScope()) return playersFromMemberTotals();
-  return computePlayersForMatches(playerStatMatches());
+  const players = isFullPlayerScope() ? playersFromMemberTotals() : computePlayersForMatches(playerStatMatches());
+  return filterActivePlayers(players);
 }
 
 function emptyPlayerForCurrentFilter(base) {
@@ -7263,6 +7307,18 @@ async function loadPlayerProfiles() {
   saveLocalPlayerProfiles();
 }
 
+async function loadClubUserStatus() {
+  try {
+    const r = await authFetch('/api/club/users-status');
+    const data = await r.json().catch(() => ({}));
+    CLUB_USER_STATUS = (r.ok && Array.isArray(data.users)) ? data.users : [];
+  } catch (e) {
+    CLUB_USER_STATUS = [];
+    console.warn('Status de usuarios indisponivel; mantendo todos os jogadores visiveis', e);
+  }
+  return CLUB_USER_STATUS;
+}
+
 async function savePlayerProfile(name, manualPosition, archetype, notes, playstyles=[]) {
   playstyles = (playstyles || []).filter(Boolean).slice(0, 3);
   if (manualPosition || archetype || notes || playstyles.length) {
@@ -7295,6 +7351,7 @@ async function loadData() {
     if (!r.ok) throw new Error('Falha ao carregar dashboard');
     DATA = await r.json();
     protectDataMatchHistory();
+    await loadClubUserStatus();
     await loadPlayerProfiles();
     await loadAgenda();
     render();
@@ -7440,7 +7497,7 @@ function render() {
         ${renderClubShield()}
         <div style="flex:1;min-width:0;">
           <div class="club-name">${DATA.club.name}</div>
-          <div class="club-meta">${computePlayersForMatches(DATA.matches || []).length} jogadores com partidas no clube &middot; ${DATA.matches?.length || 0} partidas</div>
+          <div class="club-meta">${filterActivePlayers(computePlayersForMatches(DATA.matches || [])).length} jogadores ativos com partidas no clube &middot; ${DATA.matches?.length || 0} partidas</div>
         </div>
       </div>
     </div>
@@ -7460,6 +7517,7 @@ function render() {
       ${isOwnerAdmin() ? `<div class="tab ${CURRENT_TAB==='owner-clubs'?'active':''}" onclick="setTab('owner-clubs')">CLUBES</div>` : ''}
       <div class="tab ${CURRENT_TAB==='playstyles'?'active':''}" onclick="setTab('playstyles')">ESTILOS</div>
       <div class="tab ${CURRENT_TAB==='adversarios'?'active':''}" onclick="setTab('adversarios')">ADVERS&Aacute;RIOS</div>
+      <div class="tab ${CURRENT_TAB==='ajuda'?'active':''}" onclick="setTab('ajuda')">AJUDA</div>
       <div class="tab ${CURRENT_TAB==='agenda'?'active':''}" onclick="setTab('agenda')">AGENDA</div>
     </div>
     
@@ -7541,6 +7599,7 @@ function renderTab() {
   else if (CURRENT_TAB === 'owner-clubs' && isOwnerAdmin()) { tc.innerHTML = '<div class="loading"><div class="spinner"></div> Carregando clubes...</div>'; loadOwnerClubs().then(() => { const t=document.getElementById('tabContent'); if (t && CURRENT_TAB === 'owner-clubs') t.innerHTML = renderOwnerClubsAdmin(); }).catch(e => { const t=document.getElementById('tabContent'); if (t) t.innerHTML = `<div class="empty-state" style="padding:40px 20px;"><div class="empty-text">Erro ao carregar clubes: ${escapeAttr(e.message || e)}</div></div>`; }); }
   else if (CURRENT_TAB === 'playstyles') tc.innerHTML = renderPlaystyles();
   else if (CURRENT_TAB === 'adversarios') tc.innerHTML = renderAdversarios();
+  else if (CURRENT_TAB === 'ajuda') tc.innerHTML = renderAjuda();
   else if (['jogadores','comparar','confrontos','cadastro','alertas','config','owner-users','owner-clubs','adversarios'].includes(CURRENT_TAB) && (!isAdmin() || (['owner-users','owner-clubs'].includes(CURRENT_TAB) && !isOwnerAdmin()))) { CURRENT_TAB = 'visao'; tc.innerHTML = renderVisao(); }
   else if (CURRENT_TAB === 'agenda') tc.innerHTML = renderAgenda();
 }
@@ -8058,7 +8117,7 @@ function renderJogadores() {
 
 function renderRankings() {
   const matches = filteredMatches();
-  const players = eligibleRankingPlayers(computePlayersForMatches(matches));
+  const players = eligibleRankingPlayers(filterActivePlayers(computePlayersForMatches(matches)));
   const minGames = effectiveMinGamesForScope();
   const typeLabel = {
     todos: 'todas as partidas',
@@ -8637,6 +8696,7 @@ async function loadClubUsers() {
     const data = await r.json().catch(() => ({}));
     if (!r.ok) throw new Error(data.detail || 'Erro ao carregar usuários');
     CLUB_USERS = data.users || [];
+    CLUB_USER_STATUS = CLUB_USERS;
   } catch (e) {
     console.warn('Erro ao carregar usuarios do clube', e);
     CLUB_USERS = [];
@@ -8887,7 +8947,7 @@ function clubRosterForProfileAlerts() {
     const key = String(p.name).toLowerCase();
     if (!byName.has(key)) byName.set(key, p);
   });
-  return [...byName.values()].filter(p => p && p.name).sort((a,b) => String(a.name).localeCompare(String(b.name)));
+  return filterActivePlayers([...byName.values()].filter(p => p && p.name)).sort((a,b) => String(a.name).localeCompare(String(b.name)));
 }
 
 function profileMissingFields(profile) {
@@ -8948,6 +9008,67 @@ function renderAlertasCadastro() {
     <div class="rankings-grid">
       ${renderAlertList('Jogadores sem cadastro', semCadastro, 'top3')}
       ${renderAlertList('Cadastros incompletos', incompletos, 'top2')}
+    </div>
+  `;
+}
+
+function helpCard(title, items) {
+  return `
+    <div class="ranking-card">
+      <div class="ranking-title">${title}</div>
+      <div style="color:var(--text-2);font-size:13px;line-height:1.65;">
+        <ul style="margin:0;padding-left:18px;">${items.map(x => `<li>${x}</li>`).join('')}</ul>
+      </div>
+    </div>`;
+}
+
+function renderAjuda() {
+  const common = [
+    helpCard('Filtros e recortes', [
+      'Per&iacute;odo, tipo de partida e status valem para Vis&atilde;o, Meu Scout, Jogadores, Rankings, Comparar e Time Ideal.',
+      'Quando o filtro for menor que 10 jogos, o m&iacute;nimo de jogos acompanha o tamanho do filtro. Exemplo: &Uacute;ltimos 7 exige 7 jogos.',
+      'V&aacute;lidas remove partidas detectadas como quitadas; Quitadas mostra apenas essas partidas; Todas mistura os dois grupos.',
+    ]),
+    helpCard('Rankings e compara&ccedil;&atilde;o', [
+      'Rankings usam somente jogadores ativos no clube.',
+      'Jogador com login bloqueado, pendente ou inativo sai dos rankings at&eacute; ser ativado novamente.',
+      'Nota m&eacute;dia, gols, assist&ecirc;ncias, passes, divididas e MOM respeitam o filtro selecionado.',
+    ]),
+    helpCard('Confrontos', [
+      'A tela de confronto foi pensada para print no celular.',
+      'Ela mostra placar, resultado, data, hora, tipo, ID do jogo, MOM e notas dos jogadores do time.',
+      'A lista usa as notas salvas daquela partida, sem misturar outros jogos.',
+    ]),
+  ];
+  const adminCards = [
+    helpCard('Vis&atilde;o Admin', [
+      'Use Cadastro para preencher posi&ccedil;&atilde;o/build, arqu&eacute;tipo e PlayStyles.',
+      'Use Alertas para ver quem est&aacute; sem cadastro ou com cadastro incompleto, ordenado por quem mais joga.',
+      'Ativar/desativar usu&aacute;rios controla se o jogador entra ou sai dos rankings e listas principais.',
+      'Sincronize ap&oacute;s jogos para atualizar hist&oacute;rico, rankings e confronto.',
+    ]),
+    helpCard('Time Ideal', [
+      'O Time Ideal usa apenas jogadores ativos, com cadastro completo e jogos suficientes no filtro.',
+      'Cadastro completo significa posi&ccedil;&atilde;o/build, arqu&eacute;tipo e ao menos um PlayStyle.',
+      'Modo manual tamb&eacute;m respeita jogadores ativos e cadastro completo.',
+    ]),
+  ];
+  const playerCards = [
+    helpCard('Vis&atilde;o Jogador', [
+      'Meu Scout abre automaticamente seu jogador pelo usu&aacute;rio/ID FIFA cadastrado.',
+      'Seu resumo respeita os filtros selecionados antes de abrir a tela.',
+      'Preencha arqu&eacute;tipo e PlayStyles no Meu Scout quando liberado, para ajudar o treinador e o Time Ideal.',
+      'Se seus dados n&atilde;o aparecerem, confira com o admin se seu usu&aacute;rio est&aacute; ativo e com nome igual ao Pro Clubs.',
+    ]),
+  ];
+  return `
+    <div class="section-title">Ajuda</div>
+    <div style="color:var(--text-2);font-size:12px;line-height:1.5;margin-bottom:14px;">
+      Guia r&aacute;pido para entender como o Scout calcula as telas e como usar os filtros sem misturar contexto.
+    </div>
+    <div class="rankings-grid">
+      ${common.join('')}
+      ${(isAdmin() ? adminCards : playerCards).join('')}
     </div>
   `;
 }
