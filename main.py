@@ -3447,7 +3447,63 @@ def build_estimated_heatmap(player, history):
     }
 
 
-def build_player_analytics(player_name, cache, match_type="todos"):
+def _is_quit_match_py(match: dict) -> bool:
+    if str((match or {}).get("match_type") or "").lower() != "amistoso":
+        return False
+    players = (match or {}).get("players_ratings") or []
+    rated = []
+    for p in players:
+        try:
+            v = float((p or {}).get("rating") or 0)
+        except Exception:
+            v = 0
+        if v > 0:
+            rated.append(v)
+    if len(rated) < 3:
+        return False
+    avg = sum(rated) / len(rated)
+    below_six = len([v for v in rated if v < 6])
+    low_or_flat = len([v for v in rated if v <= 6.1])
+    mostly_low = (below_six / len(rated)) >= 0.55 or (low_or_flat / len(rated)) >= 0.75
+    almost_all_flat = avg <= 6.15 and low_or_flat >= max(3, int(len(rated) * 0.7 + 0.999))
+    low_activity = sum(
+        _safe_int((p or {}).get("goals")) + _safe_int((p or {}).get("assists")) +
+        _safe_int((p or {}).get("shots")) + _safe_int((p or {}).get("tackles_made")) +
+        _safe_int((p or {}).get("saves"))
+        for p in players
+    ) <= max(2, len(rated) * 0.35)
+    return mostly_low or almost_all_flat or (avg <= 6.05 and low_activity)
+
+
+def _filter_matches_for_scope(matches: list, match_type: str = "todos", period: str = "todos", match_status: str = "todas") -> list:
+    wanted_type = (match_type or "todos").lower()
+    wanted_period = (period or "todos").lower()
+    wanted_status = (match_status or "todas").lower()
+    out = sorted([m for m in (matches or []) if isinstance(m, dict)], key=lambda m: _safe_int(m.get("timestamp")), reverse=True)
+    if wanted_type != "todos":
+        out = [m for m in out if str(m.get("match_type") or "").lower() == wanted_type]
+    if wanted_status == "quitadas":
+        out = [m for m in out if _is_quit_match_py(m)]
+    elif wanted_status != "todas":
+        out = [m for m in out if not _is_quit_match_py(m)]
+    if wanted_period == "todos":
+        return out
+    if wanted_period.startswith("ult"):
+        try:
+            return out[:max(0, int(wanted_period.replace("ult", "") or 0))]
+        except Exception:
+            return out
+    now = int(time.time())
+    if wanted_period == "semana":
+        cutoff = now - 7 * 86400
+        return [m for m in out if _safe_int(m.get("timestamp")) >= cutoff]
+    if wanted_period == "mes":
+        cutoff = now - 30 * 86400
+        return [m for m in out if _safe_int(m.get("timestamp")) >= cutoff]
+    return out
+
+
+def build_player_analytics(player_name, cache, match_type="todos", period="todos", match_status="todas"):
     """Gera pacote analitico profissional do jogador a partir do cache local."""
     if not cache:
         raise HTTPException(404, "Sincronize um clube primeiro")
@@ -3456,11 +3512,11 @@ def build_player_analytics(player_name, cache, match_type="todos"):
     player = next((p for p in players if p.get("name", "").lower() == pname), None)
 
     wanted_match_type = (match_type or "todos").lower()
+    wanted_period = (period or "todos").lower()
+    wanted_status = (match_status or "todas").lower()
+    scoped_matches = _filter_matches_for_scope(cache.get("matches", []), wanted_match_type, wanted_period, wanted_status)
     history = []
-    for m in cache.get("matches", []):
-        current_match_type = str(m.get("match_type", "desconhecido") or "desconhecido").lower()
-        if wanted_match_type != "todos" and current_match_type != wanted_match_type:
-            continue
+    for m in scoped_matches:
         for pr in (m.get("players_ratings") or []):
             if pr.get("name", "").lower() == pname:
                 history.append({
@@ -3497,10 +3553,7 @@ def build_player_analytics(player_name, cache, match_type="todos"):
     # Todas as metricas de elenco/ranking abaixo vêm SOMENTE das partidas salvas do clube atual.
     # Nao usa games/goals globais de members/career/stats, porque esses numeros podem incluir outros clubes.
     club_player_rows = {}
-    for m in cache.get("matches", []):
-        current_match_type = str(m.get("match_type", "desconhecido") or "desconhecido").lower()
-        if wanted_match_type != "todos" and current_match_type != wanted_match_type:
-            continue
+    for m in scoped_matches:
         for pr in (m.get("players_ratings") or []):
             nm = pr.get("name") or "Unknown"
             row = club_player_rows.setdefault(nm, {
@@ -3598,7 +3651,7 @@ def build_player_analytics(player_name, cache, match_type="todos"):
     analytics = {
         "player": player,
         "games_with_history": games,
-        "scope": {"club_id": (cache.get("club") or {}).get("id"), "match_type": wanted_match_type, "label": "clube atual"},
+        "scope": {"club_id": (cache.get("club") or {}).get("id"), "match_type": wanted_match_type, "period": wanted_period, "status": wanted_status, "label": "clube atual"},
         "history": history,
         "series": list(reversed(history)),
         "averages": {
@@ -3622,7 +3675,7 @@ def build_player_analytics(player_name, cache, match_type="todos"):
     }
     detail_games = games
     club_total_games = int(float(player.get("ea_global_games") or player.get("games") or detail_games or 0))
-    use_member_totals = wanted_match_type == "todos" and club_total_games > detail_games
+    use_member_totals = wanted_match_type == "todos" and wanted_period == "todos" and wanted_status == "todas" and club_total_games > detail_games
     if use_member_totals:
         member = player.get("member_stats") or player
         has_shot_stats = bool(member.get("has_shot_stats"))
@@ -3726,13 +3779,13 @@ Priorize treinos e chamadas que maximizem os pontos fortes acima. Em jogos grand
 """
 
 @app.post("/api/ai/player")
-async def ai_player(player_name: str, match_type: str = Query("todos")):
+async def ai_player(player_name: str, match_type: str = Query("todos"), period: str = Query("todos"), match_status: str = Query("todas")):
     """Analise de jogador por IA usando o pacote analitico completo."""
     cache = load_cache()
     if not cache or not cache.get("players"):
         raise HTTPException(404, "Sincronize um clube primeiro")
 
-    analytics = build_player_analytics(player_name, cache, match_type)
+    analytics = build_player_analytics(player_name, cache, match_type, period, match_status)
     player = analytics["player"]
 
     if not OPENAI_API_KEY:
@@ -3850,10 +3903,10 @@ A formação **{ideal['formation']}** foi escolhida com base no elenco disponív
 # ============================================================
 
 @app.get("/api/player/{player_name}/analytics")
-def get_player_analytics(player_name: str, match_type: str = Query("todos")):
+def get_player_analytics(player_name: str, match_type: str = Query("todos"), period: str = Query("todos"), match_status: str = Query("todas")):
     """Retorna analytics profissional completo do jogador."""
     cache = load_cache()
-    return build_player_analytics(player_name, cache, match_type)
+    return build_player_analytics(player_name, cache, match_type, period, match_status)
 
 
 @app.get("/api/player/{player_name}")
@@ -5285,7 +5338,7 @@ body {
 .modal-content strong { color: var(--green); }
 .modal-content ul { padding-left: 20px; margin-bottom: 10px; }
 .modal-content li { color: var(--text-2); margin-bottom: 4px; }
-.match-report { background:linear-gradient(180deg, rgba(0,255,115,.08), rgba(0,0,0,.2)); border:1px solid var(--green-dim); border-radius:12px; padding:14px; color:var(--text); }
+.match-report { background:linear-gradient(180deg, rgba(0,255,115,.08), rgba(0,0,0,.2)); border:1px solid var(--green-dim); border-radius:12px; padding:16px; color:var(--text); }
 .match-report-head { display:grid; grid-template-columns:1fr auto 1fr; align-items:center; gap:10px; }
 .match-report .team-name { font-size:15px; font-weight:900; line-height:1.1; overflow-wrap:anywhere; text-transform:uppercase; }
 .match-report .team-name.right { text-align:right; }
@@ -5295,8 +5348,9 @@ body {
 .match-report .result.v { color:var(--green); }
 .match-report .result.e { color:var(--yellow); }
 .match-report .result.d { color:var(--red); }
-.match-report-meta { display:grid; grid-template-columns:repeat(5, minmax(0,1fr)); gap:6px; margin:10px 0 8px; }
+.match-report-meta { display:grid; grid-template-columns:repeat(4, minmax(0,1fr)); gap:6px; margin:10px 0 8px; }
 .match-report-meta span { border:1px solid var(--border); border-radius:7px; padding:6px 4px; text-align:center; font-size:10px; font-weight:800; color:var(--text-2); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.match-report-meta .id { grid-column: span 2; }
 .match-report-sub { color:var(--text-2); font-size:11px; text-align:center; margin:4px 0 10px; overflow-wrap:anywhere; }
 .match-report-players { display:grid; grid-template-columns:1fr; gap:4px; }
 .report-player { display:grid; grid-template-columns:24px minmax(0,1fr) 36px 44px; gap:6px; align-items:center; min-height:25px; padding:4px 6px; border:1px solid rgba(255,255,255,.08); border-radius:7px; background:rgba(0,0,0,.24); }
@@ -5327,22 +5381,23 @@ body {
   .mp-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:6px; font-size:11px; color:var(--text-2); }
   .mp-grid span { background:rgba(0,0,0,.25); border:1px solid rgba(255,255,255,.06); border-radius:6px; padding:6px; text-align:center; }
   .mp-grid b { display:block; color:var(--green); font-size:13px; margin-top:2px; }
-  .modal-box:has(.match-report) { padding:8px; max-height:none; }
+  .modal-box:has(.match-report) { width:calc(100vw - 10px); max-width:calc(100vw - 10px); padding:8px; max-height:none; }
   .modal-content:has(.match-report) { margin-top:4px; line-height:1.2; }
-  .match-report { padding:8px; border-radius:9px; }
-  .match-report-head { gap:6px; grid-template-columns:minmax(0,1fr) 76px minmax(0,1fr); }
-  .match-report .team-name { font-size:11px; }
-  .match-report .score-box { min-width:0; padding:6px 4px; border-radius:8px; }
-  .match-report .score { font-size:23px; }
-  .match-report .result { font-size:8px; margin-top:3px; }
-  .match-report-meta { grid-template-columns:repeat(5, minmax(0,1fr)); gap:3px; margin:7px 0 6px; }
-  .match-report-meta span { font-size:8px; padding:4px 2px; border-radius:5px; }
-  .match-report-sub { font-size:9px; margin:3px 0 6px; }
-  .match-report-players { gap:3px; }
-  .report-player { grid-template-columns:18px minmax(0,1fr) 28px 34px; gap:4px; min-height:20px; padding:3px 5px; border-radius:5px; }
-  .report-player .n, .report-player .pos { font-size:8px; }
-  .report-player .name { font-size:10px; }
-  .report-player .grade { font-size:11px; }
+  .match-report { padding:13px; border-radius:11px; min-height:calc(100dvh - 230px); display:flex; flex-direction:column; }
+  .match-report-head { gap:8px; grid-template-columns:minmax(0,1fr) 92px minmax(0,1fr); }
+  .match-report .team-name { font-size:13px; }
+  .match-report .score-box { min-width:0; padding:8px 5px; border-radius:9px; }
+  .match-report .score { font-size:30px; }
+  .match-report .result { font-size:9px; margin-top:4px; }
+  .match-report-meta { grid-template-columns:repeat(3, minmax(0,1fr)); gap:5px; margin:10px 0 8px; }
+  .match-report-meta span { font-size:10px; padding:6px 3px; border-radius:6px; }
+  .match-report-meta .id { grid-column:1/-1; white-space:normal; overflow-wrap:anywhere; text-overflow:clip; }
+  .match-report-sub { font-size:11px; margin:4px 0 9px; }
+  .match-report-players { gap:5px; flex:1; }
+  .report-player { grid-template-columns:22px minmax(0,1fr) 42px 44px; gap:6px; min-height:31px; padding:5px 7px; border-radius:6px; }
+  .report-player .n, .report-player .pos { font-size:10px; }
+  .report-player .name { font-size:12px; }
+  .report-player .grade { font-size:14px; }
 }
 /* SYNC PROGRESS */
 .sync-progress {
@@ -6612,7 +6667,7 @@ function renderAuth(mode = 'login') {
   if (!c) return;
   const isRegister = mode === 'register';
   const isReset = mode === 'reset';
-  if (!isAdmin() && ['jogadores','comparar','confrontos','cadastro','config','owner-users','owner-clubs','adversarios'].includes(CURRENT_TAB)) CURRENT_TAB = 'visao';
+  if (!isAdmin() && ['jogadores','comparar','confrontos','cadastro','alertas','config','owner-users','owner-clubs','adversarios'].includes(CURRENT_TAB)) CURRENT_TAB = 'visao';
   const title = isRegister ? 'Criar Conta' : isReset ? 'Redefinir Acesso' : 'Entrar no ClubScout Pro';
   const help = isRegister
     ? 'Crie sua conta como jogador. O admin do clube libera ou bloqueia seu login depois.'
@@ -6895,7 +6950,7 @@ function setPeriod(p, ev) {
   if (ev && ev.target) ev.target.classList.add('active');
   if (!isAdmin()) {
     document.querySelectorAll('.tab').forEach(el => {
-      if (['JOGADORES','COMPARAR','CONFRONTOS','CADASTRO','CONFIG','USUÁRIOS','USUARIOS','ADVERSÁRIOS','ADVERSARIOS','ADVERS&Aacute;RIOS'].includes((el.textContent || '').trim())) el.remove();
+      if (['JOGADORES','COMPARAR','CONFRONTOS','CADASTRO','ALERTAS','CONFIG','USUÁRIOS','USUARIOS','ADVERSÁRIOS','ADVERSARIOS','ADVERS&Aacute;RIOS'].includes((el.textContent || '').trim())) el.remove();
     });
   }
   render();
@@ -6908,7 +6963,7 @@ function setMatchType(t, ev) {
   if (ev && ev.target) ev.target.classList.add('active');
   if (!isAdmin()) {
     document.querySelectorAll('.tab').forEach(el => {
-      if (['JOGADORES','COMPARAR','CONFRONTOS','CADASTRO','CONFIG','USUÁRIOS','USUARIOS','ADVERSÁRIOS','ADVERSARIOS','ADVERS&Aacute;RIOS'].includes((el.textContent || '').trim())) el.remove();
+      if (['JOGADORES','COMPARAR','CONFRONTOS','CADASTRO','ALERTAS','CONFIG','USUÁRIOS','USUARIOS','ADVERSÁRIOS','ADVERSARIOS','ADVERS&Aacute;RIOS'].includes((el.textContent || '').trim())) el.remove();
     });
   }
   renderTab();
@@ -7367,7 +7422,7 @@ function render() {
   const c = document.getElementById('content');
   
   if (!DATA || !DATA.club) {
-    if (!isAdmin() && ['jogadores','comparar','confrontos','cadastro','config','owner-users','owner-clubs','adversarios'].includes(CURRENT_TAB)) CURRENT_TAB = 'visao';
+    if (!isAdmin() && ['jogadores','comparar','confrontos','cadastro','alertas','config','owner-users','owner-clubs','adversarios'].includes(CURRENT_TAB)) CURRENT_TAB = 'visao';
   c.innerHTML = `
       <div class="empty-state">
         <div class="empty-icon">⚽</div>
@@ -7378,7 +7433,7 @@ function render() {
     return;
   }
   
-  if (!isAdmin() && ['jogadores','comparar','confrontos','cadastro','config','owner-users','owner-clubs','adversarios'].includes(CURRENT_TAB)) CURRENT_TAB = 'visao';
+  if (!isAdmin() && ['jogadores','comparar','confrontos','cadastro','alertas','config','owner-users','owner-clubs','adversarios'].includes(CURRENT_TAB)) CURRENT_TAB = 'visao';
   c.innerHTML = `
     <div class="club-card">
       <div class="club-info">
@@ -7399,6 +7454,7 @@ function render() {
       <div class="tab ${CURRENT_TAB==='confrontos'?'active':''}" onclick="setTab('confrontos')">CONFRONTOS</div>
       <div class="tab ${CURRENT_TAB==='time-ideal'?'active':''}" onclick="setTab('time-ideal')">TIME IDEAL</div>
       ${isAdmin() ? `<div class="tab ${CURRENT_TAB==='cadastro'?'active':''}" onclick="setTab('cadastro')">CADASTRO</div>` : ''}
+      ${isAdmin() ? `<div class="tab ${CURRENT_TAB==='alertas'?'active':''}" onclick="setTab('alertas')">ALERTAS</div>` : ''}
       ${isAdmin() ? `<div class="tab ${CURRENT_TAB==='config'?'active':''}" onclick="setTab('config')">CONFIG</div>` : ''}
       ${isOwnerAdmin() ? `<div class="tab ${CURRENT_TAB==='owner-users'?'active':''}" onclick="setTab('owner-users')">USU&Aacute;RIOS</div>` : ''}
       ${isOwnerAdmin() ? `<div class="tab ${CURRENT_TAB==='owner-clubs'?'active':''}" onclick="setTab('owner-clubs')">CLUBES</div>` : ''}
@@ -7442,7 +7498,7 @@ function render() {
   
   if (!isAdmin()) {
     document.querySelectorAll('.tab').forEach(el => {
-      if (['JOGADORES','COMPARAR','CONFRONTOS','CADASTRO','CONFIG','USUÁRIOS','USUARIOS','ADVERSÁRIOS','ADVERSARIOS','ADVERS&Aacute;RIOS'].includes((el.textContent || '').trim())) el.remove();
+      if (['JOGADORES','COMPARAR','CONFRONTOS','CADASTRO','ALERTAS','CONFIG','USUÁRIOS','USUARIOS','ADVERSÁRIOS','ADVERSARIOS','ADVERS&Aacute;RIOS'].includes((el.textContent || '').trim())) el.remove();
     });
   }
   renderTab();
@@ -7461,7 +7517,7 @@ function setTab(t, ev) {
   if (target && target.classList) target.classList.add('active');
   if (!isAdmin()) {
     document.querySelectorAll('.tab').forEach(el => {
-      if (['JOGADORES','COMPARAR','CONFRONTOS','CADASTRO','CONFIG','USUÁRIOS','USUARIOS','ADVERSÁRIOS','ADVERSARIOS','ADVERS&Aacute;RIOS'].includes((el.textContent || '').trim())) el.remove();
+      if (['JOGADORES','COMPARAR','CONFRONTOS','CADASTRO','ALERTAS','CONFIG','USUÁRIOS','USUARIOS','ADVERSÁRIOS','ADVERSARIOS','ADVERS&Aacute;RIOS'].includes((el.textContent || '').trim())) el.remove();
     });
   }
   renderTab();
@@ -7479,12 +7535,13 @@ function renderTab() {
   else if (CURRENT_TAB === 'confrontos') tc.innerHTML = renderConfrontos();
   else if (CURRENT_TAB === 'time-ideal') tc.innerHTML = renderTimeIdeal();
   else if (CURRENT_TAB === 'cadastro' && isAdmin()) { tc.innerHTML = '<div class="loading"><div class="spinner"></div> Carregando cadastro...</div>'; loadClubUsers().then(() => { const t=document.getElementById('tabContent'); if (t && CURRENT_TAB === 'cadastro') t.innerHTML = renderCadastroJogadores(); }); }
+  else if (CURRENT_TAB === 'alertas' && isAdmin()) tc.innerHTML = renderAlertasCadastro();
   else if (CURRENT_TAB === 'config' && isAdmin()) tc.innerHTML = renderConfiguracoesClube();
   else if (CURRENT_TAB === 'owner-users' && isOwnerAdmin()) { tc.innerHTML = '<div class="loading"><div class="spinner"></div> Carregando usu&aacute;rios...</div>'; loadOwnerUsers().then(() => { const t=document.getElementById('tabContent'); if (t && CURRENT_TAB === 'owner-users') t.innerHTML = renderOwnerUsersAdmin(); }); }
   else if (CURRENT_TAB === 'owner-clubs' && isOwnerAdmin()) { tc.innerHTML = '<div class="loading"><div class="spinner"></div> Carregando clubes...</div>'; loadOwnerClubs().then(() => { const t=document.getElementById('tabContent'); if (t && CURRENT_TAB === 'owner-clubs') t.innerHTML = renderOwnerClubsAdmin(); }).catch(e => { const t=document.getElementById('tabContent'); if (t) t.innerHTML = `<div class="empty-state" style="padding:40px 20px;"><div class="empty-text">Erro ao carregar clubes: ${escapeAttr(e.message || e)}</div></div>`; }); }
   else if (CURRENT_TAB === 'playstyles') tc.innerHTML = renderPlaystyles();
   else if (CURRENT_TAB === 'adversarios') tc.innerHTML = renderAdversarios();
-  else if (['jogadores','comparar','confrontos','cadastro','config','owner-users','owner-clubs','adversarios'].includes(CURRENT_TAB) && (!isAdmin() || (['owner-users','owner-clubs'].includes(CURRENT_TAB) && !isOwnerAdmin()))) { CURRENT_TAB = 'visao'; tc.innerHTML = renderVisao(); }
+  else if (['jogadores','comparar','confrontos','cadastro','alertas','config','owner-users','owner-clubs','adversarios'].includes(CURRENT_TAB) && (!isAdmin() || (['owner-users','owner-clubs'].includes(CURRENT_TAB) && !isOwnerAdmin()))) { CURRENT_TAB = 'visao'; tc.innerHTML = renderVisao(); }
   else if (CURRENT_TAB === 'agenda') tc.innerHTML = renderAgenda();
 }
 
@@ -8002,6 +8059,7 @@ function renderJogadores() {
 function renderRankings() {
   const matches = filteredMatches();
   const players = eligibleRankingPlayers(computePlayersForMatches(matches));
+  const minGames = effectiveMinGamesForScope();
   const typeLabel = {
     todos: 'todas as partidas',
     liga: 'liga',
@@ -8017,7 +8075,7 @@ function renderRankings() {
   }[CURRENT_PERIOD] || 'filtro atual';
 
   if (!players.length) {
-    return `<div class="empty-state">Nenhum jogador com pelo menos ${MIN_RANKING_GAMES} partidas neste filtro</div>`;
+    return `<div class="empty-state">Nenhum jogador com pelo menos ${minGames} partidas neste filtro</div>`;
   }
 
   const rankValue = (p, key) => {
@@ -8070,7 +8128,7 @@ function renderRankings() {
   return `
     <div class="section-title">Rankings &middot; ${typeLabel} &middot; ${periodLabel}</div>
     <div style="color:var(--text-2);font-size:12px;margin-bottom:14px;line-height:1.5;">
-      Top 5 calculado somente com jogadores de ${MIN_RANKING_GAMES}+ partidas no filtro atual, respeitando clube, período e tipo selecionados.
+      Top 5 calculado somente com jogadores de ${minGames}+ partidas no filtro atual, respeitando clube, período e tipo selecionados.
     </div>
     <div class="rankings-grid">
       ${topList('Top 5 Nota M&eacute;dia EA', '&#9733;', 'rating')}
@@ -8229,12 +8287,19 @@ function hasCompletePlayerProfile(name) {
   );
 }
 
+function effectiveMinGamesForScope() {
+  const matchCount = playerStatMatches().length;
+  return Math.max(1, Math.min(MIN_RANKING_GAMES, matchCount || MIN_RANKING_GAMES));
+}
+
 function eligibleRankingPlayers(players) {
-  return (players || []).filter(p => Number(p.games || 0) >= MIN_RANKING_GAMES);
+  const minGames = effectiveMinGamesForScope();
+  return (players || []).filter(p => Number(p.games || 0) >= minGames);
 }
 
 function eligibleIdealPlayers() {
-  return scopedPlayers().filter(p => Number(p.games || 0) >= MIN_RANKING_GAMES && hasCompletePlayerProfile(p.name));
+  const minGames = effectiveMinGamesForScope();
+  return scopedPlayers().filter(p => Number(p.games || 0) >= minGames && hasCompletePlayerProfile(p.name));
 }
 
 function inferPlayerPositionIntel(player) {
@@ -8434,7 +8499,7 @@ function setIdealFormation(value) {
   IDEAL_FORMATION = value;
   if (!isAdmin()) {
     document.querySelectorAll('.tab').forEach(el => {
-      if (['JOGADORES','COMPARAR','CONFRONTOS','CADASTRO','CONFIG','USUÁRIOS','USUARIOS','ADVERSÁRIOS','ADVERSARIOS','ADVERS&Aacute;RIOS'].includes((el.textContent || '').trim())) el.remove();
+      if (['JOGADORES','COMPARAR','CONFRONTOS','CADASTRO','ALERTAS','CONFIG','USUÁRIOS','USUARIOS','ADVERSÁRIOS','ADVERSARIOS','ADVERS&Aacute;RIOS'].includes((el.textContent || '').trim())) el.remove();
     });
   }
   renderTab();
@@ -8811,6 +8876,80 @@ function renderOwnerUsersAdmin() {
     <div class="profile-list">${rows || '<div class="empty-state" style="padding:30px 20px;">Nenhum usuário cadastrado encontrado.</div>'}</div>
   `;
 }
+
+function clubRosterForProfileAlerts() {
+  const byName = new Map();
+  computePlayersForMatches(DATA.matches || []).forEach(p => {
+    if (p && p.name) byName.set(String(p.name).toLowerCase(), p);
+  });
+  (DATA.players || []).forEach(p => {
+    if (!p || !p.name) return;
+    const key = String(p.name).toLowerCase();
+    if (!byName.has(key)) byName.set(key, p);
+  });
+  return [...byName.values()].filter(p => p && p.name).sort((a,b) => String(a.name).localeCompare(String(b.name)));
+}
+
+function profileMissingFields(profile) {
+  const missing = [];
+  if (!String(profile?.manual_position || '').trim()) missing.push('posicao/build');
+  if (!String(profile?.archetype || '').trim()) missing.push('arquetipo');
+  if (!Array.isArray(profile?.playstyles) || !profile.playstyles.filter(Boolean).length) missing.push('PlayStyles');
+  return missing;
+}
+
+async function refreshProfileAlerts() {
+  await loadPlayerProfiles();
+  if (DATA) DATA.player_profiles = {...PLAYER_PROFILES};
+  renderTab();
+}
+
+function renderAlertList(title, rows, tone='') {
+  return `
+    <div class="ranking-card">
+      <div class="ranking-title">${title} <span style="color:var(--text-2);font-size:12px;">${rows.length}</span></div>
+      <div class="ranking-list">
+        ${rows.map(item => `
+          <div class="ranking-row" onclick="setTab('cadastro')">
+            <div class="ranking-pos ${tone}">!</div>
+            <div class="ranking-main">
+              <div class="ranking-name">${escapeAttr(item.name)}</div>
+              <div class="ranking-meta">${escapeAttr(item.meta)}</div>
+            </div>
+            <div class="ranking-value" style="font-size:11px;">${escapeAttr(item.games || 0)}J</div>
+          </div>
+        `).join('') || '<div class="empty-state" style="padding:24px 10px;">Tudo certo aqui</div>'}
+      </div>
+    </div>`;
+}
+
+function renderAlertasCadastro() {
+  const roster = clubRosterForProfileAlerts();
+  const semCadastro = [];
+  const incompletos = [];
+  roster.forEach(p => {
+    const profile = profileForPlayer(p.name);
+    const hasAny = !!(profile && (profile.manual_position || profile.archetype || (profile.playstyles || []).length || profile.notes));
+    const missing = profileMissingFields(profile);
+    const games = Number(p.games || p.club_games || p.history_apps || 0);
+    if (!hasAny) semCadastro.push({name:p.name, games, meta:'Sem registro em player_profiles para este clube'});
+    else if (missing.length) incompletos.push({name:p.name, games, meta:'Falta: ' + missing.join(', ')});
+  });
+  return `
+    <div class="section-title">Alertas de Cadastro</div>
+    <div style="color:var(--text-2);font-size:12px;line-height:1.5;margin-bottom:12px;">
+      Controle de perfis salvo no banco do clube. O Time Ideal usa apenas jogador com posi&ccedil;&atilde;o/build, arqu&eacute;tipo e PlayStyles preenchidos.
+    </div>
+    <div style="display:flex;justify-content:flex-end;margin-bottom:12px;">
+      <button class="btn-mini" style="padding:10px 14px;" onclick="refreshProfileAlerts()">Atualizar do banco</button>
+    </div>
+    <div class="rankings-grid">
+      ${renderAlertList('Jogadores sem cadastro', semCadastro, 'top3')}
+      ${renderAlertList('Cadastros incompletos', incompletos, 'top2')}
+    </div>
+  `;
+}
+
 function renderCadastroJogadores() {
   const players = computePlayersForMatches(DATA.matches || []);
   const fallback = (DATA.players || []).map(p => {
@@ -9140,8 +9279,9 @@ function renderPlaystyles() {
 
 function renderTimeIdeal() {
   const idealOptions = eligibleIdealPlayers();
+  const minGames = effectiveMinGamesForScope();
   if (!idealOptions.length) {
-    return `<div class="empty-state">Nenhum jogador eleg&iacute;vel para montar o time ideal. Cadastre posi&ccedil;&atilde;o, arqu&eacute;tipo e PlayStyles, e use jogadores com pelo menos ${MIN_RANKING_GAMES} partidas no filtro.</div>`;
+    return `<div class="empty-state">Nenhum jogador eleg&iacute;vel para montar o time ideal. Cadastre posi&ccedil;&atilde;o, arqu&eacute;tipo e PlayStyles, e use jogadores com pelo menos ${minGames} partidas neste filtro.</div>`;
   }
 
   const team = buildIdealTeamClient(IDEAL_FORMATION);
@@ -9217,7 +9357,7 @@ function renderTimeIdeal() {
       ${listHtml}
     </div>
 
-    ${team.missing_slots.length ? `<div style="color:var(--yellow);font-size:12px;margin-bottom:14px;">Atenção: faltou jogador para ${team.missing_slots.join(', ')}. O Time Ideal usa apenas jogadores com cadastro completo e ${MIN_RANKING_GAMES}+ partidas no filtro.</div>` : ''}
+    ${team.missing_slots.length ? `<div style="color:var(--yellow);font-size:12px;margin-bottom:14px;">Atenção: faltou jogador para ${team.missing_slots.join(', ')}. O Time Ideal usa apenas jogadores com cadastro completo e ${minGames}+ partidas neste filtro.</div>` : ''}
 
     <div class="section-title">Análise Tática</div>
     <button class="btn-primary" onclick="analyzeTeam()">Gerar Análise com IA</button>
@@ -9361,7 +9501,7 @@ function cancelAgendaEdit() {
   AGENDA_EDIT_ID = null;
   if (!isAdmin()) {
     document.querySelectorAll('.tab').forEach(el => {
-      if (['JOGADORES','COMPARAR','CONFRONTOS','CADASTRO','CONFIG','USUÁRIOS','USUARIOS','ADVERSÁRIOS','ADVERSARIOS','ADVERS&Aacute;RIOS'].includes((el.textContent || '').trim())) el.remove();
+      if (['JOGADORES','COMPARAR','CONFRONTOS','CADASTRO','ALERTAS','CONFIG','USUÁRIOS','USUARIOS','ADVERSÁRIOS','ADVERSARIOS','ADVERS&Aacute;RIOS'].includes((el.textContent || '').trim())) el.remove();
     });
   }
   renderTab();
@@ -9429,8 +9569,7 @@ function showMatchDetails(matchId) {
         <span>${escapeAttr(matchDate)}</span>
         <span>${escapeAttr(matchTime)}</span>
         <span>${escapeAttr(m.match_type || '-')}</span>
-        <span>ID ${escapeAttr(m.match_id || '-')}</span>
-        <span>${isQuitMatch(m) ? 'Quitada' : 'Valida'}</span>
+        <span class="id">ID ${escapeAttr(m.match_id || '-')}</span>
       </div>
       <div class="match-report-sub">
         MOM: ${escapeAttr(m.mom || 'N/A')}${m.mom_rating ? ' - ' + escapeAttr(m.mom_rating) : ''} &middot; ${compactPlayers.length}/11 jogadores
@@ -9507,7 +9646,7 @@ async function analyzePlayer(name) {
   document.getElementById('modal').classList.add('active');
   
   try {
-    const r = await authFetch(`/api/ai/player?player_name=${encodeURIComponent(name)}&match_type=${encodeURIComponent(CURRENT_MATCH_TYPE)}`, { method: 'POST' });
+    const r = await authFetch(`/api/ai/player?player_name=${encodeURIComponent(name)}&match_type=${encodeURIComponent(CURRENT_MATCH_TYPE)}&period=${encodeURIComponent(CURRENT_PERIOD)}&match_status=${encodeURIComponent(CURRENT_MATCH_STATUS)}`, { method: 'POST' });
     const data = await r.json();
     document.getElementById('modalContent').innerHTML = renderMarkdown(data.analysis);
   } catch (e) {
@@ -9520,7 +9659,7 @@ async function showPlayerDetail(name) {
   mc.innerHTML = '<div class="loading"><div class="spinner"></div> Carregando analytics...</div>';
   document.getElementById('modal').classList.add('active');
   try {
-    const r = await authFetch('/api/player/' + encodeURIComponent(name) + '/analytics?match_type=' + encodeURIComponent(CURRENT_MATCH_TYPE));
+    const r = await authFetch('/api/player/' + encodeURIComponent(name) + '/analytics?match_type=' + encodeURIComponent(CURRENT_MATCH_TYPE) + '&period=' + encodeURIComponent(CURRENT_PERIOD) + '&match_status=' + encodeURIComponent(CURRENT_MATCH_STATUS));
     if (!r.ok) throw new Error('Não encontrado ou sem dados suficientes');
     const data = await r.json();
     mc.innerHTML = renderPlayerDetailHTML(data);
