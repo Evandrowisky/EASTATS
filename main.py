@@ -7130,7 +7130,7 @@ function inactivePlayerKeys() {
   (CLUB_USER_STATUS || []).forEach(u => {
     const active = !!u.is_active && String(u.status || 'ativo').trim().toLowerCase() === 'ativo';
     if (active) return;
-    [u.usuario, u.nome].forEach(v => {
+    [u.usuario].forEach(v => {
       normPlayerKeys(v).forEach(k => keys.add(k));
     });
   });
@@ -8967,7 +8967,7 @@ function clubUserForPlayer(name) {
   const keys = new Set(normPlayerKeys(name));
   if (!keys.size) return null;
   return (CLUB_USER_STATUS || []).find(u => {
-    return normPlayerKeys(u.usuario).some(k => keys.has(k)) || normPlayerKeys(u.nome).some(k => keys.has(k));
+    return normPlayerKeys(u.usuario).some(k => keys.has(k));
   }) || null;
 }
 
@@ -9007,7 +9007,7 @@ function renderAlertasCadastro() {
     const missing = profileMissingFields(profile);
     const games = Number(p.games || p.club_games || p.history_apps || 0);
     if (!user) {
-      semCadastro.push({name:p.name, games, meta:'Sem login em app_users para este clube'});
+      semCadastro.push({name:p.name, games, meta:'Sem usuario em app_users para este clube'});
     } else if (missing.length) {
       const status = (!!user.is_active && String(user.status || 'ativo').toLowerCase() === 'ativo') ? 'ativo' : (user.status || 'inativo');
       incompletos.push({name:p.name, games, meta:`Login ${status}; falta: ${missing.join(', ')}`});
@@ -9018,7 +9018,7 @@ function renderAlertasCadastro() {
   return `
     <div class="section-title">Alertas de Cadastro</div>
     <div style="color:var(--text-2);font-size:12px;line-height:1.5;margin-bottom:12px;">
-      Cadastro aqui significa login em app_users. Perfil incompleto significa que o login existe, mas ainda falta posi&ccedil;&atilde;o/build, arqu&eacute;tipo ou PlayStyles.
+      Cadastro aqui significa existir na coluna usuario da app_users. Perfil incompleto significa que o usuario existe, mas ainda falta posi&ccedil;&atilde;o/build, arqu&eacute;tipo ou PlayStyles em player_profiles.
     </div>
     <div style="display:flex;justify-content:flex-end;margin-bottom:12px;">
       <button class="btn-mini" style="padding:10px 14px;" onclick="refreshProfileAlerts()">Atualizar do banco</button>
