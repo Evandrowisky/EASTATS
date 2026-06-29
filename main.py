@@ -5383,7 +5383,7 @@ body {
   .mp-grid b { display:block; color:var(--green); font-size:13px; margin-top:2px; }
   .modal-box:has(.match-report) { width:calc(100vw - 10px); max-width:calc(100vw - 10px); padding:8px; max-height:none; }
   .modal-content:has(.match-report) { margin-top:4px; line-height:1.2; }
-  .match-report { padding:14px; border-radius:11px; height:min(680px, calc(100dvh - 120px)); min-height:560px; display:flex; flex-direction:column; }
+  .match-report { padding:14px; border-radius:11px; min-height:min(680px, calc(100dvh - 120px)); display:flex; flex-direction:column; }
   .match-report-head { gap:8px; grid-template-columns:minmax(0,1fr) 92px minmax(0,1fr); }
   .match-report .team-name { font-size:13px; }
   .match-report .score-box { min-width:0; padding:8px 5px; border-radius:9px; }
@@ -5393,8 +5393,8 @@ body {
   .match-report-meta span { font-size:10px; padding:6px 3px; border-radius:6px; }
   .match-report-meta .id { grid-column:1/-1; white-space:normal; overflow-wrap:anywhere; text-overflow:clip; }
   .match-report-sub { font-size:11px; margin:4px 0 9px; }
-  .match-report-players { display:flex; flex-direction:column; justify-content:space-between; gap:5px; flex:1; min-height:0; }
-  .report-player { grid-template-columns:24px minmax(0,1fr) 44px 48px; gap:7px; min-height:36px; padding:7px 8px; border-radius:7px; }
+  .match-report-players { display:flex; flex-direction:column; justify-content:flex-start; gap:6px; flex:0 0 auto; min-height:0; }
+  .report-player { grid-template-columns:24px minmax(0,1fr) 44px 48px; gap:7px; min-height:34px; padding:6px 8px; border-radius:7px; }
   .report-player .n, .report-player .pos { font-size:10px; }
   .report-player .name { font-size:13px; }
   .report-player .grade { font-size:15px; }
