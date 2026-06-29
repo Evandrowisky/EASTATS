@@ -55,6 +55,7 @@ OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
 JWT_ALGORITHM = "HS256"
 JWT_EXPIRE_DAYS = int(os.getenv("JWT_EXPIRE_DAYS", "7") or "7")
 SUPABASE_LOGO_BUCKET = os.getenv("SUPABASE_LOGO_BUCKET", "club-logos").strip() or "club-logos"
+MIN_RANKING_GAMES = 10
 
 def _env_float_local(name: str, default: float) -> float:
     try:
@@ -1872,6 +1873,17 @@ def apply_player_profiles_to_players(players_list, club_id: Optional[str] = None
         out.append(item)
     return out
 
+def has_complete_player_profile(player: dict) -> bool:
+    """Jogador elegivel para Time Ideal: cadastro manual completo + jogos suficientes."""
+    if not isinstance(player, dict):
+        return False
+    return (
+        bool(str(player.get("manual_position") or "").strip())
+        and bool(str(player.get("archetype") or "").strip())
+        and bool(player.get("playstyles") or [])
+        and int(player.get("games") or 0) >= MIN_RANKING_GAMES
+    )
+
 def build_ideal_team(players_list, formation="3-5-2"):
     """Monta 11 ideal por formacao, funcao e melhor encaixe disponivel."""
     formation_slots = {
@@ -1959,6 +1971,8 @@ def build_ideal_team(players_list, formation="3-5-2"):
     slots = formation_slots.get(formation, formation_slots["3-5-2"])
     pool = []
     for p in players_list or []:
+        if not has_complete_player_profile(p):
+            continue
         fam = family_by_position.get(str(p.get("position", "")).lower(), "MID")
         pool.append({**p, "family": fam})
     pool.sort(key=lambda p: float(p.get("rating", 0) or 0), reverse=True)
@@ -2549,7 +2563,7 @@ def import_history(payload: HistoryImportPayload, current_user: dict = Depends(r
             cache["stats"] = calc_club_stats([], {}, merged_matches)
             cache["opponents"] = calc_opponent_avg(merged_matches)
             if players:
-                cache["ideal_team"] = build_ideal_team(players, "3-5-2")
+                cache["ideal_team"] = build_ideal_team(apply_player_profiles_to_players(players, club_id), "3-5-2")
                 cache["mvp"] = max(players, key=lambda p: (p.get("mom", 0), p.get("rating", 0)))
             save_cache(cache)
             save_club_json_history(club_id, cache)
@@ -2594,7 +2608,7 @@ def get_dashboard(current_user: dict = Depends(get_current_user)):
             not cache.get("ideal_team")
             or not cache["ideal_team"].get("players")
         ):
-            cache["ideal_team"] = build_ideal_team(cache["players"], "3-5-2")
+            cache["ideal_team"] = build_ideal_team(apply_player_profiles_to_players(cache["players"], club_id), "3-5-2")
             save_cache(cache)
         try:
             cache["player_profiles"] = load_player_profiles(club_id or "default")
@@ -3024,7 +3038,7 @@ async def sync_stream(
             yield f"data: {log('🧮 Calculando estat&iacute;sticas...', 8, 8)}\n\n"
             stats = calc_club_stats(overall, info, matches)
             opponents = calc_opponent_avg(matches)
-            ideal_team = build_ideal_team(players, "3-5-2")
+            ideal_team = build_ideal_team(apply_player_profiles_to_players(players, club_id), "3-5-2")
             
             # Encontra MVP (jogador com mais MOMs)
             mvp = None
@@ -3062,7 +3076,7 @@ async def sync_stream(
                         matches = merge_match_lists_for_storage(club_id, supabase_matches, matches)
                         stats = calc_club_stats(overall, info, matches)
                         opponents = calc_opponent_avg(matches)
-                        ideal_team = build_ideal_team(players, "3-5-2")
+                        ideal_team = build_ideal_team(apply_player_profiles_to_players(players, club_id), "3-5-2")
                         if players:
                             mvp = max(players, key=lambda p: (p.get("mom", 0), p.get("rating", 0)))
                         club_data["matches"] = matches
@@ -3227,7 +3241,7 @@ def sync_club_for_auto_update(club_ref: dict) -> dict:
 
     stats = calc_club_stats(overall, info, matches)
     opponents = calc_opponent_avg(matches)
-    ideal_team = build_ideal_team(players, "3-5-2")
+    ideal_team = build_ideal_team(apply_player_profiles_to_players(players, club_id), "3-5-2")
     mvp = max(players, key=lambda p: (_safe_int(p.get("mom")), _safe_float(p.get("rating")))) if players else None
 
     club_data = {
@@ -3258,7 +3272,7 @@ def sync_club_for_auto_update(club_ref: dict) -> dict:
         club_data["matches"] = matches
         club_data["stats"] = calc_club_stats(overall, info, matches)
         club_data["opponents"] = calc_opponent_avg(matches)
-        club_data["ideal_team"] = build_ideal_team(players, "3-5-2")
+        club_data["ideal_team"] = build_ideal_team(apply_player_profiles_to_players(players, club_id), "3-5-2")
         club_data["matchtype_summary"] = summarize_matches_by_type(matches)
         save_club_supabase(club_data)
 
@@ -5271,6 +5285,25 @@ body {
 .modal-content strong { color: var(--green); }
 .modal-content ul { padding-left: 20px; margin-bottom: 10px; }
 .modal-content li { color: var(--text-2); margin-bottom: 4px; }
+.match-report { background:linear-gradient(180deg, rgba(0,255,115,.08), rgba(0,0,0,.2)); border:1px solid var(--green-dim); border-radius:12px; padding:14px; color:var(--text); }
+.match-report-head { display:grid; grid-template-columns:1fr auto 1fr; align-items:center; gap:10px; }
+.match-report .team-name { font-size:15px; font-weight:900; line-height:1.1; overflow-wrap:anywhere; text-transform:uppercase; }
+.match-report .team-name.right { text-align:right; }
+.match-report .score-box { min-width:88px; text-align:center; border:1px solid var(--border); border-radius:10px; padding:8px; background:rgba(0,0,0,.34); }
+.match-report .score { font-size:28px; line-height:1; font-weight:900; color:var(--green); }
+.match-report .result { margin-top:5px; font-size:10px; font-weight:900; letter-spacing:.8px; text-transform:uppercase; }
+.match-report .result.v { color:var(--green); }
+.match-report .result.e { color:var(--yellow); }
+.match-report .result.d { color:var(--red); }
+.match-report-meta { display:grid; grid-template-columns:repeat(5, minmax(0,1fr)); gap:6px; margin:10px 0 8px; }
+.match-report-meta span { border:1px solid var(--border); border-radius:7px; padding:6px 4px; text-align:center; font-size:10px; font-weight:800; color:var(--text-2); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.match-report-sub { color:var(--text-2); font-size:11px; text-align:center; margin:4px 0 10px; overflow-wrap:anywhere; }
+.match-report-players { display:grid; grid-template-columns:1fr; gap:4px; }
+.report-player { display:grid; grid-template-columns:24px minmax(0,1fr) 36px 44px; gap:6px; align-items:center; min-height:25px; padding:4px 6px; border:1px solid rgba(255,255,255,.08); border-radius:7px; background:rgba(0,0,0,.24); }
+.report-player .n { color:var(--text-3); font-size:10px; font-weight:900; }
+.report-player .name { font-size:12px; font-weight:800; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.report-player .pos { color:var(--text-2); font-size:10px; text-align:center; }
+.report-player .grade { color:var(--green); font-size:13px; font-weight:900; text-align:right; }
 
 @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
 @keyframes slideUp { from { transform: translateY(20px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
@@ -5294,6 +5327,22 @@ body {
   .mp-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:6px; font-size:11px; color:var(--text-2); }
   .mp-grid span { background:rgba(0,0,0,.25); border:1px solid rgba(255,255,255,.06); border-radius:6px; padding:6px; text-align:center; }
   .mp-grid b { display:block; color:var(--green); font-size:13px; margin-top:2px; }
+  .modal-box:has(.match-report) { padding:8px; max-height:none; }
+  .modal-content:has(.match-report) { margin-top:4px; line-height:1.2; }
+  .match-report { padding:8px; border-radius:9px; }
+  .match-report-head { gap:6px; grid-template-columns:minmax(0,1fr) 76px minmax(0,1fr); }
+  .match-report .team-name { font-size:11px; }
+  .match-report .score-box { min-width:0; padding:6px 4px; border-radius:8px; }
+  .match-report .score { font-size:23px; }
+  .match-report .result { font-size:8px; margin-top:3px; }
+  .match-report-meta { grid-template-columns:repeat(5, minmax(0,1fr)); gap:3px; margin:7px 0 6px; }
+  .match-report-meta span { font-size:8px; padding:4px 2px; border-radius:5px; }
+  .match-report-sub { font-size:9px; margin:3px 0 6px; }
+  .match-report-players { gap:3px; }
+  .report-player { grid-template-columns:18px minmax(0,1fr) 28px 34px; gap:4px; min-height:20px; padding:3px 5px; border-radius:5px; }
+  .report-player .n, .report-player .pos { font-size:8px; }
+  .report-player .name { font-size:10px; }
+  .report-player .grade { font-size:11px; }
 }
 /* SYNC PROGRESS */
 .sync-progress {
@@ -6506,6 +6555,7 @@ let AGENDA_EDIT_ID = null;
 let IDEAL_FORMATION = '3-5-2';
 let IDEAL_MODE = localStorage.getItem('scout_ideal_mode') || 'auto';
 let MANUAL_LINEUPS = {};
+const MIN_RANKING_GAMES = 10;
 let AUTH_TOKEN = localStorage.getItem('scout_auth_token') || '';
 let AUTH_USER = (() => {
   try { return JSON.parse(localStorage.getItem('scout_auth_user') || 'null'); }
@@ -7951,7 +8001,7 @@ function renderJogadores() {
 
 function renderRankings() {
   const matches = filteredMatches();
-  const players = computePlayersForMatches(matches).filter(p => Number(p.games || 0) > 0);
+  const players = eligibleRankingPlayers(computePlayersForMatches(matches));
   const typeLabel = {
     todos: 'todas as partidas',
     liga: 'liga',
@@ -7967,7 +8017,7 @@ function renderRankings() {
   }[CURRENT_PERIOD] || 'filtro atual';
 
   if (!players.length) {
-    return '<div class="empty-state">Nenhum jogador encontrado neste filtro</div>';
+    return `<div class="empty-state">Nenhum jogador com pelo menos ${MIN_RANKING_GAMES} partidas neste filtro</div>`;
   }
 
   const rankValue = (p, key) => {
@@ -8020,7 +8070,7 @@ function renderRankings() {
   return `
     <div class="section-title">Rankings &middot; ${typeLabel} &middot; ${periodLabel}</div>
     <div style="color:var(--text-2);font-size:12px;margin-bottom:14px;line-height:1.5;">
-      Top 5 calculado somente com partidas do clube atual e respeitando período + tipo de partida selecionados.
+      Top 5 calculado somente com jogadores de ${MIN_RANKING_GAMES}+ partidas no filtro atual, respeitando clube, período e tipo selecionados.
     </div>
     <div class="rankings-grid">
       ${topList('Top 5 Nota M&eacute;dia EA', '&#9733;', 'rating')}
@@ -8169,6 +8219,24 @@ function profileForPlayer(name) {
   return PLAYER_PROFILES[name] || PLAYER_PROFILES[String(name || '').trim()] || {};
 }
 
+function hasCompletePlayerProfile(name) {
+  const profile = profileForPlayer(name);
+  return !!(
+    String(profile.manual_position || '').trim() &&
+    String(profile.archetype || '').trim() &&
+    Array.isArray(profile.playstyles) &&
+    profile.playstyles.filter(Boolean).length
+  );
+}
+
+function eligibleRankingPlayers(players) {
+  return (players || []).filter(p => Number(p.games || 0) >= MIN_RANKING_GAMES);
+}
+
+function eligibleIdealPlayers() {
+  return scopedPlayers().filter(p => Number(p.games || 0) >= MIN_RANKING_GAMES && hasCompletePlayerProfile(p.name));
+}
+
 function inferPlayerPositionIntel(player) {
   const profile = profileForPlayer(player.name);
   const counts = player.position_counts || {GK:0, DEF:0, MID:0, FWD:0};
@@ -8291,7 +8359,7 @@ function applyManualLineup(team) {
   loadManualLineups();
   const slots = FORMATION_SLOTS[IDEAL_FORMATION] || FORMATION_SLOTS['3-5-2'];
   const byName = {};
-  scopedPlayers().forEach(p => {
+  eligibleIdealPlayers().forEach(p => {
     const intel = inferPlayerPositionIntel(p);
     byName[p.name] = {...p, family:intel.family, position:intel.label, position_source:intel.source, position_counts:intel.counts, history_apps:intel.apps};
   });
@@ -8332,7 +8400,7 @@ async function exportIdealJpeg() {
 
 function buildIdealTeamClient(formation) {
   const slots = FORMATION_SLOTS[formation] || FORMATION_SLOTS['3-5-2'];
-  const pool = scopedPlayers().map(p => { const intel = inferPlayerPositionIntel(p); return {...p, family: intel.family, position: intel.label, position_source: intel.source, position_counts: intel.counts, history_apps: intel.apps}; }).sort((a,b) => Number(b.rating || 0) - Number(a.rating || 0));
+  const pool = eligibleIdealPlayers().map(p => { const intel = inferPlayerPositionIntel(p); return {...p, family: intel.family, position: intel.label, position_source: intel.source, position_counts: intel.counts, history_apps: intel.apps}; }).sort((a,b) => Number(b.rating || 0) - Number(a.rating || 0));
   const used = new Set();
   const picked = [];
   slots.forEach(slot => {
@@ -9071,8 +9139,9 @@ function renderPlaystyles() {
 }
 
 function renderTimeIdeal() {
-  if (!scopedPlayers().length) {
-    return '<div class="empty-state">Nenhum jogador com partidas neste clube/filtro para montar o time ideal</div>';
+  const idealOptions = eligibleIdealPlayers();
+  if (!idealOptions.length) {
+    return `<div class="empty-state">Nenhum jogador eleg&iacute;vel para montar o time ideal. Cadastre posi&ccedil;&atilde;o, arqu&eacute;tipo e PlayStyles, e use jogadores com pelo menos ${MIN_RANKING_GAMES} partidas no filtro.</div>`;
   }
 
   const team = buildIdealTeamClient(IDEAL_FORMATION);
@@ -9098,7 +9167,7 @@ function renderTimeIdeal() {
       <div><span class="tag liga">${slot}</span></div>
       <select onchange="setManualLineupPlayer('${slot}', this.value)">
         <option value="">Escolher jogador</option>
-        ${scopedPlayers().map(p => `<option value="${escapeAttr(p.name)}" ${selectedManualName(slot) === p.name ? 'selected' : ''}>${p.name} &middot; ${p.position} &middot; ${p.rating}</option>`).join('')}
+        ${idealOptions.map(p => `<option value="${escapeAttr(p.name)}" ${selectedManualName(slot) === p.name ? 'selected' : ''}>${p.name} &middot; ${p.position} &middot; ${p.rating} &middot; ${p.games}J</option>`).join('')}
       </select>
     </div>
   `).join('');
@@ -9148,7 +9217,7 @@ function renderTimeIdeal() {
       ${listHtml}
     </div>
 
-    ${team.missing_slots.length ? `<div style="color:var(--yellow);font-size:12px;margin-bottom:14px;">Atenção: faltou jogador para ${team.missing_slots.join(', ')}. Se houver menos de 11 no filtro, mude para TODOS ou ajuste o cadastro.</div>` : ''}
+    ${team.missing_slots.length ? `<div style="color:var(--yellow);font-size:12px;margin-bottom:14px;">Atenção: faltou jogador para ${team.missing_slots.join(', ')}. O Time Ideal usa apenas jogadores com cadastro completo e ${MIN_RANKING_GAMES}+ partidas no filtro.</div>` : ''}
 
     <div class="section-title">Análise Tática</div>
     <button class="btn-primary" onclick="analyzeTeam()">Gerar Análise com IA</button>
@@ -9341,6 +9410,43 @@ function showMatchDetails(matchId) {
   const m = DATA.matches.find(x => String(x.match_id) === String(matchId));
   if (!m) return;
   const players = [...(m.players_ratings || [])].sort((a,b) => Number(b.sofi_rating || b.rating || 0) - Number(a.sofi_rating || a.rating || 0));
+  const clubName = (DATA && DATA.club && DATA.club.name) ? DATA.club.name : 'Nosso time';
+  const resultLabel = m.result === 'V' ? 'Vitoria' : m.result === 'E' ? 'Empate' : 'Derrota';
+  const matchDate = m.date || m.match_date || '-';
+  const matchTime = m.time || m.match_time || (m.timestamp ? new Date(Number(m.timestamp) * 1000).toLocaleTimeString('pt-BR', {hour:'2-digit', minute:'2-digit'}) : '--:--');
+  const compactPlayers = players.slice(0, 11);
+  const reportHtml = `
+    <div class="match-report">
+      <div class="match-report-head">
+        <div class="team-name">${escapeAttr(clubName)}</div>
+        <div class="score-box">
+          <div class="score">${escapeAttr(m.score || `${m.goals_for || 0}-${m.goals_against || 0}`)}</div>
+          <div class="result ${String(m.result || '').toLowerCase()}">${resultLabel}</div>
+        </div>
+        <div class="team-name right">VS ${escapeAttr(String(m.opponent || '').toUpperCase())}</div>
+      </div>
+      <div class="match-report-meta">
+        <span>${escapeAttr(matchDate)}</span>
+        <span>${escapeAttr(matchTime)}</span>
+        <span>${escapeAttr(m.match_type || '-')}</span>
+        <span>ID ${escapeAttr(m.match_id || '-')}</span>
+        <span>${isQuitMatch(m) ? 'Quitada' : 'Valida'}</span>
+      </div>
+      <div class="match-report-sub">
+        MOM: ${escapeAttr(m.mom || 'N/A')}${m.mom_rating ? ' - ' + escapeAttr(m.mom_rating) : ''} &middot; ${compactPlayers.length}/11 jogadores
+      </div>
+      <div class="match-report-players">
+        ${compactPlayers.map((p, idx) => `<div class="report-player">
+          <span class="n">${idx + 1}</span>
+          <span class="name">${escapeAttr(p.name || '-')}</span>
+          <span class="pos">${escapeAttr(p.pos || '-')}</span>
+          <span class="grade">${escapeAttr(p.sofi_rating ?? p.rating ?? '-')}</span>
+        </div>`).join('')}
+      </div>
+    </div>`;
+  document.getElementById('modalContent').innerHTML = reportHtml;
+  document.getElementById('modal').classList.add('active');
+  return;
   const positives = [];
   const negatives = [];
   if (m.result === 'V') positives.push('Resultado positivo e eficiência para vencer o confronto.');
