@@ -56,6 +56,27 @@ JWT_ALGORITHM = "HS256"
 JWT_EXPIRE_DAYS = int(os.getenv("JWT_EXPIRE_DAYS", "7") or "7")
 SUPABASE_LOGO_BUCKET = os.getenv("SUPABASE_LOGO_BUCKET", "club-logos").strip() or "club-logos"
 MIN_RANKING_GAMES = 10
+BR_TZ = timezone(timedelta(hours=-3))
+
+
+def format_match_date_br(timestamp) -> str:
+    try:
+        ts = int(timestamp or 0)
+    except Exception:
+        ts = 0
+    if not ts:
+        return "—"
+    return datetime.fromtimestamp(ts, timezone.utc).astimezone(BR_TZ).strftime("%d/%m/%Y")
+
+
+def format_match_time_br(timestamp) -> str:
+    try:
+        ts = int(timestamp or 0)
+    except Exception:
+        ts = 0
+    if not ts:
+        return "--:--"
+    return datetime.fromtimestamp(ts, timezone.utc).astimezone(BR_TZ).strftime("%H:%M")
 
 def _env_float_local(name: str, default: float) -> float:
     try:
@@ -1732,7 +1753,7 @@ def parse_matches(matches_raw, our_club_id):
                     mom = player_name
             
             timestamp = int(m.get("timestamp", 0))
-            date_str = datetime.fromtimestamp(timestamp).strftime("%d/%m/%Y") if timestamp else "—"
+            date_str = format_match_date_br(timestamp)
             opponent_name = _fix_mojibake(opp.get("details", {}).get("name", "Adversário"))
             raw_match_id = str(m.get("matchId") or m.get("matchid") or m.get("id") or "").strip()
             if not raw_match_id or raw_match_id.lower() in ("none", "null", "undefined", "0"):
@@ -1753,6 +1774,7 @@ def parse_matches(matches_raw, our_club_id):
                 "match_type": match_type_label,
                 "match_type_raw": raw_match_type or origin,
                 "date": date_str,
+                "time": format_match_time_br(timestamp),
                 "timestamp": timestamp,
                 "mom": mom,
                 "mom_rating": round(mom_rating, 1),
@@ -3540,7 +3562,7 @@ def build_player_analytics(player_name, cache, match_type="todos", period="todos
         for pr in (m.get("players_ratings") or []):
             if pr.get("name", "").lower() == pname:
                 history.append({
-                    "match_id": m.get("match_id"), "opponent": m.get("opponent"), "date": m.get("date"),
+                    "match_id": m.get("match_id"), "opponent": m.get("opponent"), "date": (format_match_date_br(m.get("timestamp")) if m.get("timestamp") else m.get("date")),
                     "timestamp": int(m.get("timestamp", 0) or 0), "score": m.get("score"), "result": m.get("result"),
                     "match_type": m.get("match_type", "liga"), "position": pr.get("pos"),
                     "rating": float(pr.get("rating", 0) or 0),
@@ -3949,7 +3971,7 @@ def get_player_detail(player_name: str, current_user: dict = Depends(get_current
                 history.append({
                     "match_id": m.get("match_id"),
                     "opponent": m.get("opponent"),
-                    "date": m.get("date"),
+                    "date": (format_match_date_br(m.get("timestamp")) if m.get("timestamp") else m.get("date")),
                     "timestamp": m.get("timestamp"),
                     "score": m.get("score"),
                     "result": m.get("result"),
@@ -6953,6 +6975,24 @@ function filteredMatches() {
 function playerStatMatches() {
   return applyMatchFilters((DATA && DATA.matches) ? DATA.matches : []);
 }
+
+function matchDateTimeBRFromTimestamp(timestamp) {
+  const ts = Number(timestamp || 0);
+  if (!Number.isFinite(ts) || ts <= 0) return {date: '', time: '', full: ''};
+  const d = new Date((ts - 3 * 60 * 60) * 1000);
+  const pad = n => String(n).padStart(2, '0');
+  const date = `${pad(d.getUTCDate())}/${pad(d.getUTCMonth() + 1)}/${d.getUTCFullYear()}`;
+  const time = `${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}`;
+  return {date, time, full: `${date} ${time}`};
+}
+
+function matchDisplayDate(m) {
+  return matchDateTimeBRFromTimestamp(m && m.timestamp).date || (m && (m.date || m.match_date)) || '-';
+}
+
+function matchDisplayTime(m) {
+  return matchDateTimeBRFromTimestamp(m && m.timestamp).time || (m && (m.time || m.match_time)) || '--:--';
+}
 function togglePeriodMenu(ev) {
   if (ev) ev.stopPropagation();
   const wrap = ev && ev.currentTarget ? ev.currentTarget.closest('.period-dropdown') : null;
@@ -7598,7 +7638,13 @@ function renderTab() {
   else if (CURRENT_TAB === 'confrontos') tc.innerHTML = renderConfrontos();
   else if (CURRENT_TAB === 'time-ideal') tc.innerHTML = renderTimeIdeal();
   else if (CURRENT_TAB === 'cadastro' && isAdmin()) { tc.innerHTML = '<div class="loading"><div class="spinner"></div> Carregando cadastro...</div>'; loadClubUsers().then(() => { const t=document.getElementById('tabContent'); if (t && CURRENT_TAB === 'cadastro') t.innerHTML = renderCadastroJogadores(); }); }
-  else if (CURRENT_TAB === 'alertas' && isAdmin()) tc.innerHTML = renderAlertasCadastro();
+  else if (CURRENT_TAB === 'alertas' && isAdmin()) {
+    tc.innerHTML = '<div class="loading"><div class="spinner"></div> Carregando alertas...</div>';
+    Promise.all([loadClubUsers(), loadPlayerProfiles()]).then(() => {
+      const t = document.getElementById('tabContent');
+      if (t && CURRENT_TAB === 'alertas') t.innerHTML = renderAlertasCadastro();
+    });
+  }
   else if (CURRENT_TAB === 'config' && isAdmin()) tc.innerHTML = renderConfiguracoesClube();
   else if (CURRENT_TAB === 'owner-users' && isOwnerAdmin()) { tc.innerHTML = '<div class="loading"><div class="spinner"></div> Carregando usu&aacute;rios...</div>'; loadOwnerUsers().then(() => { const t=document.getElementById('tabContent'); if (t && CURRENT_TAB === 'owner-users') t.innerHTML = renderOwnerUsersAdmin(); }); }
   else if (CURRENT_TAB === 'owner-clubs' && isOwnerAdmin()) { tc.innerHTML = '<div class="loading"><div class="spinner"></div> Carregando clubes...</div>'; loadOwnerClubs().then(() => { const t=document.getElementById('tabContent'); if (t && CURRENT_TAB === 'owner-clubs') t.innerHTML = renderOwnerClubsAdmin(); }).catch(e => { const t=document.getElementById('tabContent'); if (t) t.innerHTML = `<div class="empty-state" style="padding:40px 20px;"><div class="empty-text">Erro ao carregar clubes: ${escapeAttr(e.message || e)}</div></div>`; }); }
@@ -8307,10 +8353,11 @@ function renderConfrontos() {
   let html = `<div class="section-title">Confrontos &middot; ${scope}</div><div class="confronts-grid">`;
   matches.forEach(m => {
     const top = (m.players_ratings || [])[0];
+    const displayDate = matchDisplayDate(m);
     html += `
       <div class="confront-card" onclick="showMatchDetails('${m.match_id}')" style="cursor:pointer;">
         <div>
-          <div class="confront-name">${m.date} &middot; VS ${String(m.opponent || '').toUpperCase()}</div>
+          <div class="confront-name">${displayDate} &middot; VS ${String(m.opponent || '').toUpperCase()}</div>
           <div style="font-size:11px;color:var(--text-2);margin-top:4px;">${m.match_type} &middot; MOM ${m.mom || '-'} ${m.mom_rating ? '(' + m.mom_rating + ')' : ''}${top ? ' &middot; Melhor Sofi: ' + top.name + ' ' + top.sofi_rating : ''}</div>
         </div>
         <div class="confront-vs">
@@ -8972,7 +9019,8 @@ function clubUserForPlayer(name) {
 }
 
 async function refreshProfileAlerts() {
-  await loadClubUserStatus();
+  if (isAdmin()) await loadClubUsers();
+  else await loadClubUserStatus();
   await loadPlayerProfiles();
   if (DATA) DATA.player_profiles = {...PLAYER_PROFILES};
   renderTab();
@@ -9693,8 +9741,8 @@ function showMatchDetails(matchId) {
   const players = [...(m.players_ratings || [])].sort((a,b) => Number(b.sofi_rating || b.rating || 0) - Number(a.sofi_rating || a.rating || 0));
   const clubName = (DATA && DATA.club && DATA.club.name) ? DATA.club.name : 'Nosso time';
   const resultLabel = m.result === 'V' ? 'Vitoria' : m.result === 'E' ? 'Empate' : 'Derrota';
-  const matchDate = m.date || m.match_date || '-';
-  const matchTime = m.time || m.match_time || (m.timestamp ? new Date(Number(m.timestamp) * 1000).toLocaleTimeString('pt-BR', {hour:'2-digit', minute:'2-digit'}) : '--:--');
+  const matchDate = matchDisplayDate(m);
+  const matchTime = matchDisplayTime(m);
   const compactPlayers = players.slice(0, 11);
   const reportHtml = `
     <div class="match-report">
@@ -9837,7 +9885,7 @@ function renderHeatmap(heatmap) {
 
 function matchLine(m) {
   if (!m) return '<div class="mini-insight"><div class="v">Sem dados</div></div>';
-  return `<div class="mini-insight"><div class="k">${m.date} &middot; ${m.match_type}</div><div class="v">VS ${m.opponent} &middot; ${m.result} ${m.score} &middot; Sofi ${m.sofi_rating} &middot; EA ${m.rating}</div></div>`;
+  return `<div class="mini-insight"><div class="k">${matchDisplayDate(m)} &middot; ${m.match_type}</div><div class="v">VS ${m.opponent} &middot; ${m.result} ${m.score} &middot; Sofi ${m.sofi_rating} &middot; EA ${m.rating}</div></div>`;
 }
 
 function plainScoutSummary(text) {
