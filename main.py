@@ -1523,8 +1523,8 @@ def require_admin(current_user: dict = Depends(get_current_user)):
 
 def require_owner_admin(current_user: dict = Depends(require_admin)):
     usuario = str((current_user or {}).get("usuario") or "").strip().lower()
-    if usuario != "sennasant":
-        raise HTTPException(403, "Apenas o login sennasant pode acessar esta tela")
+    if usuario not in ("sennasant33", "sennasant"):
+        raise HTTPException(403, "Apenas o login master pode acessar esta tela")
     return current_user
 
 
@@ -6663,7 +6663,10 @@ let AUTH_USER = (() => {
 
 function isLoggedIn() { return !!AUTH_TOKEN && !!AUTH_USER; }
 function isAdmin() { return !!AUTH_USER && String(AUTH_USER.cargo || '').trim().toLowerCase() === 'admin'; }
-function isOwnerAdmin() { return isAdmin() && String(AUTH_USER.usuario || '').trim().toLowerCase() === 'sennasant'; }
+function isOwnerAdmin() {
+  const usuario = String(AUTH_USER?.usuario || '').trim().toLowerCase();
+  return isAdmin() && ['sennasant33', 'sennasant'].includes(usuario);
+}
 
 function authHeaders(extra = {}) {
   const headers = {...extra};
@@ -7532,7 +7535,7 @@ function render() {
           <div class="club-info">
             <div class="club-shield">&#9881;</div>
             <div style="flex:1;min-width:0;">
-              <div class="club-name">Painel master sennasant</div>
+              <div class="club-name">Painel master</div>
               <div class="club-meta">Gerencie usu&aacute;rios e clubes cadastrados sem depender de sincroniza&ccedil;&atilde;o do clube</div>
             </div>
           </div>
@@ -8927,7 +8930,7 @@ function renderOwnerClubsAdmin() {
     </div>`;
   }).join('');
   return `
-    <div class="section-title">Painel sennasant &middot; clubes liberados</div>
+    <div class="section-title">Painel master &middot; clubes liberados</div>
     <div style="color:var(--text-2);font-size:12px;margin-bottom:12px;line-height:1.5;">Cadastre aqui os clubes que podem receber novos usu?rios. Clubes que j? foram sincronizados aparecem na lista abaixo; basta clicar em Liberar.</div>
     <form class="agenda-form" onsubmit="addOwnerClub(event)" style="grid-template-columns: 1fr auto;">
       <input id="owner-club-name" type="text" placeholder="Nome do clube exatamente como aparece no Pro Clubs" required>
@@ -9008,8 +9011,8 @@ function renderOwnerUsersAdmin() {
       </div>`;
   }).join('');
   return `
-    <div class="section-title">Painel sennasant · todos os usuários</div>
-    <div style="color:var(--text-2);font-size:12px;margin-bottom:12px;line-height:1.5;">Tela exclusiva do login <strong>sennasant</strong>. Aqui você muda jogador/admin, ativa/desativa login e exclui usuários de qualquer clube cadastrado.</div>
+    <div class="section-title">Painel master · todos os usuários</div>
+    <div style="color:var(--text-2);font-size:12px;margin-bottom:12px;line-height:1.5;">Tela exclusiva do login master. Aqui você muda jogador/admin, ativa/desativa login e exclui usuários de qualquer clube cadastrado.</div>
     <div class="profile-list">${rows || '<div class="empty-state" style="padding:30px 20px;">Nenhum usuário cadastrado encontrado.</div>'}</div>
   `;
 }
