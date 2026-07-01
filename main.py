@@ -5395,10 +5395,11 @@ body {
 .match-report-meta .id { grid-column: span 2; }
 .match-report-sub { color:var(--text-2); font-size:11px; text-align:center; margin:4px 0 10px; overflow-wrap:anywhere; }
 .match-report-players { display:grid; grid-template-columns:1fr; gap:4px; }
-.report-player { display:grid; grid-template-columns:24px minmax(0,1fr) 36px 44px; gap:6px; align-items:center; min-height:25px; padding:4px 6px; border:1px solid rgba(255,255,255,.08); border-radius:7px; background:rgba(0,0,0,.24); }
+.report-player { display:grid; grid-template-columns:24px minmax(0,1fr) 36px 44px 44px; gap:6px; align-items:center; min-height:25px; padding:4px 6px; border:1px solid rgba(255,255,255,.08); border-radius:7px; background:rgba(0,0,0,.24); }
 .report-player .n { color:var(--text-3); font-size:10px; font-weight:900; }
 .report-player .name { font-size:12px; font-weight:800; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .report-player .pos { color:var(--text-2); font-size:10px; text-align:center; }
+.report-player .ga { color:var(--text-2); font-size:10px; font-weight:800; text-align:center; white-space:nowrap; }
 .report-player .grade { color:var(--green); font-size:13px; font-weight:900; text-align:right; }
 
 @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
@@ -5436,10 +5437,10 @@ body {
   .match-report-meta .id { grid-column:1/-1; white-space:normal; overflow-wrap:anywhere; text-overflow:clip; }
   .match-report-sub { font-size:11px; margin:4px 0 9px; }
   .match-report-players { display:flex; flex-direction:column; justify-content:flex-start; gap:6px; flex:0 0 auto; min-height:0; }
-  .report-player { grid-template-columns:24px minmax(0,1fr) 44px 48px; gap:7px; min-height:34px; padding:6px 8px; border-radius:7px; }
-  .report-player .n, .report-player .pos { font-size:10px; }
+  .report-player { grid-template-columns:22px minmax(0,1fr) 36px 44px 44px; gap:5px; min-height:32px; padding:5px 7px; border-radius:7px; }
+  .report-player .n, .report-player .pos, .report-player .ga { font-size:9px; }
   .report-player .name { font-size:13px; }
-  .report-player .grade { font-size:15px; }
+  .report-player .grade { font-size:14px; }
 }
 /* SYNC PROGRESS */
 .sync-progress {
@@ -9768,6 +9769,7 @@ function showMatchDetails(matchId) {
           <span class="n">${idx + 1}</span>
           <span class="name">${escapeAttr(p.name || '-')}</span>
           <span class="pos">${escapeAttr(p.pos || '-')}</span>
+          <span class="ga">G${escapeAttr(p.goals || 0)} A${escapeAttr(p.assists || 0)}</span>
           <span class="grade">${escapeAttr(p.sofi_rating ?? p.rating ?? '-')}</span>
         </div>`).join('')}
       </div>
