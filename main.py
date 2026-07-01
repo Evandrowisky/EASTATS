@@ -4061,7 +4061,7 @@ def list_player_profiles(current_user: dict = Depends(get_current_user)):
 
 @app.put("/api/player-profiles/{player_name}")
 def update_player_profile(player_name: str, item: PlayerProfileUpdate, current_user: dict = Depends(get_current_user)):
-    """Salva ajuste manual. Admin edita tudo; jogador edita apenas proprio arquetipo/playstyles."""
+    """Salva ajuste manual. Admin edita tudo; jogador edita o proprio scout."""
     club_id = str((current_user or {}).get("club_id") or _current_club_id_from_cache())
     is_admin_user = str((current_user or {}).get("cargo") or "").strip().lower() == "admin"
     def _profile_owner_key(value):
@@ -4075,7 +4075,7 @@ def update_player_profile(player_name: str, item: PlayerProfileUpdate, current_u
     field_set = set(getattr(item, "model_fields_set", None) or getattr(item, "__fields_set__", set()) or set())
     existing = (load_player_profiles(club_id) or {}).get(player_name, {}) or {}
 
-    raw_manual_position = (item.manual_position if "manual_position" in field_set else existing.get("manual_position")) if is_admin_user else existing.get("manual_position")
+    raw_manual_position = item.manual_position if "manual_position" in field_set else existing.get("manual_position")
     raw_archetype = item.archetype if "archetype" in field_set else existing.get("archetype")
     raw_playstyles = item.playstyles if "playstyles" in field_set else existing.get("playstyles")
     raw_notes = (item.notes if "notes" in field_set else existing.get("notes")) if is_admin_user else existing.get("notes")
@@ -8033,8 +8033,9 @@ function renderMyScoutProfileEditor(name) {
   const profile = profileForPlayer(name);
   const selected = (profile.playstyles || []).map(normalizePlaystyleName);
   return `
-    <div class="section-title" style="margin-top:20px;">Meu cadastro de arqu&eacute;tipo e PlayStyles</div>
-    <div class="agenda-form my-scout-profile-editor" style="grid-template-columns: repeat(4, minmax(0,1fr)); align-items:end;">
+    <div class="section-title" style="margin-top:20px;">Meu cadastro de posi&ccedil;&atilde;o, arqu&eacute;tipo e PlayStyles</div>
+    <div class="agenda-form my-scout-profile-editor" style="grid-template-columns: repeat(5, minmax(0,1fr)); align-items:end;">
+      <select id="my-pos-${id}" style="grid-column:span 1;">${manualPositionSelectOptions(profile.manual_position || '')}</select>
       <select id="my-arch-${id}" style="grid-column:span 1;">${archetypeSelectOptions(profile.archetype || '')}</select>
       <select id="my-ps-1-${id}" style="grid-column:span 1;">${playstyleSelectOptions(selected[0] || '')}</select>
       <select id="my-ps-2-${id}" style="grid-column:span 1;">${playstyleSelectOptions(selected[1] || '')}</select>
@@ -8050,6 +8051,7 @@ function renderMyScoutProfileEditor(name) {
 async function saveMyScoutProfile(name) {
   const id = cssSafeId(name || 'meu-scout');
   const profile = profileForPlayer(name);
+  const manualPosition = document.getElementById('my-pos-' + id)?.value || '';
   const arch = normalizeArchetypeName(document.getElementById('my-arch-' + id)?.value || '');
   const playstyles = [1,2,3].map(i => normalizePlaystyleName(document.getElementById(`my-ps-${i}-` + id)?.value || '')).filter(Boolean);
   const btn = document.getElementById('my-prof-save-' + id);
@@ -8057,7 +8059,7 @@ async function saveMyScoutProfile(name) {
   const old = btn ? btn.textContent : '';
   try {
     if (btn) { btn.disabled = true; btn.textContent = 'Salvando...'; }
-    await savePlayerProfile(name, profile.manual_position || '', arch, profile.notes || '', playstyles);
+    await savePlayerProfile(name, manualPosition, arch, profile.notes || '', playstyles);
     if (status) { status.textContent = 'Dados salvos'; status.style.display = 'inline'; }
     if (btn) btn.textContent = 'Salvo!';
     setTimeout(() => { if (btn) { btn.disabled = false; btn.textContent = old || 'Salvar meu cadastro'; } if (status) status.style.display = 'none'; renderTab(); }, 900);
@@ -8768,6 +8770,15 @@ function archetypeSelectOptions(selected='') {
   ).join('');
 }
 
+function manualPositionSelectOptions(selected='') {
+  const opts = [
+    ['', 'AUTO'], ['GK','GK - Goleiro'], ['CB','CB - Zagueiro Central'], ['LB','LB - Lateral Esq.'], ['RB','RB - Lateral Dir.'],
+    ['CDM','CDM - Volante'], ['CM','CM - Meia'], ['CAM','CAM - Meia Ofensivo'], ['LM','LM - Ala/Meia Esq.'], ['RM','RM - Ala/Meia Dir.'],
+    ['LW','LW - Ponta Esq.'], ['RW','RW - Ponta Dir.'], ['ST','ST - Atacante']
+  ];
+  return opts.map(([v,l]) => `<option value="${v}" ${String(selected || '') === v ? 'selected' : ''}>${l}</option>`).join('');
+}
+
 
 async function loadClubUsers() {
   if (!isAdmin()) return [];
@@ -9175,15 +9186,10 @@ function renderCadastroJogadores() {
     return {...base, position:intel.label, position_source:intel.source};
   });
   const rows = (players.length ? players : fallback);
-  const opts = [
-    ['', 'AUTO'], ['GK','GK - Goleiro'], ['CB','CB - Zagueiro Central'], ['LB','LB - Lateral Esq.'], ['RB','RB - Lateral Dir.'],
-    ['CDM','CDM - Volante'], ['CM','CM - Meia'], ['CAM','CAM - Meia Ofensivo'], ['LM','LM - Ala/Meia Esq.'], ['RM','RM - Ala/Meia Dir.'],
-    ['LW','LW - Ponta Esq.'], ['RW','RW - Ponta Dir.'], ['ST','ST - Atacante']
-  ];
   const rowsHtml = rows.map(p => {
     const profile = profileForPlayer(p.name);
     const intel = inferPlayerPositionIntel(p);
-    const selectHtml = opts.map(([v,l]) => `<option value="${v}" ${String(profile.manual_position || '') === v ? 'selected' : ''}>${l}</option>`).join('');
+    const selectHtml = manualPositionSelectOptions(profile.manual_position || '');
     const selectedStyles = (profile.playstyles || []).map(normalizePlaystyleName);
     const selectedArchetype = normalizeArchetypeName(profile.archetype || "");
     return `
