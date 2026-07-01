@@ -7525,6 +7525,30 @@ function render() {
   const c = document.getElementById('content');
   
   if (!DATA || !DATA.club) {
+    if (isOwnerAdmin()) {
+      if (!['owner-users','owner-clubs','ajuda'].includes(CURRENT_TAB)) CURRENT_TAB = 'owner-users';
+      c.innerHTML = `
+        <div class="club-card">
+          <div class="club-info">
+            <div class="club-shield">&#9881;</div>
+            <div style="flex:1;min-width:0;">
+              <div class="club-name">Painel master sennasant</div>
+              <div class="club-meta">Gerencie usu&aacute;rios e clubes cadastrados sem depender de sincroniza&ccedil;&atilde;o do clube</div>
+            </div>
+          </div>
+        </div>
+        <div class="tabs">
+          <div class="tab ${CURRENT_TAB==='owner-users'?'active':''}" onclick="setTab('owner-users')">USU&Aacute;RIOS</div>
+          <div class="tab ${CURRENT_TAB==='owner-clubs'?'active':''}" onclick="setTab('owner-clubs')">CLUBES</div>
+          <div class="tab ${CURRENT_TAB==='ajuda'?'active':''}" onclick="setTab('ajuda')">AJUDA</div>
+        </div>
+        <div class="container">
+          <div id="tabContent"></div>
+        </div>
+      `;
+      renderTab();
+      return;
+    }
     if (!isAdmin() && ['jogadores','comparar','confrontos','cadastro','alertas','config','owner-users','owner-clubs','adversarios'].includes(CURRENT_TAB)) CURRENT_TAB = 'visao';
   c.innerHTML = `
       <div class="empty-state">
