@@ -6719,7 +6719,7 @@ function renderAuth(mode = 'login') {
   if (!c) return;
   const isRegister = mode === 'register';
   const isReset = mode === 'reset';
-  if (!isAdmin() && ['jogadores','comparar','confrontos','cadastro','alertas','config','owner-users','owner-clubs','adversarios'].includes(CURRENT_TAB)) CURRENT_TAB = 'visao';
+  if (!isAdmin() && ['jogadores','comparar','confrontos','cadastro','alertas','config','owner-users','owner-clubs'].includes(CURRENT_TAB)) CURRENT_TAB = 'visao';
   const title = isRegister ? 'Criar Conta' : isReset ? 'Redefinir Acesso' : 'Entrar no ClubScout Pro';
   const help = isRegister
     ? 'Crie sua conta como jogador. O admin do clube libera ou bloqueia seu login depois.'
@@ -7017,7 +7017,7 @@ function setPeriod(p, ev) {
   if (ev && ev.target) ev.target.classList.add('active');
   if (!isAdmin()) {
     document.querySelectorAll('.tab').forEach(el => {
-      if (['JOGADORES','COMPARAR','CONFRONTOS','CADASTRO','ALERTAS','CONFIG','USUÁRIOS','USUARIOS','ADVERSÁRIOS','ADVERSARIOS','ADVERS&Aacute;RIOS'].includes((el.textContent || '').trim())) el.remove();
+      if (['JOGADORES','COMPARAR','CONFRONTOS','CADASTRO','ALERTAS','CONFIG','USUÁRIOS','USUARIOS'].includes((el.textContent || '').trim())) el.remove();
     });
   }
   render();
@@ -7030,7 +7030,7 @@ function setMatchType(t, ev) {
   if (ev && ev.target) ev.target.classList.add('active');
   if (!isAdmin()) {
     document.querySelectorAll('.tab').forEach(el => {
-      if (['JOGADORES','COMPARAR','CONFRONTOS','CADASTRO','ALERTAS','CONFIG','USUÁRIOS','USUARIOS','ADVERSÁRIOS','ADVERSARIOS','ADVERS&Aacute;RIOS'].includes((el.textContent || '').trim())) el.remove();
+      if (['JOGADORES','COMPARAR','CONFRONTOS','CADASTRO','ALERTAS','CONFIG','USUÁRIOS','USUARIOS'].includes((el.textContent || '').trim())) el.remove();
     });
   }
   renderTab();
@@ -7554,7 +7554,7 @@ function render() {
       renderTab();
       return;
     }
-    if (!isAdmin() && ['jogadores','comparar','confrontos','cadastro','alertas','config','owner-users','owner-clubs','adversarios'].includes(CURRENT_TAB)) CURRENT_TAB = 'visao';
+    if (!isAdmin() && ['jogadores','comparar','confrontos','cadastro','alertas','config','owner-users','owner-clubs'].includes(CURRENT_TAB)) CURRENT_TAB = 'visao';
   c.innerHTML = `
       <div class="empty-state">
         <div class="empty-icon">⚽</div>
@@ -7565,7 +7565,7 @@ function render() {
     return;
   }
   
-  if (!isAdmin() && ['jogadores','comparar','confrontos','cadastro','alertas','config','owner-users','owner-clubs','adversarios'].includes(CURRENT_TAB)) CURRENT_TAB = 'visao';
+  if (!isAdmin() && ['jogadores','comparar','confrontos','cadastro','alertas','config','owner-users','owner-clubs'].includes(CURRENT_TAB)) CURRENT_TAB = 'visao';
   c.innerHTML = `
     <div class="club-card">
       <div class="club-info">
@@ -7631,7 +7631,7 @@ function render() {
   
   if (!isAdmin()) {
     document.querySelectorAll('.tab').forEach(el => {
-      if (['JOGADORES','COMPARAR','CONFRONTOS','CADASTRO','ALERTAS','CONFIG','USUÁRIOS','USUARIOS','ADVERSÁRIOS','ADVERSARIOS','ADVERS&Aacute;RIOS'].includes((el.textContent || '').trim())) el.remove();
+      if (['JOGADORES','COMPARAR','CONFRONTOS','CADASTRO','ALERTAS','CONFIG','USUÁRIOS','USUARIOS'].includes((el.textContent || '').trim())) el.remove();
     });
   }
   renderTab();
@@ -7650,7 +7650,7 @@ function setTab(t, ev) {
   if (target && target.classList) target.classList.add('active');
   if (!isAdmin()) {
     document.querySelectorAll('.tab').forEach(el => {
-      if (['JOGADORES','COMPARAR','CONFRONTOS','CADASTRO','ALERTAS','CONFIG','USUÁRIOS','USUARIOS','ADVERSÁRIOS','ADVERSARIOS','ADVERS&Aacute;RIOS'].includes((el.textContent || '').trim())) el.remove();
+      if (['JOGADORES','COMPARAR','CONFRONTOS','CADASTRO','ALERTAS','CONFIG','USUÁRIOS','USUARIOS'].includes((el.textContent || '').trim())) el.remove();
     });
   }
   renderTab();
@@ -7681,7 +7681,7 @@ function renderTab() {
   else if (CURRENT_TAB === 'playstyles') tc.innerHTML = renderPlaystyles();
   else if (CURRENT_TAB === 'adversarios') tc.innerHTML = renderAdversarios();
   else if (CURRENT_TAB === 'ajuda') tc.innerHTML = renderAjuda();
-  else if (['jogadores','comparar','confrontos','cadastro','alertas','config','owner-users','owner-clubs','adversarios'].includes(CURRENT_TAB) && (!isAdmin() || (['owner-users','owner-clubs'].includes(CURRENT_TAB) && !isOwnerAdmin()))) { CURRENT_TAB = 'visao'; tc.innerHTML = renderVisao(); }
+  else if (['jogadores','comparar','confrontos','cadastro','alertas','config','owner-users','owner-clubs'].includes(CURRENT_TAB) && (!isAdmin() || (['owner-users','owner-clubs'].includes(CURRENT_TAB) && !isOwnerAdmin()))) { CURRENT_TAB = 'visao'; tc.innerHTML = renderVisao(); }
   else if (CURRENT_TAB === 'agenda') tc.innerHTML = renderAgenda();
 }
 
@@ -8807,7 +8807,7 @@ function setIdealFormation(value) {
   IDEAL_FORMATION = value;
   if (!isAdmin()) {
     document.querySelectorAll('.tab').forEach(el => {
-      if (['JOGADORES','COMPARAR','CONFRONTOS','CADASTRO','ALERTAS','CONFIG','USUÁRIOS','USUARIOS','ADVERSÁRIOS','ADVERSARIOS','ADVERS&Aacute;RIOS'].includes((el.textContent || '').trim())) el.remove();
+      if (['JOGADORES','COMPARAR','CONFRONTOS','CADASTRO','ALERTAS','CONFIG','USUÁRIOS','USUARIOS'].includes((el.textContent || '').trim())) el.remove();
     });
   }
   renderTab();
@@ -9892,7 +9892,7 @@ function cancelAgendaEdit() {
   AGENDA_EDIT_ID = null;
   if (!isAdmin()) {
     document.querySelectorAll('.tab').forEach(el => {
-      if (['JOGADORES','COMPARAR','CONFRONTOS','CADASTRO','ALERTAS','CONFIG','USUÁRIOS','USUARIOS','ADVERSÁRIOS','ADVERSARIOS','ADVERS&Aacute;RIOS'].includes((el.textContent || '').trim())) el.remove();
+      if (['JOGADORES','COMPARAR','CONFRONTOS','CADASTRO','ALERTAS','CONFIG','USUÁRIOS','USUARIOS'].includes((el.textContent || '').trim())) el.remove();
     });
   }
   renderTab();
