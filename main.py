@@ -1279,7 +1279,7 @@ class AuthLoginPayload(BaseModel):
 
 class AuthResetPayload(BaseModel):
     usuario: str
-    senha_atual: str
+    senha_atual: Optional[str] = None
     nova_senha: Optional[str] = None
     clube: str
     novo_clube: Optional[str] = None
@@ -2184,34 +2184,19 @@ def auth_reset(payload: AuthResetPayload):
     if not sb:
         raise HTTPException(503, "Supabase nao configurado para autenticacao")
     usuario = str(payload.usuario or "").strip().lower()
-    senha_atual = str(payload.senha_atual or "").strip()
     nova_senha = str(payload.nova_senha or "").strip()
     clube_informado = str(payload.clube or "").strip()
-    novo_clube = str(payload.novo_clube or "").strip()
-    if not usuario or not senha_atual or not clube_informado:
-        raise HTTPException(400, "Usuario, senha atual e clube atual sao obrigatorios")
+    if not usuario or not clube_informado or not nova_senha:
+        raise HTTPException(400, "Usuario, clube atual e nova senha sao obrigatorios")
+    if len(nova_senha) < 6:
+        raise HTTPException(400, "A nova senha deve ter pelo menos 6 caracteres")
 
     resolved = resolve_club_for_auth(clube_informado)
     row = _get_app_user_by_usuario(usuario, resolved["club_id"])
-    if not row or not verify_password(senha_atual, row.get("password_hash")):
-        raise HTTPException(401, "Usuario, clube ou senha atual invalidos")
+    if not row:
+        raise HTTPException(401, "Usuario ou clube invalidos")
 
-    update = {"updated_at": _now_iso()}
-    if nova_senha:
-        if len(nova_senha) < 6:
-            raise HTTPException(400, "A nova senha deve ter pelo menos 6 caracteres")
-        update["password_hash"] = hash_password(nova_senha)
-    if novo_clube:
-        new_resolved = resolve_club_for_auth(novo_clube)
-        existing = _get_app_user_by_usuario(usuario, new_resolved["club_id"])
-        if existing and str(existing.get("id")) != str(row.get("id")):
-            raise HTTPException(409, "Este usuario ja possui cadastro neste clube")
-        update["club_id"] = new_resolved["club_id"]
-        update["clube"] = new_resolved["clube"]
-        update["status"] = "pendente"
-        update["is_active"] = False
-    if len(update) == 1:
-        raise HTTPException(400, "Informe uma nova senha ou um novo clube")
+    update = {"updated_at": _now_iso(), "password_hash": hash_password(nova_senha)}
 
     try:
         resp = sb.table("app_users").update(update).eq("id", str(row.get("id"))).execute()
@@ -6719,7 +6704,7 @@ function renderAuth(mode = 'login') {
   const help = isRegister
     ? 'Crie sua conta como jogador. O admin do clube libera ou bloqueia seu login depois.'
     : isReset
-      ? 'Use sua senha atual para trocar senha ou mudar o clube vinculado. Se mudar de clube, o admin do novo clube precisa liberar seu acesso.'
+      ? 'Informe seu usu&aacute;rio, clube atual e uma nova senha. N&atilde;o precisa da senha antiga.'
       : 'Use seu usu&aacute;rio, senha e nome do clube exatamente como aparece no Pro Clubs.';
   c.innerHTML = `
     <div class="auth-shell">
@@ -6729,14 +6714,13 @@ function renderAuth(mode = 'login') {
         <form onsubmit="${isRegister ? 'submitRegister(event)' : isReset ? 'submitResetAccess(event)' : 'submitLogin(event)'}">
           ${isRegister ? `<div class="auth-field"><label>Nome</label><input id="authNome" autocomplete="name" required></div>` : ''}
           <div class="auth-field"><label>Usu&aacute;rio / ID FIFA</label><input id="authUsuario" autocomplete="username" required><div style="color:var(--text-2);font-size:11px;line-height:1.4;">Use o mesmo ID/nome do jogador no FIFA/EA FC, igual aparece no Pro Clubs. &Eacute; assim que o Meu Scout encontra suas estat&iacute;sticas.</div></div>
-          <div class="auth-field"><label>${isReset ? 'Senha atual' : 'Senha'}</label><input id="authSenha" type="password" autocomplete="${isRegister ? 'new-password' : 'current-password'}" required></div>
-          ${isReset ? `<div class="auth-field"><label>Nova senha (opcional)</label><input id="authNovaSenha" type="password" autocomplete="new-password" placeholder="Preencha s&oacute; se quiser trocar a senha"></div>` : ''}
+          ${!isReset ? `<div class="auth-field"><label>Senha</label><input id="authSenha" type="password" autocomplete="${isRegister ? 'new-password' : 'current-password'}" required></div>` : ''}
+          ${isReset ? `<div class="auth-field"><label>Nova senha</label><input id="authNovaSenha" type="password" autocomplete="new-password" placeholder="M&iacute;nimo 6 caracteres" required></div>` : ''}
           <div class="auth-field"><label>${isReset ? 'Clube atual' : 'Nome do Clube'}</label><input id="authClube" placeholder="Nome do clube igual ao Pro Clubs" required><div style="color:var(--text-2);font-size:11px;line-height:1.4;">Digite o nome do clube como est&aacute; no EA FC Pro Clubs, incluindo acentos e espa&ccedil;os quando houver.</div></div>
-          ${isReset ? `<div class="auth-field"><label>Novo clube (opcional)</label><input id="authNovoClube" placeholder="Preencha s&oacute; se quiser trocar de clube"></div>` : ''}
           <div class="auth-actions">
-            <button class="btn-primary" type="submit">${isRegister ? 'Criar Conta' : isReset ? 'Salvar Altera&ccedil;&atilde;o' : 'Entrar'}</button>
+            <button class="btn-primary" type="submit">${isRegister ? 'Criar Conta' : isReset ? 'Redefinir senha' : 'Entrar'}</button>
             <button class="auth-link" type="button" onclick="renderAuth('${isRegister || isReset ? 'login' : 'register'}')">${isRegister || isReset ? 'J&aacute; tenho conta' : 'Criar conta'}</button>
-            ${!isRegister && !isReset ? `<button class="auth-link" type="button" onclick="renderAuth('reset')">Redefinir senha/clube</button>` : ''}
+            ${!isRegister && !isReset ? `<button class="auth-link" type="button" onclick="renderAuth('reset')">Esqueci minha senha</button>` : ''}
           </div>
           <div id="authError" class="auth-error"></div>
         </form>
@@ -6815,22 +6799,20 @@ async function submitResetAccess(ev) {
   try {
     const body = {
       usuario: document.getElementById('authUsuario').value.trim(),
-      senha_atual: document.getElementById('authSenha').value,
       nova_senha: document.getElementById('authNovaSenha').value,
       clube: document.getElementById('authClube').value.trim(),
-      novo_clube: document.getElementById('authNovoClube').value.trim(),
     };
     const r = await fetch('/api/auth/reset', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
     const data = await r.json().catch(() => ({}));
     if (!r.ok) throw new Error(data.detail || data.message || 'Erro ao redefinir acesso');
-    showAuthMessage(body.novo_clube ? 'Acesso atualizado. O admin do novo clube precisa liberar seu login.' : 'Senha atualizada. Volte para o login.', 'success');
+    showAuthMessage('Senha atualizada. Volte para o login.', 'success');
     setTimeout(() => {
       renderAuth('login');
       setTimeout(() => {
         const userInput = document.getElementById('authUsuario');
         const clubInput = document.getElementById('authClube');
         if (userInput) userInput.value = body.usuario;
-        if (clubInput) clubInput.value = body.novo_clube || body.clube;
+        if (clubInput) clubInput.value = body.clube;
       }, 60);
     }, 1000);
   } catch (e) {
