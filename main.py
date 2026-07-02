@@ -5868,6 +5868,9 @@ body {
 .opponent-table th { text-align:left; color:var(--text-2); font-size:10px; letter-spacing:1.5px; text-transform:uppercase; padding:9px 10px; border-bottom:1px solid var(--border); }
 .opponent-table td { padding:10px; border-bottom:1px solid rgba(255,255,255,0.04); vertical-align:top; }
 .opponent-table tr:last-child td { border-bottom:none; }
+.opponent-history-tools { display:flex; align-items:center; justify-content:space-between; gap:10px; margin-bottom:10px; flex-wrap:wrap; }
+.opponent-history-search { flex:1 1 240px; background:var(--bg); color:var(--text); border:1px solid var(--border); border-radius:10px; padding:11px 12px; font:inherit; font-size:13px; min-width:0; }
+.opponent-history-hint { color:var(--text-2); font-size:11px; letter-spacing:.5px; text-transform:uppercase; }
 .opponent-history-table { min-width:920px; }
 .opponent-history-table th, .opponent-history-table td,
 .opponent-games-table th, .opponent-games-table td { border-right:1px solid rgba(255,255,255,.22); border-bottom:1px solid rgba(255,255,255,.16); padding:7px 9px; }
@@ -5898,6 +5901,8 @@ body {
   .opponent-grade { min-width:58px; width:58px; height:58px; }
   .opponent-grade .rank { font-size:20px; }
   .opponent-grade .score { font-size:8px; }
+  .opponent-history-tools { align-items:stretch; }
+  .opponent-history-search { flex-basis:100%; }
   .opponent-table-wrap { border:0; overflow:visible; }
   .opponent-table, .opponent-table tbody, .opponent-table tr, .opponent-table td { display:block; width:100%; min-width:0; }
   .opponent-table thead { display:none; }
@@ -7770,18 +7775,20 @@ function resultSequenceHtml(seq) {
   }).join('');
 }
 
-function renderOpponentHistory() {
-  const matches = playerStatMatches();
-  const rows = buildOpponentHistoryRows(matches);
-  const scopeLabel = currentScopeLabel();
+function opponentHistoryFilteredRows(query) {
+  const q = normalizePlayerLookup(query);
+  const rows = buildOpponentHistoryRows(playerStatMatches());
+  if (!q) return rows.slice(0, 10);
+  const starts = rows.filter(r => normalizePlayerLookup(r.opponent).startsWith(q));
+  return starts.length ? starts : rows.filter(r => normalizePlayerLookup(r.opponent).includes(q));
+}
+
+function renderOpponentHistoryTable(query = '') {
+  const rows = opponentHistoryFilteredRows(query);
   if (!rows.length) {
-    return `
-      <div class="section-title">Hist&oacute;rico por advers&aacute;rio &middot; ${escapeAttr(scopeLabel)}</div>
-      <div class="empty-state" style="padding:30px 20px;">Nenhuma partida salva neste filtro</div>
-    `;
+    return '<div class="empty-state" style="padding:30px 20px;">Nenhum advers&aacute;rio encontrado neste filtro</div>';
   }
   return `
-    <div class="section-title">Hist&oacute;rico por advers&aacute;rio &middot; ${escapeAttr(scopeLabel)}</div>
     <div class="opponent-table-wrap" style="margin-bottom:22px;">
       <table class="opponent-table opponent-history-table">
         <thead>
@@ -7806,6 +7813,32 @@ function renderOpponentHistory() {
         </tbody>
       </table>
     </div>
+  `;
+}
+
+function filterOpponentHistory(input) {
+  const target = document.getElementById('opponentHistoryResults');
+  if (!target) return;
+  target.innerHTML = renderOpponentHistoryTable(input && input.value ? input.value : '');
+}
+
+function renderOpponentHistory() {
+  const matches = playerStatMatches();
+  const rows = buildOpponentHistoryRows(matches);
+  const scopeLabel = currentScopeLabel();
+  if (!rows.length) {
+    return `
+      <div class="section-title">Hist&oacute;rico por advers&aacute;rio &middot; ${escapeAttr(scopeLabel)}</div>
+      <div class="empty-state" style="padding:30px 20px;">Nenhuma partida salva neste filtro</div>
+    `;
+  }
+  return `
+    <div class="section-title">Hist&oacute;rico por advers&aacute;rio &middot; ${escapeAttr(scopeLabel)}</div>
+    <div class="opponent-history-tools">
+      <input class="opponent-history-search" type="search" placeholder="Buscar advers&aacute;rio: pal, desa..." oninput="filterOpponentHistory(this)">
+      <div class="opponent-history-hint">Top 10 por jogos &middot; digite para pesquisar</div>
+    </div>
+    <div id="opponentHistoryResults">${renderOpponentHistoryTable('')}</div>
   `;
 }
 
