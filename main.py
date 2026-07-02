@@ -5869,6 +5869,14 @@ body {
 .opponent-table td { padding:10px; border-bottom:1px solid rgba(255,255,255,0.04); vertical-align:top; }
 .opponent-table tr:last-child td { border-bottom:none; }
 .opponent-history-table { min-width:920px; }
+.opponent-history-table th, .opponent-history-table td,
+.opponent-games-table th, .opponent-games-table td { border-right:1px solid rgba(255,255,255,.22); border-bottom:1px solid rgba(255,255,255,.16); padding:7px 9px; }
+.opponent-history-table th:last-child, .opponent-history-table td:last-child,
+.opponent-games-table th:last-child, .opponent-games-table td:last-child { border-right:0; }
+.opponent-history-table tr:last-child td,
+.opponent-games-table tr:last-child td { border-bottom:0; }
+.opponent-link { appearance:none; background:none; border:0; color:var(--green); font:inherit; font-weight:900; padding:0; cursor:pointer; text-align:left; overflow-wrap:anywhere; }
+.opponent-link:hover { text-decoration:underline; text-shadow:0 0 10px var(--green-glow); }
 .result-sequence { display:flex; gap:4px; flex-wrap:wrap; align-items:center; max-width:190px; }
 .result-dot { min-width:19px; height:19px; padding:0 5px; display:inline-flex; align-items:center; justify-content:center; border-radius:6px; border:1px solid var(--border); color:var(--text-2); font-size:10px; font-weight:900; }
 .result-dot.v { color:var(--green); border-color:rgba(0,255,115,.35); background:rgba(0,255,115,.08); }
@@ -7785,7 +7793,7 @@ function renderOpponentHistory() {
           ${rows.map((r, idx) => `
             <tr>
               <td data-label="#">${idx + 1}</td>
-              <td data-label="Advers&aacute;rio"><strong>${escapeAttr(r.opponent)}</strong></td>
+              <td data-label="Advers&aacute;rio"><button type="button" class="opponent-link" data-opponent="${escapeAttr(r.opponent)}" onclick="showOpponentHistory(this.dataset.opponent)">${escapeAttr(r.opponent)}</button></td>
               <td data-label="Jogos">${escapeAttr(r.games)}</td>
               <td data-label="V/E/D">${escapeAttr(r.wins)} / ${escapeAttr(r.draws)} / ${escapeAttr(r.losses)}</td>
               <td data-label="Win">${escapeAttr(r.winRate)}%</td>
@@ -7799,6 +7807,48 @@ function renderOpponentHistory() {
       </table>
     </div>
   `;
+}
+
+function showOpponentHistory(opponent) {
+  const wanted = String(opponent || '').trim().toLowerCase();
+  const matches = playerStatMatches()
+    .filter(m => String(m.opponent || '').trim().toLowerCase() === wanted)
+    .sort((a,b) => Number(b.timestamp || 0) - Number(a.timestamp || 0));
+  if (!matches.length) return;
+  const summary = buildOpponentHistoryRows(matches)[0] || {};
+  const rows = matches.map((m, idx) => {
+    const resultLabel = m.result === 'V' ? 'Vit&oacute;ria' : m.result === 'E' ? 'Empate' : 'Derrota';
+    const score = m.score || `${m.goals_for || 0}-${m.goals_against || 0}`;
+    return `
+      <tr>
+        <td data-label="#">${idx + 1}</td>
+        <td data-label="Data">${escapeAttr(matchDisplayDate(m))}</td>
+        <td data-label="Hora">${escapeAttr(matchDisplayTime(m))}</td>
+        <td data-label="Tipo">${escapeAttr(m.match_type || '-')}</td>
+        <td data-label="Placar"><strong>${escapeAttr(score)}</strong></td>
+        <td data-label="Resultado"><span class="vs-tag ${String(m.result || '').toLowerCase()}">${escapeAttr(resultLabel)}</span></td>
+        <td data-label="MOM">${escapeAttr(m.mom || '-')}${m.mom_rating ? ' &middot; ' + escapeAttr(m.mom_rating) : ''}</td>
+        <td data-label="ID">${escapeAttr(m.match_id || '-')}</td>
+      </tr>
+    `;
+  }).join('');
+  document.getElementById('modalContent').innerHTML = `
+    <h2>${escapeAttr(summary.opponent || opponent)}</h2>
+    <div class="analytics-cards" style="margin:12px 0 16px;">
+      <div class="analytics-card"><div class="v">${escapeAttr(summary.games || 0)}</div><div class="l">Jogos</div></div>
+      <div class="analytics-card"><div class="v">${escapeAttr((summary.wins || 0) + '/' + (summary.draws || 0) + '/' + (summary.losses || 0))}</div><div class="l">V/E/D</div></div>
+      <div class="analytics-card"><div class="v">${escapeAttr(summary.winRate || 0)}%</div><div class="l">Win</div></div>
+      <div class="analytics-card"><div class="v">${escapeAttr((summary.gf || 0) + '-' + (summary.ga || 0))}</div><div class="l">Gols</div></div>
+    </div>
+    <div class="result-sequence" style="max-width:none;margin-bottom:14px;" title="${escapeAttr(summary.sequence || '')}">${resultSequenceHtml(summary.sequence || '')}</div>
+    <div class="opponent-table-wrap">
+      <table class="opponent-table opponent-games-table">
+        <thead><tr><th>#</th><th>Data</th><th>Hora</th><th>Tipo</th><th>Placar</th><th>Resultado</th><th>MOM</th><th>ID</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>
+  `;
+  document.getElementById('modal').classList.add('active');
 }
 
 function avgFrom(values) {
