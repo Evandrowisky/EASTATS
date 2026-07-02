@@ -5868,6 +5868,12 @@ body {
 .opponent-table th { text-align:left; color:var(--text-2); font-size:10px; letter-spacing:1.5px; text-transform:uppercase; padding:9px 10px; border-bottom:1px solid var(--border); }
 .opponent-table td { padding:10px; border-bottom:1px solid rgba(255,255,255,0.04); vertical-align:top; }
 .opponent-table tr:last-child td { border-bottom:none; }
+.opponent-history-table { min-width:920px; }
+.result-sequence { display:flex; gap:4px; flex-wrap:wrap; align-items:center; max-width:190px; }
+.result-dot { min-width:19px; height:19px; padding:0 5px; display:inline-flex; align-items:center; justify-content:center; border-radius:6px; border:1px solid var(--border); color:var(--text-2); font-size:10px; font-weight:900; }
+.result-dot.v { color:var(--green); border-color:rgba(0,255,115,.35); background:rgba(0,255,115,.08); }
+.result-dot.e { color:var(--yellow); border-color:rgba(255,204,0,.35); background:rgba(255,204,0,.08); }
+.result-dot.d { color:var(--red); border-color:rgba(255,65,65,.35); background:rgba(255,65,65,.08); }
 .scout-pill { display:inline-block; padding:3px 8px; border-radius:999px; background:var(--green-dim); color:var(--green); border:1px solid rgba(0,255,115,.25); font-size:10px; font-weight:800; letter-spacing:1px; text-transform:uppercase; }
 .scout-cols { display:grid; grid-template-columns:1fr 1fr 1.4fr; gap:12px; }
 .scout-box { background:rgba(255,255,255,0.025); border:1px solid var(--border); border-radius:10px; padding:12px; min-height:96px; }
@@ -5891,6 +5897,7 @@ body {
   .opponent-table td { padding:8px; border:1px solid var(--border); border-radius:8px; background:rgba(255,255,255,0.025); font-size:11px; overflow-wrap:anywhere; }
   .opponent-table td::before { content: attr(data-label); display:block; color:var(--green); font-size:9px; text-transform:uppercase; letter-spacing:1px; margin-bottom:3px; }
   .opponent-table td:last-child { grid-column:1 / -1; }
+  .result-sequence { max-width:none; }
 }
 
 /* AUTH */
@@ -7697,6 +7704,101 @@ function calcOpponentAvgClient(matches) {
     avg_gf: +(d.gf / Math.max(d.games, 1)).toFixed(1),
     avg_ga: +(d.ga / Math.max(d.games, 1)).toFixed(1),
   })).sort((a,b) => b.avg_gf - a.avg_gf).slice(0, 10);
+}
+
+function buildOpponentHistoryRows(matches) {
+  const byOpp = {};
+  (matches || []).forEach(m => {
+    const opponent = String(m.opponent || 'Adversario').trim() || 'Adversario';
+    const key = opponent.toLowerCase();
+    if (!byOpp[key]) {
+      byOpp[key] = {
+        opponent,
+        games: 0,
+        wins: 0,
+        draws: 0,
+        losses: 0,
+        gf: 0,
+        ga: 0,
+        matches: [],
+      };
+    }
+    const row = byOpp[key];
+    row.games += 1;
+    if (m.result === 'V') row.wins += 1;
+    else if (m.result === 'E') row.draws += 1;
+    else if (m.result === 'D') row.losses += 1;
+    row.gf += Number(m.goals_for || 0);
+    row.ga += Number(m.goals_against || 0);
+    row.matches.push(m);
+  });
+  return Object.values(byOpp).map(row => {
+    const ordered = row.matches.slice().sort((a,b) => Number(a.timestamp || 0) - Number(b.timestamp || 0));
+    const latest = row.matches.slice().sort((a,b) => Number(b.timestamp || 0) - Number(a.timestamp || 0))[0] || {};
+    const sequence = ordered.map(m => String(m.result || '-').slice(0, 1).toUpperCase()).join('');
+    const recentSequence = ordered.slice(-12).map(m => String(m.result || '-').slice(0, 1).toUpperCase()).join('');
+    const winRate = Math.round((row.wins / Math.max(row.games, 1)) * 100);
+    return {
+      ...row,
+      sequence,
+      recentSequence,
+      winRate,
+      lastDate: matchDisplayDate(latest),
+      lastScore: latest.score || `${latest.goals_for || 0}-${latest.goals_against || 0}`,
+      lastResult: latest.result || '-',
+      goalDiff: row.gf - row.ga,
+    };
+  }).sort((a,b) =>
+    Number(b.games || 0) - Number(a.games || 0) ||
+    Number(b.winRate || 0) - Number(a.winRate || 0) ||
+    String(a.opponent || '').localeCompare(String(b.opponent || ''))
+  );
+}
+
+function resultSequenceHtml(seq) {
+  return String(seq || '').split('').map(r => {
+    const cls = r === 'V' ? 'v' : r === 'E' ? 'e' : r === 'D' ? 'd' : '';
+    return `<span class="result-dot ${cls}">${escapeAttr(r)}</span>`;
+  }).join('');
+}
+
+function renderOpponentHistory() {
+  const matches = playerStatMatches();
+  const rows = buildOpponentHistoryRows(matches);
+  const scopeLabel = currentScopeLabel();
+  if (!rows.length) {
+    return `
+      <div class="section-title">Hist&oacute;rico por advers&aacute;rio &middot; ${escapeAttr(scopeLabel)}</div>
+      <div class="empty-state" style="padding:30px 20px;">Nenhuma partida salva neste filtro</div>
+    `;
+  }
+  return `
+    <div class="section-title">Hist&oacute;rico por advers&aacute;rio &middot; ${escapeAttr(scopeLabel)}</div>
+    <div class="opponent-table-wrap" style="margin-bottom:22px;">
+      <table class="opponent-table opponent-history-table">
+        <thead>
+          <tr>
+            <th>#</th><th>Advers&aacute;rio</th><th>Jogos</th><th>V/E/D</th><th>Win</th><th>Gols</th><th>Saldo</th><th>Retrospecto</th><th>&Uacute;ltimo</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${rows.map((r, idx) => `
+            <tr>
+              <td data-label="#">${idx + 1}</td>
+              <td data-label="Advers&aacute;rio"><strong>${escapeAttr(r.opponent)}</strong></td>
+              <td data-label="Jogos">${escapeAttr(r.games)}</td>
+              <td data-label="V/E/D">${escapeAttr(r.wins)} / ${escapeAttr(r.draws)} / ${escapeAttr(r.losses)}</td>
+              <td data-label="Win">${escapeAttr(r.winRate)}%</td>
+              <td data-label="Gols">${escapeAttr(r.gf)}-${escapeAttr(r.ga)}</td>
+              <td data-label="Saldo">${escapeAttr(r.goalDiff > 0 ? '+' + r.goalDiff : r.goalDiff)}</td>
+              <td data-label="Retrospecto"><div class="result-sequence" title="${escapeAttr(r.sequence)}">${resultSequenceHtml(r.recentSequence)}</div></td>
+              <td data-label="&Uacute;ltimo">${escapeAttr(r.lastDate)} &middot; <span class="vs-tag ${String(r.lastResult || '').toLowerCase()}">${escapeAttr(r.lastResult)}</span> ${escapeAttr(r.lastScore)}</td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>
+    </div>
+  `;
 }
 
 function avgFrom(values) {
@@ -9572,6 +9674,7 @@ function renderTimeIdeal() {
 function renderAdversarios() {
   const results = renderOpponentScouts();
   return `
+    ${renderOpponentHistory()}
     <div class="section-title">Próximos Adversários</div>
     <div style="color:var(--text-2);font-size:12px;line-height:1.5;margin-bottom:12px;">Cadastre até 5 clubes rivais para uma leitura rápida: força do time, estilo provável, principais jogadores, pontos fortes/fracos e plano de jogo.</div>
     <div class="opponent-form">
