@@ -3976,7 +3976,123 @@ def build_market_analysis_from_cache(player_name: str, cache: dict) -> dict:
     return _market_finalize(rows, player_name, "cache")
 
 
-def build_market_analysis_supabase(player_name: str) -> dict:
+def build_market_analysis_live_ea(player_name: str, club_name: str, platform: str = "auto") -> dict:
+    q = str(player_name or "").strip()
+    club_query = str(club_name or "").strip()
+    if len(q) < 2 or len(club_query) < 2:
+        raise HTTPException(400, "Informe usuario e clube atual para buscar ao vivo na EA")
+    search = ea_client.search_club(club_query, platform or "auto")
+    if not search or not search.get("success"):
+        raise HTTPException(404, f"Clube '{club_name}' nao encontrado na EA")
+    club_id = str(search.get("clubId") or "")
+    plat = search.get("platform") or "common-gen5"
+    club_real_name = search.get("name") or club_name
+    row = _market_empty_club(club_id, club_real_name)
+
+    members_raw = ea_client.members(club_id, plat)
+    players = parse_players(members_raw)
+    member = next((p for p in players if _market_name_matches(p.get("name"), q)), None)
+    if member:
+        row["player_name"] = member.get("name") or q
+        row["position"] = member.get("position") or row["position"]
+        row["member_games"] = _safe_int(member.get("games"))
+        row["goals"] = _safe_int(member.get("goals"))
+        row["assists"] = _safe_int(member.get("assists"))
+        row["shots"] = _safe_int(member.get("shots"))
+        row["passes_made"] = _safe_int(member.get("passes_made"))
+        row["tackles_made"] = _safe_int(member.get("tackles_made"))
+        row["moms"] = _safe_int(member.get("mom"))
+        row["member_totals"] = member
+        if member.get("rating") is not None:
+            row["rating_sum"] += _safe_float(member.get("rating"))
+            row["rating_count"] += 1
+        if member.get("pass_pct") is not None:
+            row["pass_pct_sum"] += _safe_float(member.get("pass_pct"))
+            row["pass_pct_count"] += 1
+        if member.get("tackle_pct") is not None:
+            row["tackle_pct_sum"] += _safe_float(member.get("tackle_pct"))
+            row["tackle_pct_count"] += 1
+
+    raw_matches = []
+    for match_type in ("leagueMatch", "club_private", "club_private cupMatch", "cupMatch"):
+        try:
+            got = ea_client.matches(club_id, match_type, plat, max_count=100)
+            if isinstance(got, list):
+                for item in got:
+                    if isinstance(item, dict):
+                        item["_origin"] = match_type
+                        raw_matches.append(item)
+        except Exception as e:
+            print(f"[MERCADO] Aviso ao buscar partidas EA {match_type}: {type(e).__name__}: {e}")
+    parsed_matches = parse_matches(raw_matches, club_id)
+    seen_matches = set()
+    for m in parsed_matches:
+        mid = str(m.get("match_id") or "")
+        if mid and mid in seen_matches:
+            continue
+        if mid:
+            seen_matches.add(mid)
+        found = None
+        for pr in m.get("players_ratings") or []:
+            if _market_name_matches(pr.get("name"), q):
+                found = pr
+                break
+        if not found:
+            continue
+        row["player_name"] = found.get("name") or row.get("player_name") or q
+        row["position"] = found.get("pos") or found.get("position") or row.get("position") or "-"
+        row["games"] += 1
+        if m.get("result") == "V":
+            row["wins"] += 1
+        elif m.get("result") == "E":
+            row["draws"] += 1
+        elif m.get("result") == "D":
+            row["losses"] += 1
+        ts = _safe_int(m.get("timestamp"))
+        row["last_timestamp"] = max(_safe_int(row.get("last_timestamp")), ts)
+        for key in ("goals", "assists", "shots", "passes_made", "tackles_made", "saves", "clean_sheet", "red"):
+            target = "clean_sheets" if key == "clean_sheet" else "reds" if key == "red" else key
+            row[target] += _safe_int(found.get(key))
+        row["moms"] += 1 if _safe_int(found.get("mom")) else 0
+        if found.get("rating") is not None:
+            row["rating_sum"] += _safe_float(found.get("rating"))
+            row["rating_count"] += 1
+        if found.get("sofi_rating") is not None:
+            row["sofi_sum"] += _safe_float(found.get("sofi_rating"))
+            row["sofi_count"] += 1
+        if found.get("pass_pct") is not None:
+            row["pass_pct_sum"] += _safe_float(found.get("pass_pct"))
+            row["pass_pct_count"] += 1
+        if found.get("tackle_pct") is not None:
+            row["tackle_pct_sum"] += _safe_float(found.get("tackle_pct"))
+            row["tackle_pct_count"] += 1
+        row["history"].append({
+            "match_id": m.get("match_id"),
+            "timestamp": ts,
+            "date": format_match_date_br(ts) if ts else m.get("date"),
+            "time": format_match_time_br(ts) if ts else m.get("time"),
+            "opponent": m.get("opponent"),
+            "score": m.get("score"),
+            "result": m.get("result"),
+            "match_type": m.get("match_type"),
+            "position": found.get("pos") or found.get("position"),
+            "rating": _safe_float(found.get("rating")),
+            "sofi_rating": _safe_float(found.get("sofi_rating", found.get("rating"))),
+            "goals": _safe_int(found.get("goals")),
+            "assists": _safe_int(found.get("assists")),
+            "shots": _safe_int(found.get("shots")),
+            "pass_pct": _safe_float(found.get("pass_pct")),
+            "tackle_pct": _safe_float(found.get("tackle_pct")),
+        })
+
+    if not row.get("games") and not row.get("member_games"):
+        raise HTTPException(404, f"Jogador '{player_name}' nao encontrado no clube '{club_real_name}' pela EA")
+    result = _market_finalize({club_id: row}, q, "ea_api")
+    result["live_club"] = {"club_id": club_id, "club_name": club_real_name, "platform": plat}
+    return result
+
+
+def build_market_analysis_supabase(player_name: str, club_name: str = "", platform: str = "auto") -> dict:
     q = str(player_name or "").strip()
     if len(q) < 2:
         raise HTTPException(400, "Informe pelo menos 2 caracteres do usuario")
@@ -3985,6 +4101,8 @@ def build_market_analysis_supabase(player_name: str) -> dict:
         cache = load_cache()
         result = build_market_analysis_from_cache(q, cache)
         if not result.get("clubs"):
+            if club_name:
+                return build_market_analysis_live_ea(q, club_name, platform)
             raise HTTPException(404, "Supabase indisponivel e jogador nao encontrado no cache atual")
         return result
 
@@ -4134,6 +4252,8 @@ def build_market_analysis_supabase(player_name: str) -> dict:
         fallback = build_market_analysis_from_cache(q, cache)
         if fallback.get("clubs"):
             return fallback
+        if club_name:
+            return build_market_analysis_live_ea(q, club_name, platform)
         raise HTTPException(404, f"Jogador '{player_name}' nao encontrado no banco")
     return _market_finalize(grouped, q, "supabase")
 
@@ -4327,9 +4447,14 @@ def get_player_analytics(player_name: str, match_type: str = Query("todos"), per
 
 
 @app.get("/api/market/player/{player_name}")
-def get_market_player_analysis(player_name: str, current_user: dict = Depends(get_current_user)):
+def get_market_player_analysis(
+    player_name: str,
+    club_name: str = Query("", description="Clube atual do jogador para busca ao vivo na EA quando nao existir no banco"),
+    platform: str = Query("auto"),
+    current_user: dict = Depends(get_current_user),
+):
     """Analise de mercado: carreira do jogador por clube salvo no banco."""
-    return build_market_analysis_supabase(player_name)
+    return build_market_analysis_supabase(player_name, club_name, platform)
 
 
 @app.get("/api/player/{player_name}")
@@ -6276,7 +6401,7 @@ body {
 .opponent-games-table tr:last-child td { border-bottom:0; }
 .opponent-link { appearance:none; background:none; border:0; color:var(--green); font:inherit; font-weight:900; padding:0; cursor:pointer; text-align:left; overflow-wrap:anywhere; }
 .opponent-link:hover { text-decoration:underline; text-shadow:0 0 10px var(--green-glow); }
-.market-search { background:var(--bg-card); border:1px solid var(--border); border-radius:12px; padding:14px; display:grid; grid-template-columns:minmax(180px,1fr) auto; gap:10px; margin-bottom:16px; }
+.market-search { background:var(--bg-card); border:1px solid var(--border); border-radius:12px; padding:14px; display:grid; grid-template-columns:minmax(160px,1fr) minmax(160px,1fr) auto; gap:10px; margin-bottom:16px; }
 .market-search input { background:var(--bg); color:var(--text); border:1px solid var(--border); border-radius:10px; padding:12px; font:inherit; min-width:0; }
 .market-player-head { display:flex; align-items:flex-start; justify-content:space-between; gap:12px; margin:4px 0 14px; flex-wrap:wrap; }
 .market-player-name { font-size:24px; font-weight:900; color:var(--text); }
@@ -7617,6 +7742,17 @@ function scopedPlayers() {
   return filterActivePlayers(players);
 }
 
+function clubGamesForPlayer(name) {
+  const wanted = new Set(normPlayerKeys(name));
+  if (!wanted.size) return 0;
+  return ((DATA && DATA.matches) ? DATA.matches : []).reduce((total, match) => {
+    const found = (match.players_ratings || []).some(pr =>
+      normPlayerKeys(pr.name).some(k => wanted.has(k))
+    );
+    return total + (found ? 1 : 0);
+  }, 0);
+}
+
 function emptyPlayerForCurrentFilter(base) {
   if (!base) return null;
   const intel = inferPlayerPositionIntel(base);
@@ -8808,7 +8944,7 @@ function renderMarketResult(data) {
     <div class="market-player-head">
       <div>
         <div class="market-player-name">${escapeAttr(data.player_name || data.query || 'Jogador')}</div>
-        <div class="market-player-meta">Fonte: ${escapeAttr(data.source || 'banco')} &middot; ${escapeAttr(clubs.length)} clube(s) encontrados &middot; posi&ccedil;&atilde;o mais comum: ${escapeAttr(t.position || '-')}</div>
+        <div class="market-player-meta">Fonte: ${escapeAttr(data.source === 'ea_api' ? 'EA ao vivo' : data.source || 'banco')} &middot; ${escapeAttr(clubs.length)} clube(s) encontrados &middot; posi&ccedil;&atilde;o mais comum: ${escapeAttr(t.position || '-')}</div>
       </div>
     </div>
     <div class="market-decision">${escapeAttr(marketDecisionText(data))}</div>
@@ -8887,9 +9023,10 @@ function renderMarketResult(data) {
 function renderAnaliseMercado() {
   return `
     <div class="section-title">An&aacute;lise Mercado</div>
-    <div style="color:var(--text-2);font-size:12px;line-height:1.5;margin-bottom:12px;">Digite o usu&aacute;rio/ID EA do jogador para ver a carreira por clube com os dados dispon&iacute;veis no banco.</div>
+    <div style="color:var(--text-2);font-size:12px;line-height:1.5;margin-bottom:12px;">Digite o usu&aacute;rio/ID EA. Se o jogador n&atilde;o estiver no banco, informe tamb&eacute;m o clube atual para buscar dados ao vivo na EA.</div>
     <div class="market-search">
       <input id="marketPlayerInput" type="search" placeholder="Usu&aacute;rio / ID EA do jogador" onkeydown="if(event.key==='Enter') analyzeMarketPlayer()">
+      <input id="marketClubInput" type="search" placeholder="Clube atual (opcional para EA ao vivo)" onkeydown="if(event.key==='Enter') analyzeMarketPlayer()">
       <button type="button" class="btn-primary" id="marketSearchBtn" onclick="analyzeMarketPlayer()">Analisar</button>
     </div>
     <div id="marketStatus" style="color:var(--text-2);font-size:12px;margin-bottom:10px;"></div>
@@ -8903,14 +9040,16 @@ async function analyzeMarketPlayer() {
   const btn = document.getElementById('marketSearchBtn');
   const target = document.getElementById('marketResults');
   const name = (input && input.value ? input.value : '').trim();
+  const club = (document.getElementById('marketClubInput')?.value || '').trim();
   if (!name || name.length < 2) {
     if (status) status.textContent = 'Informe pelo menos 2 caracteres do usuario.';
     return;
   }
   try {
     if (btn) { btn.disabled = true; btn.textContent = 'Buscando...'; }
-    if (status) status.textContent = 'Buscando carreira no banco...';
-    const r = await authFetch('/api/market/player/' + encodeURIComponent(name));
+    if (status) status.textContent = club ? 'Buscando no banco; se precisar, consultando a EA ao vivo...' : 'Buscando carreira no banco...';
+    const url = '/api/market/player/' + encodeURIComponent(name) + (club ? '?club_name=' + encodeURIComponent(club) + '&platform=auto' : '');
+    const r = await authFetch(url);
     const data = await r.json().catch(() => ({}));
     if (!r.ok) throw new Error(data.detail || data.message || 'Jogador nao encontrado');
     MARKET_ANALYSIS = data;
@@ -8986,7 +9125,7 @@ function renderRankings() {
   }[CURRENT_PERIOD] || 'filtro atual';
 
   if (!players.length) {
-    return `<div class="empty-state">Nenhum jogador com pelo menos ${minGames} partidas neste filtro</div>`;
+    return `<div class="empty-state">Nenhum jogador com pelo menos ${minGames} partidas salvas no clube para este filtro</div>`;
   }
 
   const rankValue = (p, key) => {
@@ -9011,12 +9150,11 @@ function renderRankings() {
   const podiumIcon = (idx) => String(idx + 1);
   const podiumClass = (idx) => idx === 0 ? 'top1' : idx === 1 ? 'top2' : idx === 2 ? 'top3' : '';
 
-  const topList = (title, icon, key, suffix='', minGames=1, requirePositive=false) => {
+  const topList = (title, icon, key, suffix='', requirePositive=false) => {
     const rows = players
-      .filter(p => Number(p.games || 0) >= minGames)
-      .map(p => ({...p, _rank_value: rankValue(p, key)}))
+      .map(p => ({...p, _rank_value: rankValue(p, key), _club_games: clubGamesForPlayer(p.name)}))
       .filter(p => requirePositive ? p._rank_value > 0 : p._rank_value >= 0)
-      .sort((a,b) => (b._rank_value - a._rank_value) || Number(b.games || 0) - Number(a.games || 0))
+      .sort((a,b) => (b._rank_value - a._rank_value) || Number(b.games || 0) - Number(a.games || 0) || Number(b._club_games || 0) - Number(a._club_games || 0))
       .slice(0, 5);
     return `
       <div class="ranking-card">
@@ -9027,7 +9165,7 @@ function renderRankings() {
               <div class="ranking-pos ${podiumClass(idx)}">${podiumIcon(idx)}</div>
               <div class="ranking-main">
                 <div class="ranking-name">${p.name}</div>
-                <div class="ranking-meta">${p.position || '-'} &middot; ${p.games || 0} jogos no filtro</div>
+                <div class="ranking-meta">${p.position || '-'} &middot; ${p.games || 0} jogos no filtro &middot; ${p._club_games || 0} no clube</div>
               </div>
               <div class="ranking-value">${formatRankValue(p._rank_value, suffix)}</div>
             </div>
@@ -9039,15 +9177,15 @@ function renderRankings() {
   return `
     <div class="section-title">Rankings &middot; ${typeLabel} &middot; ${periodLabel}</div>
     <div style="color:var(--text-2);font-size:12px;margin-bottom:14px;line-height:1.5;">
-      Top 5 calculado somente com jogadores de ${minGames}+ partidas no filtro atual, respeitando clube, período e tipo selecionados.
+      Top 5 calculado pelo filtro atual. Para aparecer, o jogador precisa ter ${minGames}+ partidas salvas no clube.
     </div>
     <div class="rankings-grid">
       ${topList('Top 5 Nota M&eacute;dia EA', '&#9733;', 'rating')}
-      ${topList('Top 5 Gols', '&#9917;', 'goals', '', 1, true)}
-      ${topList('Top 5 Assist&ecirc;ncias', '&#9673;', 'assists', '', 1, true)}
-      ${topList('Top 5 % Passes Certos', '&#10148;', 'pass_pct', '%', 1, true)}
-      ${topList('Top 5 % Divididas', '&#9635;', 'tackle_pct', '%', 1, true)}
-      ${topList('Top 5 MOM', '&#9819;', 'mom', '', 1, true)}
+      ${topList('Top 5 Gols', '&#9917;', 'goals', '', true)}
+      ${topList('Top 5 Assist&ecirc;ncias', '&#9673;', 'assists', '', true)}
+      ${topList('Top 5 % Passes Certos', '&#10148;', 'pass_pct', '%', true)}
+      ${topList('Top 5 % Divididas', '&#9635;', 'tackle_pct', '%', true)}
+      ${topList('Top 5 MOM', '&#9819;', 'mom', '', true)}
     </div>
   `;
 }
@@ -9200,18 +9338,17 @@ function hasCompletePlayerProfile(name) {
 }
 
 function effectiveMinGamesForScope() {
-  const matchCount = playerStatMatches().length;
-  return Math.max(1, Math.min(MIN_RANKING_GAMES, matchCount || MIN_RANKING_GAMES));
+  return MIN_RANKING_GAMES;
 }
 
 function eligibleRankingPlayers(players) {
   const minGames = effectiveMinGamesForScope();
-  return (players || []).filter(p => Number(p.games || 0) >= minGames);
+  return (players || []).filter(p => Number(clubGamesForPlayer(p.name) || 0) >= minGames);
 }
 
 function eligibleIdealPlayers() {
   const minGames = effectiveMinGamesForScope();
-  return scopedPlayers().filter(p => Number(p.games || 0) >= minGames && hasCompletePlayerProfile(p.name));
+  return scopedPlayers().filter(p => Number(clubGamesForPlayer(p.name) || 0) >= minGames && hasCompletePlayerProfile(p.name));
 }
 
 function inferPlayerPositionIntel(player) {
