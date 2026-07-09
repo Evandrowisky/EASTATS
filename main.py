@@ -7510,8 +7510,15 @@ function applyMatchFilters(matches, opts = {}) {
     return all.filter(m => matchTs(m) >= cutoff);
   }
   if (CURRENT_PERIOD === 'mes') {
-    const cutoff = now - 30 * 86400;
-    return all.filter(m => matchTs(m) >= cutoff);
+    const nowDate = new Date();
+    const currentYear = nowDate.getFullYear();
+    const currentMonth = nowDate.getMonth();
+    return all.filter(m => {
+      const ts = matchTs(m);
+      if (!ts) return false;
+      const d = new Date(ts * 1000);
+      return d.getFullYear() === currentYear && d.getMonth() === currentMonth;
+    });
   }
   return all;
 }
@@ -7540,7 +7547,7 @@ function periodLabelText() {
   return {
     todos: 'todo o hist&oacute;rico salvo',
     semana: '&uacute;ltimos 7 dias',
-    mes: '&uacute;ltimos 30 dias'
+    mes: 'm&ecirc;s atual'
   }[raw] || 'per&iacute;odo atual';
 }
 
@@ -7768,7 +7775,7 @@ function currentScopeLabel() {
     todos: 'todo o historico salvo',
     ult10: 'ultimas 10 partidas',
     semana: 'ultimos 7 dias',
-    mes: 'ultimos 30 dias',
+    mes: 'mes atual',
   }[CURRENT_PERIOD] || (String(CURRENT_PERIOD || '').startsWith('ult') ? 'ultimas ' + String(CURRENT_PERIOD).replace('ult','') + ' partidas' : 'filtro atual');
   const typeLabel = CURRENT_MATCH_TYPE === 'todos' ? 'todas as partidas' : CURRENT_MATCH_TYPE;
   const statusLabel = CURRENT_MATCH_STATUS === 'todas' ? 'todas' : CURRENT_MATCH_STATUS;
@@ -7776,8 +7783,7 @@ function currentScopeLabel() {
 }
 
 function scopedPlayers() {
-  const players = isFullPlayerScope() ? playersFromMemberTotals() : computePlayersForMatches(playerStatMatches());
-  return filterActivePlayers(players);
+  return filterActivePlayers(computePlayersForMatches(playerStatMatches()));
 }
 
 function clubGamesForPlayer(name) {
@@ -7952,7 +7958,6 @@ function buildScopedAnalyticsFallback(summary, history, warning = '') {
 function mergeScopedAnalytics(data, summary, history) {
   if (!summary) return data;
   const scoped = buildScopedAnalyticsFallback(summary, history);
-  if (isFullPlayerScope()) return {...data, history: data.history || scoped.history, series: data.series || scoped.series};
   return {
     ...data,
     player: {...(data.player || {}), ...scoped.player},
@@ -7963,6 +7968,8 @@ function mergeScopedAnalytics(data, summary, history) {
     uses_member_totals: false,
     display_averages: scoped.display_averages,
     display_totals: scoped.display_totals,
+    averages: {...(data.averages || {}), ...(scoped.averages || {})},
+    totals: {...(data.totals || {}), ...(scoped.totals || {})},
     advanced: {...(data.advanced || {}), ...scoped.advanced},
     ranking: scoped.ranking,
     trend: scoped.trend,
@@ -8114,7 +8121,7 @@ async function loadPlayerProfiles() {
   const dashboardProfiles = (DATA && DATA.player_profiles) ? DATA.player_profiles : {};
   try {
     const r = await authFetch('/api/player-profiles');
-    const data = mergeScopedAnalytics(await r.json(), scopedSummary, scopedHistory);
+    const data = await r.json();
     // Ordem importa: o ajuste manual salvo no navegador e na sessão atual vence o cache/API da EA após sincronizar.
     PLAYER_PROFILES = {...dashboardProfiles, ...localProfiles, ...(PLAYER_PROFILES || {}), ...(data.profiles || {})};
   } catch (e) {
@@ -9334,7 +9341,7 @@ function renderRankings() {
   const statusLabel = statusLabelText();
 
   if (!players.length) {
-    return `<div class="empty-state">Nenhum jogador com pelo menos ${minGames} partidas salvas no clube para este filtro</div>`;
+    return `<div class="empty-state">Nenhum jogador com pelo menos ${minGames} partidas salvas no clube inteiro para este ranking</div>`;
   }
 
   const rankValue = (p, key) => {
@@ -9386,7 +9393,7 @@ function renderRankings() {
   return `
     <div class="section-title">Rankings &middot; ${typeLabel} &middot; ${periodLabel} &middot; ${statusLabel}</div>
     <div style="color:var(--text-2);font-size:12px;margin-bottom:14px;line-height:1.5;">
-      Top 5 calculado pelo filtro atual. Para aparecer, o jogador precisa ter ${minGames}+ partidas salvas no clube.
+      Top 5 calculado pelo filtro atual. Para aparecer, o jogador precisa ter ${minGames}+ partidas no clube inteiro; os n&uacute;meros exibidos s&atilde;o somente do filtro selecionado.
     </div>
     <div class="rankings-grid">
       ${topList('Top 5 Nota M&eacute;dia EA', '&#9733;', 'rating')}
@@ -9446,7 +9453,7 @@ function renderCompareBars() {
     return `
       <div style="text-align:center;padding:14px 0;">
         <div style="font-size:38px;font-weight:800;color:var(--green);text-shadow:0 0 18px var(--green-glow);">${p.rating}</div>
-        <div style="margin-top:4px;color:var(--text-2);text-transform:uppercase;font-size:10px;letter-spacing:1px;">${p.position} &middot; ${p.games}J ${CURRENT_MATCH_TYPE === 'todos' ? 'no clube' : 'detalhadas salvas'}</div>
+        <div style="margin-top:4px;color:var(--text-2);text-transform:uppercase;font-size:10px;letter-spacing:1px;">${p.position} &middot; ${p.games}J no filtro</div>
         <div style="font-weight:800;font-size:16px;margin-top:4px;">${p.name}</div>
       </div>
     `;
@@ -9495,10 +9502,9 @@ function renderConfrontos() {
   // O filtro de período continua valendo para Visão, mas aqui não corta em Últ.5/Últ.10.
   const matches = playerStatMatches();
   if (!matches.length) {
-    return '<div class="empty-state">Nenhuma partida salva para este tipo de partida</div>';
+    return '<div class="empty-state">Nenhuma partida salva para este filtro</div>';
   }
-  const scope = CURRENT_MATCH_TYPE === 'todos' ? 'todas as partidas salvas do clube' : 'todas as partidas salvas de ' + CURRENT_MATCH_TYPE;
-  let html = `<div class="section-title">Confrontos &middot; ${scope}</div><div class="confronts-grid">`;
+  let html = `<div class="section-title">Confrontos &middot; ${currentScopeLabel()}</div><div class="confronts-grid">`;
   matches.forEach(m => {
     const top = (m.players_ratings || [])[0];
     const displayDate = matchDisplayDate(m);
@@ -10248,7 +10254,7 @@ function renderAjuda() {
   const common = [
     helpCard('Filtros e recortes', [
       'Per&iacute;odo, tipo de partida e status valem para Vis&atilde;o, Meu Scout, Jogadores, Rankings, Comparar e Time Ideal.',
-      'Quando o filtro for menor que 10 jogos, o m&iacute;nimo de jogos acompanha o tamanho do filtro. Exemplo: &Uacute;ltimos 7 exige 7 jogos.',
+      'Os n&uacute;meros exibidos respeitam o filtro selecionado, mas a elegibilidade do jogador usa o total de partidas salvas no clube.',
       'V&aacute;lidas remove partidas detectadas como quitadas; Quitadas mostra apenas essas partidas; Todas mistura os dois grupos.',
     ]),
     helpCard('Rankings e compara&ccedil;&atilde;o', [
@@ -10270,7 +10276,7 @@ function renderAjuda() {
       'Sincronize ap&oacute;s jogos para atualizar hist&oacute;rico, rankings e confronto.',
     ]),
     helpCard('Time Ideal', [
-      'O Time Ideal usa apenas jogadores ativos, com cadastro completo e jogos suficientes no filtro.',
+      'O Time Ideal usa apenas jogadores ativos, com cadastro completo e jogos suficientes no clube inteiro.',
       'Cadastro completo significa posi&ccedil;&atilde;o/build, arqu&eacute;tipo e ao menos um PlayStyle.',
       'Modo manual tamb&eacute;m respeita jogadores ativos e cadastro completo.',
     ]),
@@ -10621,7 +10627,7 @@ function renderTimeIdeal() {
   const idealOptions = eligibleIdealPlayers();
   const minGames = effectiveMinGamesForScope();
   if (!idealOptions.length) {
-    return `<div class="empty-state">Nenhum jogador eleg&iacute;vel para montar o time ideal. Cadastre posi&ccedil;&atilde;o, arqu&eacute;tipo e PlayStyles, e use jogadores com pelo menos ${minGames} partidas neste filtro.</div>`;
+    return `<div class="empty-state">Nenhum jogador eleg&iacute;vel para montar o time ideal. Cadastre posi&ccedil;&atilde;o, arqu&eacute;tipo e PlayStyles, e use jogadores com pelo menos ${minGames} partidas no clube inteiro.</div>`;
   }
 
   const team = buildIdealTeamClient(IDEAL_FORMATION);
@@ -10697,7 +10703,7 @@ function renderTimeIdeal() {
       ${listHtml}
     </div>
 
-    ${team.missing_slots.length ? `<div style="color:var(--yellow);font-size:12px;margin-bottom:14px;">Atenção: faltou jogador para ${team.missing_slots.join(', ')}. O Time Ideal usa apenas jogadores com cadastro completo e ${minGames}+ partidas neste filtro.</div>` : ''}
+    ${team.missing_slots.length ? `<div style="color:var(--yellow);font-size:12px;margin-bottom:14px;">Aten&ccedil;&atilde;o: faltou jogador para ${team.missing_slots.join(', ')}. O Time Ideal usa apenas jogadores com cadastro completo e ${minGames}+ partidas no clube inteiro.</div>` : ''}
 
     <div class="section-title">Análise Tática</div>
     <button class="btn-primary" onclick="analyzeTeam()">Gerar Análise com IA</button>
@@ -11005,7 +11011,7 @@ async function showPlayerDetail(name) {
   try {
     const r = await authFetch('/api/player/' + encodeURIComponent(name) + '/analytics?match_type=' + encodeURIComponent(CURRENT_MATCH_TYPE) + '&period=' + encodeURIComponent(CURRENT_PERIOD) + '&match_status=' + encodeURIComponent(CURRENT_MATCH_STATUS));
     if (!r.ok) throw new Error('Não encontrado ou sem dados suficientes');
-    const data = await r.json();
+    const data = mergeScopedAnalytics(await r.json(), scopedSummary, scopedHistory);
     mc.innerHTML = renderPlayerDetailHTML(data);
     setTimeout(() => renderPlayerCharts(data), 80);
   } catch (e) {
