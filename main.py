@@ -3506,7 +3506,11 @@ def _filter_matches_for_scope(matches: list, match_type: str = "todos", period: 
     wanted_type = (match_type or "todos").lower()
     wanted_period = (period or "todos").lower()
     wanted_status = (match_status or "todas").lower()
-    out = sorted([m for m in (matches or []) if isinstance(m, dict)], key=lambda m: _safe_int(m.get("timestamp")), reverse=True)
+    out = sorted(
+        [m for m in (matches or []) if isinstance(m, dict)],
+        key=lambda m: _safe_int(m.get("timestamp") or m.get("match_timestamp")),
+        reverse=True,
+    )
     if wanted_type != "todos":
         out = [m for m in out if str(m.get("match_type") or "").lower() == wanted_type]
     if wanted_status == "quitadas":
@@ -3517,16 +3521,17 @@ def _filter_matches_for_scope(matches: list, match_type: str = "todos", period: 
         return out
     if wanted_period.startswith("ult"):
         try:
-            return out[:max(0, int(wanted_period.replace("ult", "") or 0))]
+            digits = "".join(ch for ch in wanted_period if ch.isdigit())
+            return out[:max(0, int(digits or 0))]
         except Exception:
             return out
     now = int(time.time())
     if wanted_period == "semana":
         cutoff = now - 7 * 86400
-        return [m for m in out if _safe_int(m.get("timestamp")) >= cutoff]
+        return [m for m in out if _safe_int(m.get("timestamp") or m.get("match_timestamp")) >= cutoff]
     if wanted_period == "mes":
         cutoff = now - 30 * 86400
-        return [m for m in out if _safe_int(m.get("timestamp")) >= cutoff]
+        return [m for m in out if _safe_int(m.get("timestamp") or m.get("match_timestamp")) >= cutoff]
     return out
 
 
@@ -7490,7 +7495,8 @@ function applyMatchFilters(matches, opts = {}) {
   const includeType = opts.includeType !== false;
   const includeStatus = opts.includeStatus !== false;
   const includePeriod = opts.includePeriod !== false;
-  let all = [...(matches || [])].sort((a,b) => Number(b.timestamp || 0) - Number(a.timestamp || 0));
+  const matchTs = (m) => Number((m && (m.timestamp || m.match_timestamp)) || 0);
+  let all = [...(matches || [])].sort((a,b) => matchTs(b) - matchTs(a));
   if (includeType && CURRENT_MATCH_TYPE !== 'todos') {
     all = all.filter(m => String(m.match_type || '').toLowerCase() === CURRENT_MATCH_TYPE);
   }
@@ -7501,11 +7507,11 @@ function applyMatchFilters(matches, opts = {}) {
   const now = Math.floor(Date.now() / 1000);
   if (CURRENT_PERIOD === 'semana') {
     const cutoff = now - 7 * 86400;
-    return all.filter(m => Number(m.timestamp || 0) >= cutoff);
+    return all.filter(m => matchTs(m) >= cutoff);
   }
   if (CURRENT_PERIOD === 'mes') {
     const cutoff = now - 30 * 86400;
-    return all.filter(m => Number(m.timestamp || 0) >= cutoff);
+    return all.filter(m => matchTs(m) >= cutoff);
   }
   return all;
 }
@@ -7516,6 +7522,38 @@ function filteredMatches() {
 
 function playerStatMatches() {
   return applyMatchFilters((DATA && DATA.matches) ? DATA.matches : []);
+}
+
+function matchTypeLabelText() {
+  return {
+    todos: 'todas as partidas',
+    liga: 'liga',
+    copa: 'copa',
+    amistoso: 'amistosos'
+  }[CURRENT_MATCH_TYPE] || 'tipo atual';
+}
+
+function periodLabelText() {
+  const raw = String(CURRENT_PERIOD || 'todos');
+  const ultMatch = raw.match(/^ult(\d+)$/);
+  if (ultMatch) return `&uacute;ltimas ${ultMatch[1]} partidas`;
+  return {
+    todos: 'todo o hist&oacute;rico salvo',
+    semana: '&uacute;ltimos 7 dias',
+    mes: '&uacute;ltimos 30 dias'
+  }[raw] || 'per&iacute;odo atual';
+}
+
+function statusLabelText() {
+  return {
+    todas: 'todas',
+    validas: 'v&aacute;lidas',
+    quitadas: 'quitadas'
+  }[CURRENT_MATCH_STATUS] || 'status atual';
+}
+
+function activeScopeLabel() {
+  return `${matchTypeLabelText()} &middot; ${periodLabelText()} &middot; ${statusLabelText()}`;
 }
 
 function matchDateTimeBRFromTimestamp(timestamp) {
@@ -7753,6 +7791,187 @@ function clubGamesForPlayer(name) {
   }, 0);
 }
 
+function samePlayerName(a, b) {
+  const keys = new Set(normPlayerKeys(a));
+  if (!keys.size) return false;
+  return normPlayerKeys(b).some(k => keys.has(k));
+}
+
+function findScopedPlayerSummary(name) {
+  return (scopedPlayers() || []).find(p => samePlayerName(p.name, name)) || null;
+}
+
+function roundStat(value, digits = 2) {
+  const n = Number(value || 0);
+  if (!Number.isFinite(n)) return 0;
+  return Number(n.toFixed(digits));
+}
+
+function avgStat(values, digits = 2) {
+  const list = (values || []).map(Number).filter(Number.isFinite);
+  if (!list.length) return 0;
+  return roundStat(list.reduce((a, b) => a + b, 0) / list.length, digits);
+}
+
+function stdStat(values) {
+  const list = (values || []).map(Number).filter(Number.isFinite);
+  if (list.length <= 1) return 0;
+  const avg = list.reduce((a, b) => a + b, 0) / list.length;
+  const variance = list.reduce((sum, n) => sum + Math.pow(n - avg, 2), 0) / list.length;
+  return Math.sqrt(variance);
+}
+
+function filteredHistoryForPlayer(name) {
+  const wanted = new Set(normPlayerKeys(name));
+  if (!wanted.size) return [];
+  const rows = [];
+  (playerStatMatches() || []).forEach(m => {
+    const pr = (m.players_ratings || []).find(x => normPlayerKeys(x.name).some(k => wanted.has(k)));
+    if (!pr) return;
+    rows.push({
+      match_id: m.match_id,
+      opponent: m.opponent,
+      date: matchDisplayDate(m),
+      timestamp: Number(m.timestamp || m.match_timestamp || 0),
+      score: m.score,
+      result: m.result,
+      match_type: m.match_type,
+      position: pr.pos || pr.position || '',
+      rating: roundStat(pr.rating, 2),
+      sofi_rating: roundStat(pr.sofi_rating, 2),
+      goals: Number(pr.goals || 0),
+      assists: Number(pr.assists || 0),
+      shots: Number(pr.shots || 0),
+      passes_made: Number(pr.passes_made || pr.passesMade || 0),
+      pass_pct: roundStat(pr.pass_pct, 2),
+      tackles_made: Number(pr.tackles_made || pr.tacklesMade || 0),
+      tackle_pct: roundStat(pr.tackle_pct, 2),
+      saves: Number(pr.saves || 0),
+      clean_sheet: Number(pr.clean_sheet || pr.cleanSheets || 0),
+      red: Number(pr.red || pr.redcards || 0),
+      mom: Number(pr.mom || 0),
+    });
+  });
+  return rows.sort((a, b) => Number(b.timestamp || 0) - Number(a.timestamp || 0));
+}
+
+function scopedRankLabel(name) {
+  const players = eligibleRankingPlayers(scopedPlayers())
+    .slice()
+    .sort((a, b) => Number(b.rating || 0) - Number(a.rating || 0));
+  const idx = players.findIndex(p => samePlayerName(p.name, name));
+  return idx >= 0 ? `${idx + 1}/${players.length}` : '-';
+}
+
+function buildScopedAnalyticsFallback(summary, history, warning = '') {
+  const h = history || [];
+  const games = Number(summary?.games || h.length || 0);
+  const ratings = h.map(x => Number(x.rating || 0)).filter(Number.isFinite);
+  const sofi = h.map(x => Number(x.sofi_rating || 0)).filter(Number.isFinite);
+  const regularity = games ? roundStat((ratings.filter(x => x >= 7).length / games) * 100, 1) : 0;
+  const consistency = roundStat(Math.max(0, 100 - stdStat(sofi.length ? sofi : ratings) * 20), 1);
+  const goals = Number(summary?.goals || 0);
+  const assists = Number(summary?.assists || 0);
+  const shots = Number(summary?.shots || 0);
+  const tackles = Number(summary?.tackles_made || 0);
+  const saves = Number(summary?.saves || 0);
+  const moms = Number(summary?.mom || 0);
+  const offensive = roundStat(goals * 4 + assists * 3 + shots * 0.6, 1);
+  const defensive = roundStat(tackles * 1.2 + Number(summary?.tackle_pct || 0) * 0.4 + saves * 1.5, 1);
+  const analytic = roundStat(Math.min(100, Math.max(0,
+    Number(summary?.rating || 0) * 8 + regularity * 0.18 + moms * 1.5 + offensive * 0.08 + defensive * 0.05
+  )), 1);
+  const orderedBest = h.slice().sort((a, b) => Number(b.sofi_rating || b.rating || 0) - Number(a.sofi_rating || a.rating || 0));
+  return {
+    player: {
+      ...(summary || {}),
+      name: summary?.name || '',
+      position: summary?.position || '-',
+      games,
+    },
+    history: h,
+    series: h.slice().reverse().map(x => ({
+      date: x.date,
+      opponent: x.opponent,
+      rating: x.rating,
+      sofi_rating: x.sofi_rating,
+      goals: x.goals,
+      assists: x.assists,
+    })),
+    detail_games: games,
+    games_with_history: games,
+    display_averages: {
+      rating: roundStat(summary?.rating || avgStat(ratings), 2),
+      sofi_rating: roundStat(summary?.sofi_rating || avgStat(sofi), 2),
+      goals_per_game: games ? roundStat(goals / games, 2) : 0,
+      assists_per_game: games ? roundStat(assists / games, 2) : 0,
+      shots_per_game: games ? roundStat(shots / games, 2) : 0,
+      tackles_per_game: games ? roundStat(tackles / games, 2) : 0,
+      saves_per_game: games ? roundStat(saves / games, 2) : 0,
+      pass_pct: roundStat(summary?.pass_pct, 2),
+      tackle_pct: roundStat(summary?.tackle_pct, 2),
+    },
+    display_totals: {
+      goals,
+      assists,
+      shots,
+      tackles,
+      saves,
+      clean_sheets: Number(summary?.clean_sheet || 0),
+      moms,
+      red_cards: Number(summary?.reds || summary?.red || 0),
+    },
+    advanced: {
+      analytic_score: analytic,
+      regularity,
+      consistency,
+      offensive_impact: offensive,
+      defensive_impact: defensive,
+      clutch_score: roundStat(moms * 4 + goals + assists, 1),
+      risk: Number(summary?.reds || summary?.red || 0),
+      radar: {
+        Finalizacao: Math.min(100, goals * 8 + shots),
+        Criacao: Math.min(100, assists * 10),
+        Passe: roundStat(summary?.pass_pct, 1),
+        Defesa: Math.min(100, defensive),
+        Consistencia: consistency,
+        Decisao: Math.min(100, moms * 12 + regularity * 0.6),
+      },
+    },
+    ranking: {rating_rank_label: scopedRankLabel(summary?.name || '')},
+    trend: {status: '-'},
+    team_comparison: {},
+    best_match: orderedBest[0] || null,
+    worst_match: orderedBest[orderedBest.length - 1] || null,
+    heatmap: {profile: summary?.position || '-', zones: {}, disclaimer: 'Mapa estimado por perfil estatistico.'},
+    scout_report: 'Dados calculados pelo filtro atual da tela.',
+    _frontend_warning: warning,
+  };
+}
+
+function mergeScopedAnalytics(data, summary, history) {
+  if (!summary) return data;
+  const scoped = buildScopedAnalyticsFallback(summary, history);
+  if (isFullPlayerScope()) return {...data, history: data.history || scoped.history, series: data.series || scoped.series};
+  return {
+    ...data,
+    player: {...(data.player || {}), ...scoped.player},
+    history: scoped.history,
+    series: scoped.series,
+    detail_games: scoped.detail_games,
+    games_with_history: scoped.games_with_history,
+    uses_member_totals: false,
+    display_averages: scoped.display_averages,
+    display_totals: scoped.display_totals,
+    advanced: {...(data.advanced || {}), ...scoped.advanced},
+    ranking: scoped.ranking,
+    trend: scoped.trend,
+    best_match: scoped.best_match,
+    worst_match: scoped.worst_match,
+    heatmap: data.heatmap || scoped.heatmap,
+  };
+}
+
 function emptyPlayerForCurrentFilter(base) {
   if (!base) return null;
   const intel = inferPlayerPositionIntel(base);
@@ -7895,7 +8114,7 @@ async function loadPlayerProfiles() {
   const dashboardProfiles = (DATA && DATA.player_profiles) ? DATA.player_profiles : {};
   try {
     const r = await authFetch('/api/player-profiles');
-    const data = await r.json();
+    const data = mergeScopedAnalytics(await r.json(), scopedSummary, scopedHistory);
     // Ordem importa: o ajuste manual salvo no navegador e na sessão atual vence o cache/API da EA após sincronizar.
     PLAYER_PROFILES = {...dashboardProfiles, ...localProfiles, ...(PLAYER_PROFILES || {}), ...(data.profiles || {})};
   } catch (e) {
@@ -9107,22 +9326,12 @@ function showMarketClubHistory(clubId) {
 
 
 function renderRankings() {
-  const matches = filteredMatches();
+  const matches = playerStatMatches();
   const players = eligibleRankingPlayers(filterActivePlayers(computePlayersForMatches(matches)));
   const minGames = effectiveMinGamesForScope();
-  const typeLabel = {
-    todos: 'todas as partidas',
-    liga: 'liga',
-    copa: 'copa',
-    amistoso: 'amistosos'
-  }[CURRENT_MATCH_TYPE] || 'filtro de tipo atual';
-  const periodLabel = {
-    todos: 'todo o histórico salvo',
-    ult5: 'últimas 5 partidas',
-    ult10: 'últimas 10 partidas',
-    semana: 'últimos 7 dias',
-    mes: 'últimos 30 dias'
-  }[CURRENT_PERIOD] || 'filtro atual';
+  const typeLabel = matchTypeLabelText();
+  const periodLabel = periodLabelText();
+  const statusLabel = statusLabelText();
 
   if (!players.length) {
     return `<div class="empty-state">Nenhum jogador com pelo menos ${minGames} partidas salvas no clube para este filtro</div>`;
@@ -9165,7 +9374,7 @@ function renderRankings() {
               <div class="ranking-pos ${podiumClass(idx)}">${podiumIcon(idx)}</div>
               <div class="ranking-main">
                 <div class="ranking-name">${p.name}</div>
-                <div class="ranking-meta">${p.position || '-'} &middot; ${p.games || 0} jogos no filtro &middot; ${p._club_games || 0} no clube</div>
+                <div class="ranking-meta">${p.position || '-'} &middot; ${p.games || 0} jogos no filtro</div>
               </div>
               <div class="ranking-value">${formatRankValue(p._rank_value, suffix)}</div>
             </div>
@@ -9175,7 +9384,7 @@ function renderRankings() {
   };
 
   return `
-    <div class="section-title">Rankings &middot; ${typeLabel} &middot; ${periodLabel}</div>
+    <div class="section-title">Rankings &middot; ${typeLabel} &middot; ${periodLabel} &middot; ${statusLabel}</div>
     <div style="color:var(--text-2);font-size:12px;margin-bottom:14px;line-height:1.5;">
       Top 5 calculado pelo filtro atual. Para aparecer, o jogador precisa ter ${minGames}+ partidas salvas no clube.
     </div>
@@ -10791,6 +11000,8 @@ async function showPlayerDetail(name) {
   const mc = document.getElementById('modalContent');
   mc.innerHTML = '<div class="loading"><div class="spinner"></div> Carregando analytics...</div>';
   document.getElementById('modal').classList.add('active');
+  const scopedSummary = findScopedPlayerSummary(name);
+  const scopedHistory = filteredHistoryForPlayer(name);
   try {
     const r = await authFetch('/api/player/' + encodeURIComponent(name) + '/analytics?match_type=' + encodeURIComponent(CURRENT_MATCH_TYPE) + '&period=' + encodeURIComponent(CURRENT_PERIOD) + '&match_status=' + encodeURIComponent(CURRENT_MATCH_STATUS));
     if (!r.ok) throw new Error('Não encontrado ou sem dados suficientes');
@@ -10798,7 +11009,13 @@ async function showPlayerDetail(name) {
     mc.innerHTML = renderPlayerDetailHTML(data);
     setTimeout(() => renderPlayerCharts(data), 80);
   } catch (e) {
-    mc.innerHTML = `<p style="color:var(--red);">Erro: ${e.message}</p>`;
+    if (scopedSummary && scopedHistory.length) {
+      const data = buildScopedAnalyticsFallback(scopedSummary, scopedHistory, e.message);
+      mc.innerHTML = renderPlayerDetailHTML(data);
+      setTimeout(() => renderPlayerCharts(data), 80);
+    } else {
+      mc.innerHTML = `<p style="color:var(--red);">Erro: ${e.message}</p>`;
+    }
   }
 }
 
@@ -10859,9 +11076,8 @@ function renderPlayerDetailHTML(data) {
   const psBadges = (profile.playstyles || []).map(x => `<span class="tag liga" style="margin-right:6px;">${playstyleIcon(x)} ${x}</span>`).join('');
   const detailedGames = Number(data.detail_games ?? data.games_with_history ?? h.length ?? 0) || h.length || 0;
   const clubTotalGames = Number(data.club_total_games ?? p.ea_global_games ?? p.games ?? detailedGames) || detailedGames;
-  const gamesLine = data.uses_member_totals
-    ? `${clubTotalGames} jogos no clube (totais EA) &middot; ${detailedGames} partidas detalhadas salvas &middot; ranking ${rank.rating_rank_label || '-'} &middot; tendência ${trend.status || '-'}`
-    : `${detailedGames} partidas detalhadas salvas de ${CURRENT_MATCH_TYPE} &middot; ranking ${rank.rating_rank_label || '-'} &middot; tendência ${trend.status || '-'}`;
+  const totalSuffix = data.uses_member_totals && isFullPlayerScope() ? ` &middot; ${clubTotalGames} jogos no clube (totais EA)` : '';
+  const gamesLine = `${detailedGames} partidas no filtro (${activeScopeLabel()})${totalSuffix} &middot; ranking ${rank.rating_rank_label || '-'} &middot; tend&ecirc;ncia ${trend.status || '-'}`;
   return `
     <div class="player-detail">
       <div class="analytics-hero">
@@ -10926,7 +11142,7 @@ function renderPlayerDetailHTML(data) {
       <div class="section-title">Relatório Scout Offline</div>
       <div class="analytics-note">${renderMarkdown(data.scout_report || '')}</div>
 
-      <div class="section-title" style="margin-top:18px;">Todas as ${h.length} partidas detalhadas salvas ${CURRENT_MATCH_TYPE === 'todos' ? 'no clube' : 'de ' + CURRENT_MATCH_TYPE}</div>
+      <div class="section-title" style="margin-top:18px;">Partidas do filtro atual &middot; ${activeScopeLabel()} (${h.length})</div>
       ${h.length === 0 ? '<div style="color:var(--text-2);padding:20px;text-align:center;">Nenhuma partida com participação registrada.</div>' : `
       <table class="history-table">
         <thead><tr><th>Data</th><th>Tipo</th><th>Adversário</th><th>Resultado</th><th>Pos</th><th>Sofi</th><th>EA</th><th>G</th><th>A</th><th>Chu</th><th>Pass%</th><th>Des%</th><th>Des</th><th>Def</th><th>SG</th><th>Verm</th><th>MOM</th></tr></thead>
