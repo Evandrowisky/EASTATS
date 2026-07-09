@@ -4846,6 +4846,124 @@ def scout_opponents(req: OpponentScoutRequest, current_user: dict = Depends(requ
     results = [build_opponent_scout(nm, req.platform) for nm in names]
     return {"count": len(results), "opponents": results}
 
+
+# ============================================================
+# TROFEUS - CRUD
+# ============================================================
+
+class TrophyItem(BaseModel):
+    tournament_name: str
+    season: Optional[str] = None
+    trophy_type: str = "copa"
+    final_match_id: Optional[str] = None
+    formation: Optional[str] = None
+    notes: Optional[str] = None
+
+
+def _user_club_id(current_user: dict) -> str:
+    return str((current_user or {}).get("club_id") or _current_club_id_from_cache() or "").strip()
+
+
+@app.get("/api/trophies")
+def list_trophies(current_user: dict = Depends(get_current_user)):
+    club_id = _user_club_id(current_user)
+    if not club_id:
+        return []
+    sb = get_supabase()
+    if not sb:
+        return []
+    try:
+        resp = (
+            sb.table("trophies")
+            .select("*")
+            .eq("club_id", club_id)
+            .order("created_at", desc=True)
+            .execute()
+        )
+        return getattr(resp, "data", None) or []
+    except Exception as e:
+        print(f"[SUPABASE] Aviso ao listar trofeus: {type(e).__name__}: {e}")
+        return []
+
+
+@app.post("/api/trophies")
+def create_trophy(item: TrophyItem, current_user: dict = Depends(require_admin)):
+    club_id = _user_club_id(current_user)
+    if not club_id:
+        raise HTTPException(400, "Clube nao identificado")
+    name = (item.tournament_name or "").strip()
+    if not name:
+        raise HTTPException(400, "Nome do torneio obrigatorio")
+    sb = get_supabase()
+    if not sb:
+        raise HTTPException(503, "Supabase nao configurado")
+    payload = {
+        "club_id": club_id,
+        "tournament_name": name,
+        "season": (item.season or "").strip() or None,
+        "trophy_type": (item.trophy_type or "copa").strip() or "copa",
+        "final_match_id": (str(item.final_match_id).strip() if item.final_match_id else None),
+        "formation": (item.formation or "").strip() or None,
+        "notes": (item.notes or "").strip() or None,
+        "created_by": (current_user or {}).get("usuario") or (current_user or {}).get("nome"),
+        "updated_at": _now_iso(),
+    }
+    try:
+        resp = sb.table("trophies").insert(payload).execute()
+        rows = getattr(resp, "data", None) or []
+        return rows[0] if rows else {"success": True, **payload}
+    except Exception as e:
+        print(f"[SUPABASE] Erro ao criar trofeu: {type(e).__name__}: {e}")
+        raise HTTPException(500, "Erro ao salvar trofeu")
+
+
+@app.put("/api/trophies/{trophy_id}")
+def update_trophy(trophy_id: int, item: TrophyItem, current_user: dict = Depends(require_admin)):
+    club_id = _user_club_id(current_user)
+    if not club_id:
+        raise HTTPException(400, "Clube nao identificado")
+    sb = get_supabase()
+    if not sb:
+        raise HTTPException(503, "Supabase nao configurado")
+    payload = {
+        "tournament_name": (item.tournament_name or "").strip(),
+        "season": (item.season or "").strip() or None,
+        "trophy_type": (item.trophy_type or "copa").strip() or "copa",
+        "final_match_id": (str(item.final_match_id).strip() if item.final_match_id else None),
+        "formation": (item.formation or "").strip() or None,
+        "notes": (item.notes or "").strip() or None,
+        "updated_at": _now_iso(),
+    }
+    if not payload["tournament_name"]:
+        raise HTTPException(400, "Nome do torneio obrigatorio")
+    try:
+        resp = (
+            sb.table("trophies")
+            .update(payload)
+            .eq("id", trophy_id)
+            .eq("club_id", club_id)
+            .execute()
+        )
+        rows = getattr(resp, "data", None) or []
+        return rows[0] if rows else {"success": True, "id": trophy_id}
+    except Exception as e:
+        print(f"[SUPABASE] Erro ao atualizar trofeu: {type(e).__name__}: {e}")
+        raise HTTPException(500, "Erro ao atualizar trofeu")
+
+
+@app.delete("/api/trophies/{trophy_id}")
+def delete_trophy(trophy_id: int, current_user: dict = Depends(require_admin)):
+    club_id = _user_club_id(current_user)
+    sb = get_supabase()
+    if not sb:
+        raise HTTPException(503, "Supabase nao configurado")
+    try:
+        sb.table("trophies").delete().eq("id", trophy_id).eq("club_id", club_id).execute()
+        return {"success": True}
+    except Exception as e:
+        print(f"[SUPABASE] Erro ao excluir trofeu: {type(e).__name__}: {e}")
+        raise HTTPException(500, "Erro ao excluir trofeu")
+
 # ============================================================
 # AGENDA - CRUD
 # ============================================================
@@ -7190,6 +7308,7 @@ let PLAYER_PROFILES = {};
 let COMPARE_A = null;
 let COMPARE_B = null;
 let AGENDA = [];
+let TROPHIES = [];
 let OPPONENT_SCOUTS = [];
 let MARKET_ANALYSIS = null;
 let CLUB_USERS = [];
@@ -8358,6 +8477,7 @@ function render() {
       <div class="tab ${CURRENT_TAB==='comparar'?'active':''}" onclick="setTab('comparar')">COMPARAR</div>
       <div class="tab ${CURRENT_TAB==='confrontos'?'active':''}" onclick="setTab('confrontos')">CONFRONTOS</div>
       <div class="tab ${CURRENT_TAB==='time-ideal'?'active':''}" onclick="setTab('time-ideal')">TIME IDEAL</div>
+      <div class="tab ${CURRENT_TAB==='trofeus'?'active':''}" onclick="setTab('trofeus')">TROF&Eacute;US</div>
       ${isAdmin() ? `<div class="tab ${CURRENT_TAB==='cadastro'?'active':''}" onclick="setTab('cadastro')">CADASTRO</div>` : ''}
       ${isAdmin() ? `<div class="tab ${CURRENT_TAB==='alertas'?'active':''}" onclick="setTab('alertas')">ALERTAS</div>` : ''}
       ${isAdmin() ? `<div class="tab ${CURRENT_TAB==='config'?'active':''}" onclick="setTab('config')">CONFIG</div>` : ''}
@@ -8441,6 +8561,13 @@ function renderTab() {
   else if (CURRENT_TAB === 'comparar') { tc.innerHTML = renderComparar(); renderCompareBars(); }
   else if (CURRENT_TAB === 'confrontos') tc.innerHTML = renderConfrontos();
   else if (CURRENT_TAB === 'time-ideal') tc.innerHTML = renderTimeIdeal();
+  else if (CURRENT_TAB === 'trofeus') {
+    tc.innerHTML = '<div class="loading"><div class="spinner"></div> Carregando trof&eacute;us...</div>';
+    loadTrophies().then(() => {
+      const t = document.getElementById('tabContent');
+      if (t && CURRENT_TAB === 'trofeus') t.innerHTML = renderTrofeus();
+    });
+  }
   else if (CURRENT_TAB === 'cadastro' && isAdmin()) { tc.innerHTML = '<div class="loading"><div class="spinner"></div> Carregando cadastro...</div>'; loadClubUsers().then(() => { const t=document.getElementById('tabContent'); if (t && CURRENT_TAB === 'cadastro') t.innerHTML = renderCadastroJogadores(); }); }
   else if (CURRENT_TAB === 'alertas' && isAdmin()) {
     tc.innerHTML = '<div class="loading"><div class="spinner"></div> Carregando alertas...</div>';
@@ -10767,6 +10894,230 @@ async function scoutOpponents() {
     if (btn) { btn.disabled = false; btn.textContent = 'Analisar adversários'; }
   }
 }
+async function loadTrophies() {
+  try {
+    const r = await authFetch('/api/trophies');
+    if (!r.ok) throw new Error('Erro ao carregar trofeus');
+    const rows = await r.json();
+    TROPHIES = Array.isArray(rows) ? rows : [];
+  } catch (e) {
+    console.warn('[trofeus]', e);
+    TROPHIES = [];
+  }
+}
+
+function trophyMatchById(id) {
+  const sid = String(id || '');
+  return (DATA && DATA.matches ? DATA.matches : []).find(m => String(m.match_id || m.matchId || '') === sid);
+}
+
+function trophyMatchOptions(selected) {
+  const selectedId = String(selected || '');
+  const matches = (DATA && DATA.matches ? DATA.matches : [])
+    .slice()
+    .sort((a,b) => Number(b.timestamp || b.match_timestamp || 0) - Number(a.timestamp || a.match_timestamp || 0))
+    .slice(0, 300);
+  return matches.map(m => {
+    const id = String(m.match_id || m.matchId || '');
+    const label = `${matchDisplayDate(m)} - ${m.score || ''} - ${m.opponent || 'Adversario'} - ${m.match_type || ''}`;
+    return `<option value="${escapeAttr(id)}" ${selectedId === id ? 'selected' : ''}>${escapeAttr(label)}</option>`;
+  }).join('');
+}
+
+function matchResultText(m) {
+  if (!m) return '-';
+  if (m.result === 'V') return 'Vitoria';
+  if (m.result === 'D') return 'Derrota';
+  if (m.result === 'E') return 'Empate';
+  return m.result || '-';
+}
+
+function compactMatchSummaryHtml(m, opts = {}) {
+  const club = (DATA && DATA.club && DATA.club.name) || 'Nosso clube';
+  const opponent = m.opponent || 'Adversario';
+  const players = (m.players_ratings || [])
+    .slice()
+    .sort((a,b) => Number(b.rating || 0) - Number(a.rating || 0))
+    .slice(0, 11);
+  const rows = players.map((p, i) => `
+    <tr>
+      <td>${i + 1}</td>
+      <td><strong>${escapeAttr(p.name || '-')}</strong>${p.mom ? '<div class="tag liga" style="margin-top:4px;">MOM</div>' : ''}</td>
+      <td>${escapeAttr(p.pos || p.position || '-')}</td>
+      <td><strong style="color:var(--green);font-size:18px;">${escapeAttr(p.rating ?? '-')}</strong></td>
+      <td>${escapeAttr(p.goals || 0)}</td>
+      <td>${escapeAttr(p.assists || 0)}</td>
+    </tr>
+  `).join('');
+  const time = matchDisplayTime(m);
+  const status = isQuitMatch(m) ? 'Quitada' : 'Valida';
+  const score = m.score || `${m.goals_for || 0}-${m.goals_against || 0}`;
+  const matchId = m.match_id || m.matchId || '-';
+  const trophyLine = opts.trophy ? `<div style="color:var(--yellow);font-weight:800;margin-bottom:8px;">${escapeAttr(opts.trophy.tournament_name || '')}${opts.trophy.season ? ' &middot; ' + escapeAttr(opts.trophy.season) : ''}</div>` : '';
+  return `
+    <div class="trophy-print-card" style="width:min(820px,100%);margin:0 auto;background:#050805;border:1px solid var(--green-dim);border-radius:16px;padding:18px;color:var(--text);box-shadow:0 0 30px rgba(0,255,115,.14);">
+      <div style="display:flex;justify-content:space-between;gap:10px;align-items:flex-start;">
+        <div style="min-width:0;">
+          <div class="section-title" style="margin:0 0 8px;">SUMULA COMPACTA DA PARTIDA</div>
+          ${trophyLine}
+          <div style="font-size:clamp(20px,3.5vw,34px);font-weight:900;color:var(--green);line-height:1.05;word-break:normal;overflow-wrap:anywhere;">${escapeAttr(club)} X ${escapeAttr(opponent)}</div>
+          <div style="font-size:clamp(42px,8vw,70px);font-weight:900;color:var(--green);line-height:1;margin-top:12px;">${escapeAttr(score)}</div>
+        </div>
+        <button class="btn-mini" onclick="downloadTrophyImage()" type="button">GERAR JPEG</button>
+      </div>
+      <div style="height:1px;background:var(--border);margin:16px 0;"></div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:8px;margin-bottom:14px;">
+        <div class="detail-stat"><div class="l">Data</div><div class="v" style="font-size:16px;color:var(--text);">${escapeAttr(matchDisplayDate(m))}</div></div>
+        ${time && time !== '--:--' ? `<div class="detail-stat"><div class="l">Horario</div><div class="v" style="font-size:16px;color:var(--text);">${escapeAttr(time)}</div></div>` : ''}
+        <div class="detail-stat"><div class="l">Tipo</div><div class="v" style="font-size:16px;color:var(--text);">${escapeAttr(m.match_type || '-')}</div></div>
+        <div class="detail-stat"><div class="l">Status</div><div class="v" style="font-size:16px;color:var(--text);">${status}</div></div>
+        <div class="detail-stat"><div class="l">Resultado</div><div class="v" style="font-size:16px;color:var(--text);">${matchResultText(m)}</div></div>
+        <div class="detail-stat"><div class="l">ID da partida</div><div class="v" style="font-size:13px;color:var(--text);word-break:break-all;">${escapeAttr(matchId)}</div></div>
+      </div>
+      <div style="overflow-x:auto;">
+        <table class="history-table" style="font-size:12px;min-width:560px;">
+          <thead><tr><th>#</th><th>Jogador</th><th>Pos</th><th>EA</th><th>G</th><th>A</th></tr></thead>
+          <tbody>${rows || '<tr><td colspan="6">Sem dados dos jogadores.</td></tr>'}</tbody>
+        </table>
+      </div>
+      <div style="display:flex;justify-content:space-between;gap:10px;margin-top:12px;color:var(--text-2);font-size:12px;">
+        <div>MOM: <strong style="color:var(--green);">${escapeAttr(m.mom || '-')}</strong> - EA ${escapeAttr(m.mom_rating || '-')}</div>
+        <div>ClubScout Pro</div>
+      </div>
+    </div>
+  `;
+}
+
+function showCompactMatchSummary(matchId) {
+  const sid = String(matchId || '');
+  const m = (DATA && DATA.matches ? DATA.matches : []).find(x => String(x.match_id || x.matchId || '') === sid);
+  if (!m) return;
+  document.getElementById('modalContent').innerHTML = compactMatchSummaryHtml(m);
+  document.getElementById('modal').classList.add('active');
+}
+
+async function downloadTrophyImage() {
+  const target = document.querySelector('.trophy-print-card');
+  if (!target) return;
+  try {
+    if (typeof html2canvas === 'undefined') throw new Error('Biblioteca de exportacao ainda nao carregou');
+    const canvas = await html2canvas(target, {backgroundColor:'#050805', scale:2, useCORS:true});
+    const a = document.createElement('a');
+    a.href = canvas.toDataURL('image/jpeg', 0.94);
+    a.download = 'sumula-clubscout.jpg';
+    a.click();
+  } catch (e) {
+    alert('Erro ao gerar JPEG: ' + e.message);
+  }
+}
+
+function renderTrofeus() {
+  const form = isAdmin() ? `
+    <div class="section-title">NOVO TROFEU</div>
+    <form class="agenda-form" onsubmit="saveTrophy(event)" style="grid-template-columns:repeat(6,1fr);">
+      <input id="tr-name" type="text" placeholder="Nome do torneio" required style="grid-column:span 2;">
+      <input id="tr-season" type="text" placeholder="Temporada" style="grid-column:span 1;">
+      <select id="tr-type" style="grid-column:span 1;">
+        <option value="copa">Copa</option>
+        <option value="liga">Liga</option>
+        <option value="amistoso">Amistoso</option>
+        <option value="torneio">Torneio</option>
+      </select>
+      <input id="tr-formation" type="text" placeholder="Formacao" style="grid-column:span 2;">
+      <select id="tr-match" required style="grid-column:span 6;">
+        <option value="">Escolha a partida da final</option>
+        ${trophyMatchOptions('')}
+      </select>
+      <textarea id="tr-notes" placeholder="Observacoes"></textarea>
+      <div class="full"><button type="submit" class="btn-primary">SALVAR TROFEU</button></div>
+    </form>
+    <div id="trophyStatus" class="empty-text"></div>
+  ` : '';
+
+  const cards = !TROPHIES.length ? `
+    <div class="empty-state" style="padding:44px 20px;"><div class="empty-text">Nenhum trofeu cadastrado ainda.</div></div>
+  ` : TROPHIES.map(t => {
+    const m = trophyMatchById(t.final_match_id) || {};
+    const opponent = m.opponent || 'Adversario';
+    const score = m.score || '-';
+    return `
+      <div class="stat-card" style="text-align:left;cursor:pointer;" onclick="showTrophyDetails('${escapeAttr(t.id)}')">
+        <div class="section-title" style="margin:0 0 10px;">${escapeAttr(t.tournament_name || 'Trofeu')}</div>
+        <div style="font-size:38px;font-weight:900;color:var(--green);line-height:1;">${escapeAttr(score)}</div>
+        <div class="empty-text" style="margin-top:8px;">Final: ${escapeAttr((DATA && DATA.club && DATA.club.name) || 'Nosso clube')} x ${escapeAttr(opponent)}</div>
+        <div class="empty-text">${escapeAttr(matchDisplayDate(m))}${t.season ? ' &middot; ' + escapeAttr(t.season) : ''}</div>
+        <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap;">
+          <button class="btn-mini" type="button" onclick="event.stopPropagation();showTrophyDetails('${escapeAttr(t.id)}')">Ver final</button>
+          ${isAdmin() ? `<button class="btn-mini danger" type="button" onclick="event.stopPropagation();deleteTrophy('${escapeAttr(t.id)}')">Excluir</button>` : ''}
+        </div>
+      </div>
+    `;
+  }).join('');
+
+  return `
+    ${form}
+    <div class="section-title">SALA DE TROFEUS</div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:14px;">
+      ${cards}
+    </div>
+  `;
+}
+
+async function saveTrophy(ev) {
+  ev.preventDefault();
+  const status = document.getElementById('trophyStatus');
+  const body = {
+    tournament_name: document.getElementById('tr-name')?.value.trim(),
+    season: document.getElementById('tr-season')?.value.trim() || null,
+    trophy_type: document.getElementById('tr-type')?.value || 'copa',
+    final_match_id: document.getElementById('tr-match')?.value,
+    formation: document.getElementById('tr-formation')?.value.trim() || null,
+    notes: document.getElementById('tr-notes')?.value.trim() || null,
+  };
+  if (!body.tournament_name || !body.final_match_id) return;
+  try {
+    const r = await authFetch('/api/trophies', {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify(body)
+    });
+    if (!r.ok) {
+      const d = await r.json().catch(() => ({detail:'Erro ao salvar'}));
+      throw new Error(d.detail || 'Erro ao salvar');
+    }
+    if (status) status.textContent = 'Trofeu salvo.';
+    await loadTrophies();
+    renderTab();
+  } catch (e) {
+    if (status) status.innerHTML = `<span style="color:var(--red);">${escapeAttr(e.message)}</span>`;
+  }
+}
+
+async function deleteTrophy(id) {
+  if (!confirm('Excluir este trofeu?')) return;
+  try {
+    const r = await authFetch('/api/trophies/' + id, {method:'DELETE'});
+    if (!r.ok) throw new Error('Erro ao excluir');
+    await loadTrophies();
+    renderTab();
+  } catch (e) {
+    alert(e.message);
+  }
+}
+
+function showTrophyDetails(id) {
+  const trophy = TROPHIES.find(t => String(t.id) === String(id));
+  if (!trophy) return;
+  const m = trophyMatchById(trophy.final_match_id);
+  if (!m) {
+    document.getElementById('modalContent').innerHTML = '<p style="color:var(--red);">Partida da final nao encontrada no historico carregado.</p>';
+    document.getElementById('modal').classList.add('active');
+    return;
+  }
+  document.getElementById('modalContent').innerHTML = compactMatchSummaryHtml(m, {trophy});
+  document.getElementById('modal').classList.add('active');
+}
+
 function renderAgenda() {
   return `
     <div class="section-title">✏️ ${AGENDA_EDIT_ID ? 'Editar Agendamento' : 'Novo Agendamento'}</div>
@@ -10896,6 +11247,9 @@ async function deleteAgenda(id) {
 function showMatchDetails(matchId) {
   const m = DATA.matches.find(x => String(x.match_id) === String(matchId));
   if (!m) return;
+  document.getElementById('modalContent').innerHTML = compactMatchSummaryHtml(m);
+  document.getElementById('modal').classList.add('active');
+  return;
   const players = [...(m.players_ratings || [])].sort((a,b) => Number(b.sofi_rating || b.rating || 0) - Number(a.sofi_rating || a.rating || 0));
   const clubName = (DATA && DATA.club && DATA.club.name) ? DATA.club.name : 'Nosso time';
   const resultLabel = m.result === 'V' ? 'Vitoria' : m.result === 'E' ? 'Empate' : 'Derrota';
