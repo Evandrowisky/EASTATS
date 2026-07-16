@@ -8557,7 +8557,13 @@ function renderTab() {
   if (CURRENT_TAB === 'visao') tc.innerHTML = renderVisao();
   else if (CURRENT_TAB === 'meu-scout') tc.innerHTML = renderMeuScout();
   else if (CURRENT_TAB === 'jogadores') tc.innerHTML = renderJogadores();
-  else if (CURRENT_TAB === 'rankings') tc.innerHTML = renderRankings();
+  else if (CURRENT_TAB === 'rankings') {
+    tc.innerHTML = '<div class="loading"><div class="spinner"></div> Carregando rankings...</div>';
+    loadTrophies().then(() => {
+      const t = document.getElementById('tabContent');
+      if (t && CURRENT_TAB === 'rankings') t.innerHTML = renderRankings();
+    });
+  }
   else if (CURRENT_TAB === 'comparar') { tc.innerHTML = renderComparar(); renderCompareBars(); }
   else if (CURRENT_TAB === 'confrontos') tc.innerHTML = renderConfrontos();
   else if (CURRENT_TAB === 'time-ideal') tc.innerHTML = renderTimeIdeal();
@@ -9517,12 +9523,63 @@ function renderRankings() {
       </div>`;
   };
 
+  const titleRanking = () => {
+    const byPlayer = {};
+    (TROPHIES || []).forEach(t => {
+      const m = trophyMatchById(t.final_match_id);
+      const finalPlayers = (m && Array.isArray(m.players_ratings)) ? m.players_ratings : [];
+      const seenInFinal = new Set();
+      finalPlayers.forEach(pr => {
+        const name = String(pr.name || pr.playername || '').trim();
+        if (!name) return;
+        const key = name.toLowerCase();
+        if (seenInFinal.has(key)) return;
+        seenInFinal.add(key);
+        if (!byPlayer[key]) {
+          byPlayer[key] = {
+            name,
+            position: pr.pos || pr.position || '-',
+            titles: 0,
+            finals: [],
+          };
+        }
+        byPlayer[key].titles += 1;
+        byPlayer[key].finals.push(t.tournament_name || t.name || 'Titulo');
+      });
+    });
+
+    const rows = Object.values(byPlayer)
+      .sort((a,b) => (b.titles - a.titles) || a.name.localeCompare(b.name))
+      .slice(0, 11);
+
+    return `
+      <div class="ranking-card" style="grid-column:1/-1;">
+        <div class="ranking-title"><span class="ranking-title-icon">&#127942;</span>Top 11 Maiores Campe&otilde;es</div>
+        <div style="color:var(--text-2);font-size:12px;margin:0 0 12px;line-height:1.5;">
+          Ranking calculado pelas finais cadastradas na Galeria de T&iacute;tulos. Cada jogador presente na partida final recebe 1 t&iacute;tulo.
+        </div>
+        <div class="ranking-list">
+          ${rows.map((p, idx) => `
+            <div class="ranking-row">
+              <div class="ranking-pos ${podiumClass(idx)}">${podiumIcon(idx)}</div>
+              <div class="ranking-main">
+                <div class="ranking-name">${p.name}</div>
+                <div class="ranking-meta">${p.position || '-'} &middot; ${p.finals.slice(0, 3).join(', ')}${p.finals.length > 3 ? ' +' + (p.finals.length - 3) : ''}</div>
+              </div>
+              <div class="ranking-value">${p.titles}</div>
+            </div>
+          `).join('') || '<div class="empty-state" style="padding:24px 10px;">Cadastre t&iacute;tulos com jogo da final para gerar este ranking</div>'}
+        </div>
+      </div>`;
+  };
+
   return `
     <div class="section-title">Rankings &middot; ${typeLabel} &middot; ${periodLabel} &middot; ${statusLabel}</div>
     <div style="color:var(--text-2);font-size:12px;margin-bottom:14px;line-height:1.5;">
       Top 5 calculado pelo filtro atual. Para aparecer, o jogador precisa ter ${minGames}+ partidas no clube inteiro; os n&uacute;meros exibidos s&atilde;o somente do filtro selecionado.
     </div>
     <div class="rankings-grid">
+      ${titleRanking()}
       ${topList('Top 5 Nota M&eacute;dia EA', '&#9733;', 'rating')}
       ${topList('Top 5 Gols', '&#9917;', 'goals', '', true)}
       ${topList('Top 5 Assist&ecirc;ncias', '&#9673;', 'assists', '', true)}
