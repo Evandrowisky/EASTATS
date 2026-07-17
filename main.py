@@ -10972,13 +10972,29 @@ function trophyMatchOptions(selected) {
   const selectedId = String(selected || '');
   const matches = (DATA && DATA.matches ? DATA.matches : [])
     .slice()
-    .sort((a,b) => Number(b.timestamp || b.match_timestamp || 0) - Number(a.timestamp || a.match_timestamp || 0))
-    .slice(0, 300);
+    .sort((a,b) => Number(b.timestamp || b.match_timestamp || 0) - Number(a.timestamp || a.match_timestamp || 0));
   return matches.map(m => {
     const id = String(m.match_id || m.matchId || '');
     const label = `${matchDisplayDate(m)} - ${m.score || ''} - ${m.opponent || 'Adversario'} - ${m.match_type || ''}`;
     return `<option value="${escapeAttr(id)}" ${selectedId === id ? 'selected' : ''}>${escapeAttr(label)}</option>`;
   }).join('');
+}
+
+function filterTrophyMatchOptions(term) {
+  const select = document.getElementById('tr-match');
+  if (!select) return;
+  const clean = (v) => String(v || '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '');
+  const q = clean(term);
+  Array.from(select.options).forEach((opt, idx) => {
+    if (idx === 0) {
+      opt.hidden = false;
+      return;
+    }
+    opt.hidden = q ? !clean(opt.textContent).includes(q) : false;
+  });
 }
 
 function matchResultText(m) {
@@ -11081,8 +11097,9 @@ function renderTrofeus() {
         <option value="torneio">Torneio</option>
       </select>
       <input id="tr-formation" type="text" placeholder="Formacao" style="grid-column:span 2;">
+      <input id="tr-match-search" type="text" placeholder="Filtrar final por data, adversario ou placar" style="grid-column:span 6;" oninput="filterTrophyMatchOptions(this.value)">
       <select id="tr-match" required style="grid-column:span 6;">
-        <option value="">Escolha a partida da final</option>
+        <option value="">Escolha a partida da final em todo o historico salvo</option>
         ${trophyMatchOptions('')}
       </select>
       <textarea id="tr-notes" placeholder="Observacoes"></textarea>
