@@ -6387,6 +6387,18 @@ body {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.compact-match-table .compact-rating {
+  color: var(--green);
+  font-size: 16px;
+  font-weight: 800;
+  line-height: 1;
+}
+.compact-match-table .compact-count {
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 800;
+  line-height: 1;
+}
 .tag {
   display: inline-block;
   padding: 2px 8px;
@@ -7000,6 +7012,12 @@ html, body { max-width: 100%; }
   }
   .compact-match-table td:nth-child(2) strong {
     font-size: 11px;
+  }
+  .compact-match-table .compact-rating {
+    font-size: 15px;
+  }
+  .compact-match-table .compact-count {
+    font-size: 13px;
   }
 }
 
@@ -11100,10 +11118,10 @@ function compactMatchSummaryHtml(m, opts = {}) {
       <td>${i + 1}</td>
       <td><strong>${escapeAttr(p.name || '-')}</strong>${p.mom ? '<div class="tag liga" style="margin-top:4px;">MOM</div>' : ''}</td>
       <td>${escapeAttr(compactPositionSigla(p.pos || p.position))}</td>
-      <td><strong style="color:var(--green);font-size:18px;">${escapeAttr(p.rating ?? '-')}</strong></td>
-      <td>${escapeAttr(p.goals || 0)}</td>
-      <td>${escapeAttr(p.assists || 0)}</td>
-      <td>${escapeAttr(p.saves || p.defesas || p.defenses || 0)}</td>
+      <td><strong class="compact-rating">${escapeAttr(p.rating ?? '-')}</strong></td>
+      <td><strong class="compact-count">${escapeAttr(p.goals || 0)}</strong></td>
+      <td><strong class="compact-count">${escapeAttr(p.assists || 0)}</strong></td>
+      <td><strong class="compact-count">${escapeAttr(p.saves || p.defesas || p.defenses || 0)}</strong></td>
     </tr>
   `).join('');
   const time = matchDisplayTime(m);
