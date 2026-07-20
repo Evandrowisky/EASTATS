@@ -56,6 +56,7 @@ JWT_ALGORITHM = "HS256"
 JWT_EXPIRE_DAYS = int(os.getenv("JWT_EXPIRE_DAYS", "7") or "7")
 SUPABASE_LOGO_BUCKET = os.getenv("SUPABASE_LOGO_BUCKET", "club-logos").strip() or "club-logos"
 MIN_RANKING_GAMES = 10
+MIN_IDEAL_GAMES = 3
 BR_TZ = timezone(timedelta(hours=-3))
 
 
@@ -1903,7 +1904,7 @@ def has_complete_player_profile(player: dict) -> bool:
         bool(str(player.get("manual_position") or "").strip())
         and bool(str(player.get("archetype") or "").strip())
         and bool(player.get("playstyles") or [])
-        and int(player.get("games") or 0) >= MIN_RANKING_GAMES
+        and int(player.get("games") or 0) >= MIN_IDEAL_GAMES
     )
 
 def build_ideal_team(players_list, formation="3-5-2"):
@@ -7411,6 +7412,7 @@ let IDEAL_FORMATION = '3-5-2';
 let IDEAL_MODE = localStorage.getItem('scout_ideal_mode') || 'auto';
 let MANUAL_LINEUPS = {};
 const MIN_RANKING_GAMES = 10;
+const MIN_IDEAL_GAMES = 3;
 let AUTH_TOKEN = localStorage.getItem('scout_auth_token') || '';
 let AUTH_USER = (() => {
   try { return JSON.parse(localStorage.getItem('scout_auth_user') || 'null'); }
@@ -9837,7 +9839,7 @@ function eligibleRankingPlayers(players) {
 }
 
 function eligibleIdealPlayers() {
-  const minGames = effectiveMinGamesForScope();
+  const minGames = MIN_IDEAL_GAMES;
   return scopedPlayers().filter(p => Number(clubGamesForPlayer(p.name) || 0) >= minGames && hasCompletePlayerProfile(p.name));
 }
 
@@ -10900,7 +10902,7 @@ function renderPlaystyles() {
 
 function renderTimeIdeal() {
   const idealOptions = eligibleIdealPlayers();
-  const minGames = effectiveMinGamesForScope();
+  const minGames = MIN_IDEAL_GAMES;
   if (!idealOptions.length) {
     return `<div class="empty-state">Nenhum jogador eleg&iacute;vel para montar o time ideal. Cadastre posi&ccedil;&atilde;o, arqu&eacute;tipo e PlayStyles, e use jogadores com pelo menos ${minGames} partidas no clube inteiro.</div>`;
   }
