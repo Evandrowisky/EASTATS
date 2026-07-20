@@ -6352,17 +6352,23 @@ body {
 .history-table tr:hover { background: rgba(0,255,115,0.04); }
 .compact-match-table {
   table-layout: fixed;
+  min-width: 0 !important;
+  width: 100%;
 }
 .compact-match-table th,
 .compact-match-table td {
   text-align: left;
+  padding: 7px 4px;
 }
 .compact-match-table th:nth-child(1),
-.compact-match-table td:nth-child(1) { width: 32px; }
+.compact-match-table td:nth-child(1) { width: 28px; }
 .compact-match-table th:nth-child(2),
-.compact-match-table td:nth-child(2) { width: 210px; }
+.compact-match-table td:nth-child(2) {
+  width: auto;
+  min-width: 0;
+}
 .compact-match-table th:nth-child(3),
-.compact-match-table td:nth-child(3) { width: 92px; }
+.compact-match-table td:nth-child(3) { width: 36px; }
 .compact-match-table th:nth-child(4),
 .compact-match-table td:nth-child(4),
 .compact-match-table th:nth-child(5),
@@ -6371,7 +6377,7 @@ body {
 .compact-match-table td:nth-child(6),
 .compact-match-table th:nth-child(7),
 .compact-match-table td:nth-child(7) {
-  width: 52px;
+  width: 36px;
   text-align: center;
 }
 .compact-match-table td:nth-child(2) strong {
@@ -6963,18 +6969,24 @@ html, body { max-width: 100%; }
 
 @media (max-width: 640px) {
   .compact-match-table {
-    min-width: 520px !important;
+    min-width: 0 !important;
+    width: 100% !important;
     font-size: 10px !important;
     table-layout: fixed;
   }
   .compact-match-table th,
   .compact-match-table td {
-    padding: 7px 4px;
+    padding: 5px 2px;
   }
+  .compact-match-table th:nth-child(1),
+  .compact-match-table td:nth-child(1) { width: 20px; }
   .compact-match-table th:nth-child(2),
-  .compact-match-table td:nth-child(2) { width: 150px; }
+  .compact-match-table td:nth-child(2) {
+    width: auto;
+    min-width: 0;
+  }
   .compact-match-table th:nth-child(3),
-  .compact-match-table td:nth-child(3) { width: 76px; }
+  .compact-match-table td:nth-child(3) { width: 28px; }
   .compact-match-table th:nth-child(4),
   .compact-match-table td:nth-child(4),
   .compact-match-table th:nth-child(5),
@@ -6983,8 +6995,11 @@ html, body { max-width: 100%; }
   .compact-match-table td:nth-child(6),
   .compact-match-table th:nth-child(7),
   .compact-match-table td:nth-child(7) {
-    width: 42px;
+    width: 26px;
     text-align: center;
+  }
+  .compact-match-table td:nth-child(2) strong {
+    font-size: 11px;
   }
 }
 
@@ -11063,6 +11078,16 @@ function matchResultText(m) {
   return m.result || '-';
 }
 
+function compactPositionSigla(pos) {
+  const p = String(pos || '').trim().toLowerCase();
+  if (!p) return '-';
+  if (['goalkeeper', 'gk', 'gol', 'goleiro'].includes(p)) return 'GK';
+  if (['defender', 'cb', 'lcb', 'rcb', 'lb', 'rb', 'zagueiro', 'defensor'].includes(p)) return 'DEF';
+  if (['midfielder', 'cm', 'lcm', 'rcm', 'cdm', 'cam', 'lm', 'rm', 'meia', 'volante'].includes(p)) return 'MEI';
+  if (['forward', 'st', 'lst', 'rst', 'cf', 'lw', 'rw', 'atacante', 'ponta'].includes(p)) return 'ATA';
+  return p.slice(0, 3).toUpperCase();
+}
+
 function compactMatchSummaryHtml(m, opts = {}) {
   const club = (DATA && DATA.club && DATA.club.name) || 'Nosso clube';
   const opponent = m.opponent || 'Adversario';
@@ -11074,7 +11099,7 @@ function compactMatchSummaryHtml(m, opts = {}) {
     <tr>
       <td>${i + 1}</td>
       <td><strong>${escapeAttr(p.name || '-')}</strong>${p.mom ? '<div class="tag liga" style="margin-top:4px;">MOM</div>' : ''}</td>
-      <td>${escapeAttr(p.pos || p.position || '-')}</td>
+      <td>${escapeAttr(compactPositionSigla(p.pos || p.position))}</td>
       <td><strong style="color:var(--green);font-size:18px;">${escapeAttr(p.rating ?? '-')}</strong></td>
       <td>${escapeAttr(p.goals || 0)}</td>
       <td>${escapeAttr(p.assists || 0)}</td>
@@ -11107,7 +11132,7 @@ function compactMatchSummaryHtml(m, opts = {}) {
         <div class="detail-stat"><div class="l">ID da partida</div><div class="v" style="font-size:13px;color:var(--text);word-break:break-all;">${escapeAttr(matchId)}</div></div>
       </div>
       <div style="overflow-x:auto;">
-        <table class="history-table compact-match-table" style="font-size:12px;min-width:560px;">
+        <table class="history-table compact-match-table" style="font-size:12px;">
           <thead><tr><th>#</th><th>Jogador</th><th>Pos</th><th>EA</th><th>G</th><th>A</th><th>DEF</th></tr></thead>
           <tbody>${rows || '<tr><td colspan="7">Sem dados dos jogadores.</td></tr>'}</tbody>
         </table>
