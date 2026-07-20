@@ -6350,6 +6350,37 @@ body {
   border-bottom: 1px solid rgba(255,255,255,0.04);
 }
 .history-table tr:hover { background: rgba(0,255,115,0.04); }
+.compact-match-table {
+  table-layout: fixed;
+}
+.compact-match-table th,
+.compact-match-table td {
+  text-align: left;
+}
+.compact-match-table th:nth-child(1),
+.compact-match-table td:nth-child(1) { width: 32px; }
+.compact-match-table th:nth-child(2),
+.compact-match-table td:nth-child(2) { width: 210px; }
+.compact-match-table th:nth-child(3),
+.compact-match-table td:nth-child(3) { width: 92px; }
+.compact-match-table th:nth-child(4),
+.compact-match-table td:nth-child(4),
+.compact-match-table th:nth-child(5),
+.compact-match-table td:nth-child(5),
+.compact-match-table th:nth-child(6),
+.compact-match-table td:nth-child(6),
+.compact-match-table th:nth-child(7),
+.compact-match-table td:nth-child(7) {
+  width: 52px;
+  text-align: center;
+}
+.compact-match-table td:nth-child(2) strong {
+  display: block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .tag {
   display: inline-block;
   padding: 2px 8px;
@@ -6928,6 +6959,33 @@ html, body { max-width: 100%; }
   .chart-box canvas { height: 180px !important; max-height: 180px !important; }
   .chart-box.wide { height: 300px; min-height: 300px; max-height: 300px; }
   .chart-box.wide canvas { height: 250px !important; max-height: 250px !important; }
+}
+
+@media (max-width: 640px) {
+  .compact-match-table {
+    min-width: 520px !important;
+    font-size: 10px !important;
+    table-layout: fixed;
+  }
+  .compact-match-table th,
+  .compact-match-table td {
+    padding: 7px 4px;
+  }
+  .compact-match-table th:nth-child(2),
+  .compact-match-table td:nth-child(2) { width: 150px; }
+  .compact-match-table th:nth-child(3),
+  .compact-match-table td:nth-child(3) { width: 76px; }
+  .compact-match-table th:nth-child(4),
+  .compact-match-table td:nth-child(4),
+  .compact-match-table th:nth-child(5),
+  .compact-match-table td:nth-child(5),
+  .compact-match-table th:nth-child(6),
+  .compact-match-table td:nth-child(6),
+  .compact-match-table th:nth-child(7),
+  .compact-match-table td:nth-child(7) {
+    width: 42px;
+    text-align: center;
+  }
 }
 
 
@@ -11020,6 +11078,7 @@ function compactMatchSummaryHtml(m, opts = {}) {
       <td><strong style="color:var(--green);font-size:18px;">${escapeAttr(p.rating ?? '-')}</strong></td>
       <td>${escapeAttr(p.goals || 0)}</td>
       <td>${escapeAttr(p.assists || 0)}</td>
+      <td>${escapeAttr(p.saves || p.defesas || p.defenses || 0)}</td>
     </tr>
   `).join('');
   const time = matchDisplayTime(m);
@@ -11048,9 +11107,9 @@ function compactMatchSummaryHtml(m, opts = {}) {
         <div class="detail-stat"><div class="l">ID da partida</div><div class="v" style="font-size:13px;color:var(--text);word-break:break-all;">${escapeAttr(matchId)}</div></div>
       </div>
       <div style="overflow-x:auto;">
-        <table class="history-table" style="font-size:12px;min-width:560px;">
-          <thead><tr><th>#</th><th>Jogador</th><th>Pos</th><th>EA</th><th>G</th><th>A</th></tr></thead>
-          <tbody>${rows || '<tr><td colspan="6">Sem dados dos jogadores.</td></tr>'}</tbody>
+        <table class="history-table compact-match-table" style="font-size:12px;min-width:560px;">
+          <thead><tr><th>#</th><th>Jogador</th><th>Pos</th><th>EA</th><th>G</th><th>A</th><th>DEF</th></tr></thead>
+          <tbody>${rows || '<tr><td colspan="7">Sem dados dos jogadores.</td></tr>'}</tbody>
         </table>
       </div>
       <div style="display:flex;justify-content:space-between;gap:10px;margin-top:12px;color:var(--text-2);font-size:12px;">
