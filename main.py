@@ -944,6 +944,38 @@ def save_matches_supabase(club_id: str, matches: list):
     if not sb or not club_id or not matches:
         return {"matches": 0, "match_players": 0}
 
+    existing_flags = {}
+    try:
+        mids = [
+            stable_match_id_for_storage(m, club_id, idx)
+            for idx, m in enumerate(matches or [])
+            if isinstance(m, dict)
+        ]
+        for chunk in _supabase_chunks(mids):
+            if not chunk:
+                continue
+            resp = (
+                sb.table("matches")
+                .select("match_id,data")
+                .eq("club_id", str(club_id))
+                .in_("match_id", chunk)
+                .execute()
+            )
+            for row in getattr(resp, "data", None) or []:
+                data = row.get("data") if isinstance(row, dict) else None
+                if isinstance(data, dict) and _is_ignored_match_py(data):
+                    existing_flags[str(row.get("match_id"))] = {
+                        "ignored": True,
+                        "is_ignored": True,
+                        "desconsiderada": True,
+                        "manual_status": data.get("manual_status") or "desconsiderada",
+                        "ignored_reason": data.get("ignored_reason") or "",
+                        "ignored_by": data.get("ignored_by") or "",
+                        "ignored_at": data.get("ignored_at"),
+                    }
+    except Exception as e:
+        print(f"[SUPABASE] Aviso ao preservar status manual das partidas: {type(e).__name__}: {e}")
+
     match_rows = []
     player_rows = []
     for idx, m in enumerate(matches or []):
@@ -951,6 +983,8 @@ def save_matches_supabase(club_id: str, matches: list):
             continue
         mid = stable_match_id_for_storage(m, club_id, idx)
         m_payload = {**m, "match_id": mid}
+        if mid in existing_flags:
+            m_payload.update(existing_flags[mid])
         match_rows.append({
             "match_id": mid,
             "club_id": str(club_id),
@@ -1302,6 +1336,11 @@ class ClubSettingsPayload(BaseModel):
     image_url: Optional[str] = None
 
 
+class MatchIgnoredPayload(BaseModel):
+    ignored: bool = False
+    reason: Optional[str] = None
+
+
 def _get_pwd_context():
     global _pwd_context
     if _pwd_context is None:
@@ -1527,6 +1566,82 @@ def require_owner_admin(current_user: dict = Depends(require_admin)):
     if usuario not in ("sennasant33", "sennasant"):
         raise HTTPException(403, "Apenas o login master pode acessar esta tela")
     return current_user
+
+
+@app.post("/api/matches/{match_id}/ignored")
+def set_match_ignored(match_id: str, payload: MatchIgnoredPayload, current_user: dict = Depends(require_admin)):
+    club_id = str((current_user or {}).get("club_id") or "").strip()
+    if not club_id:
+        raise HTTPException(400, "Clube do usuario nao identificado")
+    sid = str(match_id or "").strip()
+    if not sid:
+        raise HTTPException(400, "ID da partida invalido")
+
+    sb = get_supabase()
+    match_data = None
+    if sb:
+        try:
+            resp = (
+                sb.table("matches")
+                .select("data")
+                .eq("club_id", club_id)
+                .eq("match_id", sid)
+                .limit(1)
+                .execute()
+            )
+            rows = getattr(resp, "data", None) or []
+            if rows and isinstance(rows[0], dict) and isinstance(rows[0].get("data"), dict):
+                match_data = {**rows[0]["data"]}
+        except Exception as e:
+            print(f"[SUPABASE] Aviso ao carregar partida {sid}: {type(e).__name__}: {e}")
+
+    cache = load_cache()
+    if not match_data and cache and str(cache.get("club", {}).get("id") or "") == club_id:
+        for cm in cache.get("matches") or []:
+            if not isinstance(cm, dict):
+                continue
+            cmid = str(cm.get("match_id") or cm.get("matchId") or stable_match_id_for_storage(cm, club_id, 0))
+            if cmid == sid:
+                match_data = {**cm, "match_id": sid}
+                break
+    if not match_data:
+        raise HTTPException(404, "Partida nao encontrada")
+
+    ignored = bool(payload.ignored)
+    match_data["match_id"] = sid
+    match_data["ignored"] = ignored
+    match_data["is_ignored"] = ignored
+    match_data["desconsiderada"] = ignored
+    match_data["manual_status"] = "desconsiderada" if ignored else "valida"
+    match_data["ignored_reason"] = (payload.reason or "").strip()
+    match_data["ignored_by"] = current_user.get("usuario") or current_user.get("nome") or ""
+    match_data["ignored_at"] = _now_iso() if ignored else None
+
+    if sb:
+        try:
+            sb.table("matches").update({"data": match_data, "updated_at": _now_iso()}).eq("club_id", club_id).eq("match_id", sid).execute()
+        except Exception as e:
+            print(f"[SUPABASE] Erro ao atualizar status da partida {sid}: {type(e).__name__}: {e}")
+            raise HTTPException(500, "Erro ao salvar status da partida")
+
+    if cache and str(cache.get("club", {}).get("id") or "") == club_id:
+        updated_matches = []
+        found = False
+        for cm in cache.get("matches") or []:
+            if not isinstance(cm, dict):
+                updated_matches.append(cm)
+                continue
+            cmid = str(cm.get("match_id") or cm.get("matchId") or stable_match_id_for_storage(cm, club_id, 0))
+            if cmid == sid:
+                updated_matches.append(match_data)
+                found = True
+            else:
+                updated_matches.append(cm)
+        if found:
+            cache["matches"] = updated_matches
+            save_cache(cache)
+
+    return {"success": True, "ignored": ignored, "match": match_data}
 
 
 
@@ -3503,6 +3618,15 @@ def _is_quit_match_py(match: dict) -> bool:
     return mostly_low or almost_all_flat or (avg <= 6.05 and low_activity)
 
 
+def _is_ignored_match_py(match: dict) -> bool:
+    if not isinstance(match, dict):
+        return False
+    if bool(match.get("ignored")) or bool(match.get("is_ignored")) or bool(match.get("desconsiderada")):
+        return True
+    status = str(match.get("manual_status") or "").strip().lower()
+    return status in ("desconsiderada", "desconsiderado", "ignorada", "ignorado", "invalidada", "invalidado")
+
+
 def _filter_matches_for_scope(matches: list, match_type: str = "todos", period: str = "todos", match_status: str = "todas") -> list:
     wanted_type = (match_type or "todos").lower()
     wanted_period = (period or "todos").lower()
@@ -3514,10 +3638,14 @@ def _filter_matches_for_scope(matches: list, match_type: str = "todos", period: 
     )
     if wanted_type != "todos":
         out = [m for m in out if str(m.get("match_type") or "").lower() == wanted_type]
-    if wanted_status == "quitadas":
-        out = [m for m in out if _is_quit_match_py(m)]
-    elif wanted_status != "todas":
-        out = [m for m in out if not _is_quit_match_py(m)]
+    if wanted_status in ("desconsideradas", "desconsiderada", "ignoradas", "invalidas"):
+        out = [m for m in out if _is_ignored_match_py(m)]
+    else:
+        out = [m for m in out if not _is_ignored_match_py(m)]
+        if wanted_status == "quitadas":
+            out = [m for m in out if _is_quit_match_py(m)]
+        elif wanted_status != "todas":
+            out = [m for m in out if not _is_quit_match_py(m)]
     if wanted_period == "todos":
         return out
     if wanted_period.startswith("ult"):
@@ -6200,6 +6328,31 @@ body {
   gap: 12px;
 }
 
+.confront-filter {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+  margin: 0 0 14px;
+}
+
+.confront-search {
+  width: min(520px, 100%);
+  background: var(--bg-3);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 10px;
+  padding: 10px 12px;
+  font-size: 13px;
+  font-family: inherit;
+  outline: none;
+}
+
+.confront-search:focus {
+  border-color: var(--green);
+  box-shadow: 0 0 0 2px rgba(0,255,115,0.12);
+}
+
 .confront-card {
   background: var(--bg-card);
   border: 1px solid var(--border);
@@ -7396,6 +7549,7 @@ let CURRENT_TAB = 'visao';
 let CURRENT_PERIOD = 'todos';
 let CURRENT_MATCH_TYPE = 'todos';
 let CURRENT_MATCH_STATUS = 'todas';
+let CONFRONTOS_SEARCH = '';
 let PLAYER_PROFILES = {};
 let COMPARE_A = null;
 let COMPARE_B = null;
@@ -7696,11 +7850,20 @@ function isQuitMatch(m) {
   return mostlyLow || almostAllFlat || (avg <= 6.05 && lowActivity);
 }
 
+function isIgnoredMatch(m) {
+  if (!m) return false;
+  if (m.ignored === true || m.is_ignored === true || m.desconsiderada === true) return true;
+  const status = String(m.manual_status || m.status_manual || '').trim().toLowerCase();
+  return ['desconsiderada', 'desconsiderado', 'ignorada', 'ignorado', 'invalidada', 'invalidado'].includes(status);
+}
+
 function filterByMatchStatus(matches) {
   const all = matches || [];
-  if (CURRENT_MATCH_STATUS === 'quitadas') return all.filter(isQuitMatch);
-  if (CURRENT_MATCH_STATUS === 'todas') return all;
-  return all.filter(m => !isQuitMatch(m));
+  if (CURRENT_MATCH_STATUS === 'desconsideradas') return all.filter(isIgnoredMatch);
+  const considered = all.filter(m => !isIgnoredMatch(m));
+  if (CURRENT_MATCH_STATUS === 'quitadas') return considered.filter(isQuitMatch);
+  if (CURRENT_MATCH_STATUS === 'todas') return considered;
+  return considered.filter(m => !isQuitMatch(m));
 }
 
 function applyMatchFilters(matches, opts = {}) {
@@ -8607,6 +8770,7 @@ function render() {
     <div class="period-filter" style="margin-top:-10px;">
       <div class="period matchstatus ${CURRENT_MATCH_STATUS==='validas'?'active':''}" onclick="setMatchStatus('validas', event)">V&Aacute;LIDAS</div>
       <div class="period matchstatus ${CURRENT_MATCH_STATUS==='quitadas'?'active':''}" onclick="setMatchStatus('quitadas', event)">QUITADAS</div>
+      <div class="period matchstatus ${CURRENT_MATCH_STATUS==='desconsideradas'?'active':''}" onclick="setMatchStatus('desconsideradas', event)">DESCONSID.</div>
       <div class="period matchstatus ${CURRENT_MATCH_STATUS==='todas'?'active':''}" onclick="setMatchStatus('todas', event)">TODAS</div>
     </div>
 
@@ -9775,21 +9939,31 @@ function renderCompareBars() {
 }
 
 function renderConfrontos() {
-  // Confrontos usa o histórico completo salvo do tipo selecionado.
-  // O filtro de período continua valendo para Visão, mas aqui não corta em Últ.5/Últ.10.
-  const matches = playerStatMatches();
+  const query = normalizeSearchText(CONFRONTOS_SEARCH);
+  const matches = playerStatMatches().filter(m => {
+    if (!query) return true;
+    return normalizeSearchText(m.opponent).includes(query);
+  });
+  let html = `
+    <div class="section-title">Confrontos &middot; ${currentScopeLabel()}</div>
+    <div class="confront-filter">
+      <input class="confront-search" type="search" placeholder="Filtrar advers&aacute;rio..."
+        value="${escapeAttr(CONFRONTOS_SEARCH)}" oninput="setConfrontosSearch(this.value)">
+    </div>
+  `;
   if (!matches.length) {
-    return '<div class="empty-state">Nenhuma partida salva para este filtro</div>';
+    return html + '<div class="empty-state">Nenhuma partida salva para este filtro</div>';
   }
-  let html = `<div class="section-title">Confrontos &middot; ${currentScopeLabel()}</div><div class="confronts-grid">`;
+  html += '<div class="confronts-grid">';
   matches.forEach(m => {
     const top = (m.players_ratings || [])[0];
     const displayDate = matchDisplayDate(m);
+    const ignoredBadge = isIgnoredMatch(m) ? ' &middot; <span class="tag d">DESCONSID.</span>' : '';
     html += `
       <div class="confront-card" onclick="showMatchDetails('${m.match_id}')" style="cursor:pointer;">
         <div>
           <div class="confront-name">${displayDate} &middot; VS ${String(m.opponent || '').toUpperCase()}</div>
-          <div style="font-size:11px;color:var(--text-2);margin-top:4px;">${m.match_type} &middot; MOM ${m.mom || '-'} ${m.mom_rating ? '(' + m.mom_rating + ')' : ''}${top ? ' &middot; Melhor Sofi: ' + top.name + ' ' + top.sofi_rating : ''}</div>
+          <div style="font-size:11px;color:var(--text-2);margin-top:4px;">${m.match_type}${ignoredBadge} &middot; MOM ${m.mom || '-'} ${m.mom_rating ? '(' + m.mom_rating + ')' : ''}${top ? ' &middot; Melhor Sofi: ' + top.name + ' ' + top.sofi_rating : ''}</div>
         </div>
         <div class="confront-vs">
           <span class="vs-tag ${m.result.toLowerCase()}">${m.result}</span>
@@ -9800,6 +9974,19 @@ function renderConfrontos() {
   });
   html += '</div>';
   return html;
+}
+
+function normalizeSearchText(value) {
+  try {
+    return String(value || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
+  } catch (e) {
+    return String(value || '').toLowerCase().trim();
+  }
+}
+
+function setConfrontosSearch(value) {
+  CONFRONTOS_SEARCH = value || '';
+  if (CURRENT_TAB === 'confrontos') renderTab();
 }
 
 function normalizePlayerFamily(pos) {
@@ -11127,9 +11314,15 @@ function compactMatchSummaryHtml(m, opts = {}) {
     </tr>
   `).join('');
   const time = matchDisplayTime(m);
-  const status = isQuitMatch(m) ? 'Quitada' : 'Valida';
   const score = m.score || `${m.goals_for || 0}-${m.goals_against || 0}`;
   const matchId = m.match_id || m.matchId || '-';
+  const ignored = isIgnoredMatch(m);
+  const status = ignored ? 'Desconsiderada' : (isQuitMatch(m) ? 'Quitada' : 'Valida');
+  const adminAction = isAdmin() ? `
+    <button class="btn-mini ${ignored ? '' : 'danger'}" onclick="toggleIgnoredMatch('${escapeAttr(matchId)}', ${ignored ? 'false' : 'true'})" type="button">
+      ${ignored ? 'RECONSIDERAR' : 'DESCONSIDERAR'}
+    </button>
+  ` : '';
   const trophyLine = opts.trophy ? `<div style="color:var(--yellow);font-weight:800;margin-bottom:8px;">${escapeAttr(opts.trophy.tournament_name || '')}${opts.trophy.season ? ' &middot; ' + escapeAttr(opts.trophy.season) : ''}</div>` : '';
   return `
     <div class="trophy-print-card" style="width:min(820px,100%);margin:0 auto;background:#050805;border:1px solid var(--green-dim);border-radius:16px;padding:18px;color:var(--text);box-shadow:0 0 30px rgba(0,255,115,.14);">
@@ -11140,7 +11333,10 @@ function compactMatchSummaryHtml(m, opts = {}) {
           <div style="font-size:clamp(20px,3.5vw,34px);font-weight:900;color:var(--green);line-height:1.05;word-break:normal;overflow-wrap:anywhere;">${escapeAttr(club)} X ${escapeAttr(opponent)}</div>
           <div style="font-size:clamp(42px,8vw,70px);font-weight:900;color:var(--green);line-height:1;margin-top:12px;">${escapeAttr(score)}</div>
         </div>
-        <button class="btn-mini" onclick="downloadTrophyImage()" type="button">GERAR JPEG</button>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end;">
+          ${adminAction}
+          <button class="btn-mini" onclick="downloadTrophyImage()" type="button">GERAR JPEG</button>
+        </div>
       </div>
       <div style="height:1px;background:var(--border);margin:16px 0;"></div>
       <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:8px;margin-bottom:14px;">
@@ -11171,6 +11367,38 @@ function showCompactMatchSummary(matchId) {
   if (!m) return;
   document.getElementById('modalContent').innerHTML = compactMatchSummaryHtml(m);
   document.getElementById('modal').classList.add('active');
+}
+
+async function toggleIgnoredMatch(matchId, ignored) {
+  try {
+    const r = await authFetch('/api/matches/' + encodeURIComponent(matchId) + '/ignored', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ignored})
+    });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(data.detail || data.error || 'Erro ao salvar status da partida');
+
+    const updated = data.match || {};
+    if (DATA && Array.isArray(DATA.matches)) {
+      DATA.matches = DATA.matches.map(m => {
+        const id = String(m.match_id || m.matchId || '');
+        if (id !== String(matchId)) return m;
+        return {
+          ...m,
+          ...updated,
+          ignored,
+          is_ignored: ignored,
+          desconsiderada: ignored,
+          manual_status: ignored ? 'desconsiderada' : ''
+        };
+      });
+    }
+    render();
+    showCompactMatchSummary(matchId);
+  } catch (e) {
+    alert('Erro: ' + e.message);
+  }
 }
 
 async function downloadTrophyImage() {
