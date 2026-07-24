@@ -11979,6 +11979,7 @@ function renderPlayerDetailHTML(data) {
   const psBadges = (profile.playstyles || []).map(x => `<span class="tag liga" style="margin-right:6px;">${playstyleIcon(x)} ${x}</span>`).join('');
   const detailedGames = Number(data.detail_games ?? data.games_with_history ?? h.length ?? 0) || h.length || 0;
   const clubTotalGames = Number(data.club_total_games ?? p.ea_global_games ?? p.games ?? detailedGames) || detailedGames;
+  const participationPerGame = detailedGames ? (((Number(totals.goals || 0) + Number(totals.assists || 0)) / detailedGames).toFixed(2)) : '0';
   const totalSuffix = data.uses_member_totals && isFullPlayerScope() ? ` &middot; ${clubTotalGames} jogos no clube (totais EA)` : '';
   const gamesLine = `${detailedGames} partidas no filtro (${activeScopeLabel()})${totalSuffix} &middot; ranking ${rank.rating_rank_label || '-'} &middot; tend&ecirc;ncia ${trend.status || '-'}`;
   return `
@@ -12004,7 +12005,7 @@ function renderPlayerDetailHTML(data) {
         <div class="analytics-card"><div class="v">${avg.assists_per_game || 0}</div><div class="l">A/J</div></div>
         <div class="analytics-card"><div class="v">${fmtStat(totals.shots)}</div><div class="l">Chutes</div></div>
         <div class="analytics-card"><div class="v">${fmtStat(avg.shots_per_game)}</div><div class="l">Chu/J</div></div>
-        <div class="analytics-card"><div class="v">${fmtStat(avg.passes_pct, "%")}</div><div class="l">Pass%</div></div>
+        <div class="analytics-card"><div class="v">${participationPerGame}</div><div class="l">Part./J</div></div>
         <div class="analytics-card"><div class="v">${fmtStat(totals.tackles)}</div><div class="l">Desarmes</div></div>
         <div class="analytics-card"><div class="v">${fmtStat(avg.tackle_pct, "%")}</div><div class="l">Des%</div></div>
         <div class="analytics-card"><div class="v">${fmtStat(avg.tackles_per_game)}</div><div class="l">Des/J</div></div>
