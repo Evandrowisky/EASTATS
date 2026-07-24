@@ -7627,7 +7627,7 @@ function renderAuth(mode = 'login') {
   if (!c) return;
   const isRegister = mode === 'register';
   const isReset = mode === 'reset';
-  if (!isAdmin() && ['jogadores','comparar','confrontos','cadastro','alertas','config','owner-users','owner-clubs'].includes(CURRENT_TAB)) CURRENT_TAB = 'visao';
+  if (!isAdmin() && ['jogadores','comparar','cadastro','alertas','config','owner-users','owner-clubs'].includes(CURRENT_TAB)) CURRENT_TAB = 'visao';
   const title = isRegister ? 'Criar Conta' : isReset ? 'Redefinir Acesso' : 'Entrar no ClubScout Pro';
   const help = isRegister
     ? 'Crie sua conta como jogador. O admin do clube libera ou bloqueia seu login depois.'
@@ -7974,7 +7974,7 @@ function setPeriod(p, ev) {
   if (ev && ev.target) ev.target.classList.add('active');
   if (!isAdmin()) {
     document.querySelectorAll('.tab').forEach(el => {
-      if (['JOGADORES','COMPARAR','CONFRONTOS','CADASTRO','ALERTAS','CONFIG','USUÁRIOS','USUARIOS'].includes((el.textContent || '').trim())) el.remove();
+      if (['JOGADORES','COMPARAR','CADASTRO','ALERTAS','CONFIG','USUÁRIOS','USUARIOS'].includes((el.textContent || '').trim())) el.remove();
     });
   }
   render();
@@ -7987,7 +7987,7 @@ function setMatchType(t, ev) {
   if (ev && ev.target) ev.target.classList.add('active');
   if (!isAdmin()) {
     document.querySelectorAll('.tab').forEach(el => {
-      if (['JOGADORES','COMPARAR','CONFRONTOS','CADASTRO','ALERTAS','CONFIG','USUÁRIOS','USUARIOS'].includes((el.textContent || '').trim())) el.remove();
+      if (['JOGADORES','COMPARAR','CADASTRO','ALERTAS','CONFIG','USUÁRIOS','USUARIOS'].includes((el.textContent || '').trim())) el.remove();
     });
   }
   renderTab();
@@ -8703,7 +8703,7 @@ function render() {
       renderTab();
       return;
     }
-    if (!isAdmin() && ['jogadores','comparar','confrontos','cadastro','alertas','config','owner-users','owner-clubs'].includes(CURRENT_TAB)) CURRENT_TAB = 'visao';
+    if (!isAdmin() && ['jogadores','comparar','cadastro','alertas','config','owner-users','owner-clubs'].includes(CURRENT_TAB)) CURRENT_TAB = 'visao';
   c.innerHTML = `
       <div class="empty-state">
         <div class="empty-icon">⚽</div>
@@ -8714,7 +8714,7 @@ function render() {
     return;
   }
   
-  if (!isAdmin() && ['jogadores','comparar','confrontos','cadastro','alertas','config','owner-users','owner-clubs'].includes(CURRENT_TAB)) CURRENT_TAB = 'visao';
+  if (!isAdmin() && ['jogadores','comparar','cadastro','alertas','config','owner-users','owner-clubs'].includes(CURRENT_TAB)) CURRENT_TAB = 'visao';
   c.innerHTML = `
     <div class="club-card">
       <div class="club-info">
@@ -8783,7 +8783,7 @@ function render() {
   
   if (!isAdmin()) {
     document.querySelectorAll('.tab').forEach(el => {
-      if (['JOGADORES','COMPARAR','CONFRONTOS','CADASTRO','ALERTAS','CONFIG','USUÁRIOS','USUARIOS'].includes((el.textContent || '').trim())) el.remove();
+      if (['JOGADORES','COMPARAR','CADASTRO','ALERTAS','CONFIG','USUÁRIOS','USUARIOS'].includes((el.textContent || '').trim())) el.remove();
     });
   }
   renderTab();
@@ -8802,7 +8802,7 @@ function setTab(t, ev) {
   if (target && target.classList) target.classList.add('active');
   if (!isAdmin()) {
     document.querySelectorAll('.tab').forEach(el => {
-      if (['JOGADORES','COMPARAR','CONFRONTOS','CADASTRO','ALERTAS','CONFIG','USUÁRIOS','USUARIOS'].includes((el.textContent || '').trim())) el.remove();
+      if (['JOGADORES','COMPARAR','CADASTRO','ALERTAS','CONFIG','USUÁRIOS','USUARIOS'].includes((el.textContent || '').trim())) el.remove();
     });
   }
   renderTab();
@@ -8847,7 +8847,7 @@ function renderTab() {
   else if (CURRENT_TAB === 'adversarios') tc.innerHTML = renderAdversarios();
   else if (CURRENT_TAB === 'mercado') tc.innerHTML = renderAnaliseMercado();
   else if (CURRENT_TAB === 'ajuda') tc.innerHTML = renderAjuda();
-  else if (['jogadores','comparar','confrontos','cadastro','alertas','config','owner-users','owner-clubs'].includes(CURRENT_TAB) && (!isAdmin() || (['owner-users','owner-clubs'].includes(CURRENT_TAB) && !isOwnerAdmin()))) { CURRENT_TAB = 'visao'; tc.innerHTML = renderVisao(); }
+  else if (['jogadores','comparar','cadastro','alertas','config','owner-users','owner-clubs'].includes(CURRENT_TAB) && (!isAdmin() || (['owner-users','owner-clubs'].includes(CURRENT_TAB) && !isOwnerAdmin()))) { CURRENT_TAB = 'visao'; tc.innerHTML = renderVisao(); }
   else if (CURRENT_TAB === 'agenda') tc.innerHTML = renderAgenda();
 }
 
@@ -10228,7 +10228,7 @@ function setIdealFormation(value) {
   IDEAL_FORMATION = value;
   if (!isAdmin()) {
     document.querySelectorAll('.tab').forEach(el => {
-      if (['JOGADORES','COMPARAR','CONFRONTOS','CADASTRO','ALERTAS','CONFIG','USUÁRIOS','USUARIOS'].includes((el.textContent || '').trim())) el.remove();
+      if (['JOGADORES','COMPARAR','CADASTRO','ALERTAS','CONFIG','USUÁRIOS','USUARIOS'].includes((el.textContent || '').trim())) el.remove();
     });
   }
   renderTab();
@@ -10717,33 +10717,84 @@ function helpCard(title, items) {
 
 function renderAjuda() {
   const common = [
+    helpCard('Acesso e permiss&otilde;es', [
+      'Admin v&ecirc; todas as telas: sincroniza&ccedil;&atilde;o, jogadores, comparar, confrontos, cadastro, configura&ccedil;&otilde;es, alertas, usu&aacute;rios, clubes, t&iacute;tulos, estilos, advers&aacute;rios e agenda.',
+      'Jogador v&ecirc; Vis&atilde;o, Meu Scout, Rankings, Confrontos, Time Ideal, Estilos, Advers&aacute;rios, Ajuda e Agenda.',
+      'Cadastro de jogador, altera&ccedil;&atilde;o de cargo, bloqueio de login, libera&ccedil;&atilde;o de clube e configura&ccedil;&otilde;es do clube ficam protegidos para admin.',
+    ]),
     helpCard('Filtros e recortes', [
-      'Per&iacute;odo, tipo de partida e status valem para Vis&atilde;o, Meu Scout, Jogadores, Rankings, Comparar e Time Ideal.',
+      'Per&iacute;odo, &uacute;ltimos jogos, tipo de partida e status valem para Vis&atilde;o, Meu Scout, Jogadores, Rankings, Comparar, Confrontos e Time Ideal.',
       'Os n&uacute;meros exibidos respeitam o filtro selecionado, mas a elegibilidade do jogador usa o total de partidas salvas no clube.',
       'V&aacute;lidas remove partidas detectadas como quitadas; Quitadas mostra apenas essas partidas; Todas mistura os dois grupos.',
+      'Partida desconsiderada pelo admin n&atilde;o deve contaminar an&aacute;lises e rankings principais.',
     ]),
     helpCard('Rankings e compara&ccedil;&atilde;o', [
       'Rankings usam somente jogadores ativos no clube.',
       'Jogador com login bloqueado, pendente ou inativo sai dos rankings at&eacute; ser ativado novamente.',
-      'Nota m&eacute;dia, gols, assist&ecirc;ncias, passes, divididas e MOM respeitam o filtro selecionado.',
+      'Nota m&eacute;dia, passes e divididas exigem m&iacute;nimo de jogos no clube para evitar jogador com uma partida dominar ranking.',
+      'Gols, assist&ecirc;ncias, passes, divididas e MOM respeitam o filtro selecionado.',
     ]),
     helpCard('Confrontos', [
-      'A tela de confronto foi pensada para print no celular.',
-      'Ela mostra placar, resultado, data, hora, tipo, ID do jogo, MOM e notas dos jogadores do time.',
-      'A lista usa as notas salvas daquela partida, sem misturar outros jogos.',
+      'Confrontos tamb&eacute;m fica dispon&iacute;vel para jogadores.',
+      'Use o campo Filtrar advers&aacute;rio para digitar parte do nome do clube rival e achar jogos rapidamente.',
+      'A s&uacute;mula compacta mostra confronto, placar, data, hor&aacute;rio quando existir, ID da partida, MOM, gols, assist&ecirc;ncias, defesas e nota EA dos jogadores.',
+      'Admin pode marcar uma partida como desconsiderada quando o jogo n&atilde;o deve entrar nas an&aacute;lises.',
+    ]),
+    helpCard('Meu Scout', [
+      'Busca automaticamente o jogador pelo usu&aacute;rio/ID FIFA cadastrado na conta.',
+      'Mostra estat&iacute;sticas do jogador somente no clube atual e respeitando os filtros selecionados.',
+      'O jogador pode manter seu arqu&eacute;tipo e PlayStyles preenchidos quando essa edi&ccedil;&atilde;o estiver liberada.',
+    ]),
+    helpCard('Estilos e arqu&eacute;tipos', [
+      'A aba Estilos serve como guia de builds: arqu&eacute;tipo, PlayStyles principais, PlayStyles complementares e atributos recomendados.',
+      'Os nomes das PlayStyles foram traduzidos para facilitar o uso, mas a ideia segue o modelo do EA FC Clubs.',
+      'No cadastro do elenco, arqu&eacute;tipo e PlayStyles salvos ajudam o Time Ideal e a leitura t&aacute;tica.',
+    ]),
+    helpCard('Advers&aacute;rios', [
+      'Permite pesquisar clubes rivais para comparar estat&iacute;sticas gerais, estilo prov&aacute;vel, jogadores fortes e plano de jogo.',
+      'Use antes de amistosos, campeonatos e finais para preparar marca&ccedil;&atilde;o, ritmo e pontos de aten&ccedil;&atilde;o.',
+    ]),
+    helpCard('Agenda', [
+      'Registra pr&oacute;ximos jogos, rival, data, hora, tipo de partida, local e observa&ccedil;&otilde;es.',
+      'Ajuda o elenco a acompanhar compromissos sem misturar com partidas j&aacute; jogadas.',
     ]),
   ];
   const adminCards = [
-    helpCard('Vis&atilde;o Admin', [
+    helpCard('Cadastro do elenco', [
       'Use Cadastro para preencher posi&ccedil;&atilde;o/build, arqu&eacute;tipo e PlayStyles.',
+      'A posi&ccedil;&atilde;o manual do admin tem prioridade na escala&ccedil;&atilde;o autom&aacute;tica.',
+      'Jogadores que n&atilde;o est&atilde;o mais no clube podem ser ocultados/desativados para limpar rankings e Time Ideal.',
       'Use Alertas para ver quem est&aacute; sem cadastro ou com cadastro incompleto, ordenado por quem mais joga.',
-      'Ativar/desativar usu&aacute;rios controla se o jogador entra ou sai dos rankings e listas principais.',
-      'Sincronize ap&oacute;s jogos para atualizar hist&oacute;rico, rankings e confronto.',
     ]),
     helpCard('Time Ideal', [
-      'O Time Ideal usa apenas jogadores ativos, com cadastro completo e jogos suficientes no clube inteiro.',
+      'O Time Ideal usa jogadores ativos, com cadastro completo e jogos suficientes no clube inteiro.',
       'Cadastro completo significa posi&ccedil;&atilde;o/build, arqu&eacute;tipo e ao menos um PlayStyle.',
       'Modo manual tamb&eacute;m respeita jogadores ativos e cadastro completo.',
+    ]),
+    helpCard('Trof&eacute;us', [
+      'Cadastre t&iacute;tulos do clube com nome do torneio, data, jogo da final, placar e escala&ccedil;&atilde;o.',
+      'A final pode ser escolhida a partir das partidas salvas no hist&oacute;rico do clube.',
+      'A sala de trof&eacute;us serve para registrar conquistas e alimentar rankings de maiores campe&otilde;es.',
+    ]),
+    helpCard('Clubes liberados', [
+      'A tela Clubes libera quais clubes podem receber novos cadastros de usu&aacute;rios.',
+      'Cadastre pelo nome exato do clube no Pro Clubs; o sistema busca o ID na EA e salva a permiss&atilde;o.',
+      'Se o clube n&atilde;o estiver liberado, novos jogadores n&atilde;o conseguem criar conta nele.',
+    ]),
+    helpCard('Configura&ccedil;&otilde;es', [
+      'A tela Config permite trocar a foto/logo do clube via Supabase Storage.',
+      'Jogadores apenas visualizam a foto; somente admin altera ou remove.',
+      'Use PNG, JPG ou WEBP com at&eacute; 2MB.',
+    ]),
+    helpCard('Usu&aacute;rios e alertas', [
+      'Usu&aacute;rios permite promover jogador para admin, rebaixar admin, bloquear, ativar ou excluir contas.',
+      'Alertas mostra jogadores sem login, perfis incompletos e logins sem dados de partida.',
+      'Essa tela ajuda o admin a manter o elenco limpo e evitar estat&iacute;sticas polu&iacute;das.',
+    ]),
+    helpCard('Sincroniza&ccedil;&atilde;o e hist&oacute;rico', [
+      'A sincroniza&ccedil;&atilde;o busca novos jogos na EA e salva no Supabase sem apagar o hist&oacute;rico antigo.',
+      'SQLite e JSON ficam apenas como fallback local; o banco principal persistente &eacute; o Supabase.',
+      'Se a EA n&atilde;o devolver jogos em alguma tentativa, o app mant&eacute;m o hist&oacute;rico salvo.',
     ]),
   ];
   const playerCards = [
@@ -10757,7 +10808,7 @@ function renderAjuda() {
   return `
     <div class="section-title">Ajuda</div>
     <div style="color:var(--text-2);font-size:12px;line-height:1.5;margin-bottom:14px;">
-      Guia r&aacute;pido para entender como o Scout calcula as telas e como usar os filtros sem misturar contexto.
+      Guia r&aacute;pido para entender as telas atuais do ClubScout Pro e evitar mistura de filtros, clubes e jogadores.
     </div>
     <div class="rankings-grid">
       ${common.join('')}
@@ -11606,7 +11657,7 @@ function cancelAgendaEdit() {
   AGENDA_EDIT_ID = null;
   if (!isAdmin()) {
     document.querySelectorAll('.tab').forEach(el => {
-      if (['JOGADORES','COMPARAR','CONFRONTOS','CADASTRO','ALERTAS','CONFIG','USUÁRIOS','USUARIOS'].includes((el.textContent || '').trim())) el.remove();
+      if (['JOGADORES','COMPARAR','CADASTRO','ALERTAS','CONFIG','USUÁRIOS','USUARIOS'].includes((el.textContent || '').trim())) el.remove();
     });
   }
   renderTab();
