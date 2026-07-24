@@ -10723,10 +10723,14 @@ function renderAjuda() {
       'Cadastro de jogador, altera&ccedil;&atilde;o de cargo, bloqueio de login, libera&ccedil;&atilde;o de clube e configura&ccedil;&otilde;es do clube ficam protegidos para admin.',
     ]),
     helpCard('Filtros e recortes', [
-      'Per&iacute;odo, &uacute;ltimos jogos, tipo de partida e status valem para Vis&atilde;o, Meu Scout, Jogadores, Rankings, Comparar, Confrontos e Time Ideal.',
-      'Os n&uacute;meros exibidos respeitam o filtro selecionado, mas a elegibilidade do jogador usa o total de partidas salvas no clube.',
-      'V&aacute;lidas remove partidas detectadas como quitadas; Quitadas mostra apenas essas partidas; Todas mistura os dois grupos.',
-      'Partida desconsiderada pelo admin n&atilde;o deve contaminar an&aacute;lises e rankings principais.',
+      'A ordem dos filtros &eacute;: primeiro per&iacute;odo ou &uacute;ltimos jogos, depois tipo de partida, depois status da partida.',
+      'Per&iacute;odo: Todos, &Uacute;lt. 5, &Uacute;lt. 10, Semana, M&ecirc;s ou a lista de &uacute;ltimos 1 a 7 jogos.',
+      'Tipo: Todas partidas, Liga, Copa ou Amistoso. Esse filtro separa estat&iacute;sticas de liga, copa e amistosos em todas as telas principais.',
+      'Status: V&aacute;lidas, Quitadas ou Todas. V&aacute;lidas tira jogos quitados; Quitadas mostra s&oacute; jogos detectados como quitados; Todas mostra v&aacute;lidas + quitadas.',
+      'Quitada &eacute; usada principalmente para amistoso abandonado/encerrado fora do fluxo normal, para n&atilde;o contaminar leitura de desempenho.',
+      'Desconsiderada &eacute; uma marca&ccedil;&atilde;o manual do admin em Confrontos. Ela serve para jogo at&iacute;pico, rival desfalcado, teste ou partida que n&atilde;o deve entrar nas an&aacute;lises.',
+      'Partidas desconsideradas n&atilde;o devem contar em Vis&atilde;o, Meu Scout, Jogadores, Rankings, Comparar, Confrontos resumidos e Time Ideal.',
+      'Os n&uacute;meros exibidos respeitam os filtros selecionados. A regra de elegibilidade, como m&iacute;nimo de jogos para ranking ou escala&ccedil;&atilde;o, usa o total salvo do jogador no clube.',
     ]),
     helpCard('Rankings e compara&ccedil;&atilde;o', [
       'Rankings usam somente jogadores ativos no clube.',
