@@ -819,6 +819,45 @@ def _safe_float(value, default: float = 0.0) -> float:
         return default
 
 
+PRE_ASSIST_KEYS = (
+    "pre_assists",
+    "preAssists",
+    "preassists",
+    "secondary_assists",
+    "secondaryAssists",
+    "hockey_assists",
+    "hockeyAssists",
+)
+
+KEY_PASS_KEYS = (
+    "key_passes",
+    "keyPasses",
+    "keypasses",
+    "chances_created",
+    "chancesCreated",
+    "chance_created",
+    "chanceCreated",
+)
+
+
+def _first_stat(data, keys, default=0):
+    if not isinstance(data, dict):
+        return default
+    sources = [data]
+    nested = data.get("data")
+    if isinstance(nested, dict):
+        sources.append(nested)
+    for source in sources:
+        lowered = {str(k).lower(): v for k, v in source.items()}
+        for key in keys:
+            if key in source and source.get(key) not in (None, ""):
+                return source.get(key)
+            low_key = str(key).lower()
+            if low_key in lowered and lowered.get(low_key) not in (None, ""):
+                return lowered.get(low_key)
+    return default
+
+
 def _now_iso() -> str:
     return datetime.now().isoformat()
 
@@ -1829,6 +1868,8 @@ def parse_matches(matches_raw, our_club_id):
                 player_name = pdata.get("playername", "Unknown")
                 p_goals = int(float(pdata.get("goals", 0) or 0))
                 p_assists = int(float(pdata.get("assists", 0) or 0))
+                p_pre_assists = _safe_int(_first_stat(pdata, PRE_ASSIST_KEYS))
+                p_key_passes = _safe_int(_first_stat(pdata, KEY_PASS_KEYS))
                 p_shots = int(float(pdata.get("shots", 0) or 0))
                 p_passes_made = int(float(pdata.get("passesmade", pdata.get("passesMade", 0)) or 0))
                 p_pass_att = int(float(pdata.get("passattempts", pdata.get("passAttempts", 0)) or 0))
@@ -1887,6 +1928,9 @@ def parse_matches(matches_raw, our_club_id):
                     "pos": p_pos,
                     "goals": p_goals,
                     "assists": p_assists,
+                    "goal_involvements": p_goals + p_assists,
+                    "pre_assists": p_pre_assists,
+                    "key_passes": p_key_passes,
                     "shots": p_shots,
                     "passes_made": p_passes_made,
                     "pass_pct": pass_pct,
@@ -1967,6 +2011,9 @@ def parse_players(members_data):
         
         goals = int(float(gv("goals", default=0) or 0))
         assists = int(float(gv("assists", default=0) or 0))
+        pre_assists = _safe_int(_first_stat(m, PRE_ASSIST_KEYS))
+        key_passes = _safe_int(_first_stat(m, KEY_PASS_KEYS))
+        goal_involvements = goals + assists
         has_shot_stats = has_any("shots", "totalShots", "shotAttempts")
         has_pass_stats = has_any("passesMade", "passesmade", "passAttempts", "passattempts")
         has_tackle_stats = has_any("tacklesMade", "tacklesmade", "tackleAttempts", "tackleattempts")
@@ -1986,6 +2033,10 @@ def parse_players(members_data):
             "rating": round(rating, 2),
             "goals": goals,
             "assists": assists,
+            "goal_involvements": goal_involvements,
+            "goal_involvements_per_game": round(goal_involvements / gp, 2),
+            "pre_assists": pre_assists,
+            "key_passes": key_passes,
             "shots": shots if has_shot_stats else None,
             "passes_made": passes_made if has_pass_stats else None,
             "pass_pct": round((passes_made / max(pass_attempts, 1)) * 100, 1) if has_pass_stats and pass_attempts else None,
@@ -1994,6 +2045,8 @@ def parse_players(members_data):
             "mom": mom,
             "goals_per_game": round(goals / gp, 2),
             "assists_per_game": round(assists / gp, 2),
+            "pre_assists_per_game": round(pre_assists / gp, 2),
+            "key_passes_per_game": round(key_passes / gp, 2),
             "has_shot_stats": has_shot_stats,
             "has_pass_stats": has_pass_stats,
             "has_tackle_stats": has_tackle_stats,
@@ -8009,6 +8062,35 @@ function matchDisplayDate(m) {
 function matchDisplayTime(m) {
   return matchDateTimeBRFromTimestamp(m && m.timestamp).time || (m && (m.time || m.match_time)) || '--:--';
 }
+
+const PRE_ASSIST_KEYS_JS = ['pre_assists','preAssists','preassists','secondary_assists','secondaryAssists','hockey_assists','hockeyAssists'];
+const KEY_PASS_KEYS_JS = ['key_passes','keyPasses','keypasses','chances_created','chancesCreated','chance_created','chanceCreated'];
+
+function statAny(obj, keys) {
+  if (!obj) return 0;
+  for (const k of keys) {
+    const value = obj[k];
+    if (value !== undefined && value !== null && value !== '') return Number(value) || 0;
+  }
+  if (obj.data && typeof obj.data === 'object') return statAny(obj.data, keys);
+  return 0;
+}
+
+function formatCompactNum(value) {
+  const n = Number(value || 0);
+  if (!Number.isFinite(n)) return '0';
+  return n.toFixed(2).replace(/\.00$/, '').replace(/0$/, '').replace(/\.$/, '');
+}
+
+function participationPerGame(player) {
+  const games = Number(player?.games || player?.club_games || 0);
+  if (!games) return '0';
+  if (player?.goal_involvements_per_game !== undefined && player?.goal_involvements_per_game !== null && player?.goal_involvements_per_game !== '') {
+    return formatCompactNum(player.goal_involvements_per_game);
+  }
+  return formatCompactNum((Number(player?.goals || 0) + Number(player?.assists || 0)) / games);
+}
+
 function togglePeriodMenu(ev) {
   if (ev) ev.stopPropagation();
   const wrap = ev && ev.currentTarget ? ev.currentTarget.closest('.period-dropdown') : null;
@@ -8062,6 +8144,7 @@ function computePlayersForMatches(matches) {
       last_match_position: '',
       position_counts: {GK:0, DEF:0, MID:0, FWD:0},
       games: 0, rating_sum: 0, sofi_sum: 0, goals: 0, assists: 0, shots: 0,
+      pre_assists: 0, key_passes: 0,
       passes_pct_sum: 0, passes_made: 0, tackle_pct_sum: 0, tackles_made: 0, mom: 0, reds: 0, saves: 0, clean_sheet: 0, wins: 0, draws: 0, losses: 0
     };
   });
@@ -8072,6 +8155,7 @@ function computePlayersForMatches(matches) {
           name: pr.name, position: pr.pos || '?', favorite_position: pr.pos || '?', last_match_position: '',
           position_counts: {GK:0, DEF:0, MID:0, FWD:0},
           games: 0, rating_sum: 0, sofi_sum: 0, goals: 0, assists: 0, shots: 0,
+          pre_assists: 0, key_passes: 0,
           passes_pct_sum: 0, passes_made: 0, tackle_pct_sum: 0, tackles_made: 0, mom: 0, reds: 0, saves: 0, clean_sheet: 0, wins: 0, draws: 0, losses: 0
         };
       }
@@ -8084,6 +8168,8 @@ function computePlayersForMatches(matches) {
       p.sofi_sum += Number(pr.sofi_rating || pr.rating || 0);
       p.goals += Number(pr.goals || 0);
       p.assists += Number(pr.assists || 0);
+      p.pre_assists += statAny(pr, PRE_ASSIST_KEYS_JS);
+      p.key_passes += statAny(pr, KEY_PASS_KEYS_JS);
       p.shots += Number(pr.shots || 0);
       p.passes_pct_sum += Number(pr.pass_pct || 0);
       p.passes_made += Number(pr.passes_made || 0);
@@ -8116,6 +8202,10 @@ function computePlayersForMatches(matches) {
         saves_per_game: +(p.saves / Math.max(p.games, 1)).toFixed(2),
         goal_involvements: Number(p.goals || 0) + Number(p.assists || 0),
         goal_involvements_per_game: +((Number(p.goals || 0) + Number(p.assists || 0)) / Math.max(p.games, 1)).toFixed(2),
+        pre_assists: Number(p.pre_assists || 0),
+        key_passes: Number(p.key_passes || 0),
+        pre_assists_per_game: +(Number(p.pre_assists || 0) / Math.max(p.games, 1)).toFixed(2),
+        key_passes_per_game: +(Number(p.key_passes || 0) / Math.max(p.games, 1)).toFixed(2),
         win_rate: +((Number(p.wins || 0) / Math.max(p.games, 1)) * 100).toFixed(1),
       };
     })
@@ -8156,6 +8246,10 @@ function playersFromMemberTotals() {
     };
     merged.goal_involvements = Number(merged.goals || 0) + Number(merged.assists || 0);
     merged.goal_involvements_per_game = +(merged.goal_involvements / games).toFixed(2);
+    merged.pre_assists = Number(base.pre_assists || d.pre_assists || 0);
+    merged.key_passes = Number(base.key_passes || d.key_passes || 0);
+    merged.pre_assists_per_game = +(merged.pre_assists / games).toFixed(2);
+    merged.key_passes_per_game = +(merged.key_passes / games).toFixed(2);
     merged.shots_per_game = hasShotStats ? +Number(merged.shots_per_game || 0).toFixed(2) : null;
     merged.tackles_per_game = hasTackleStats ? +Number(merged.tackles_per_game || 0).toFixed(2) : null;
     const intel = inferPlayerPositionIntel(merged);
@@ -9534,7 +9628,7 @@ function renderMeuScout() {
           ${playerStatLine('A/J', found.assists_per_game)}
           ${playerStatLine('Chutes', found.shots)}
           ${playerStatLine('Chu/J', found.shots_per_game)}
-          ${playerStatLine('Pass%', found.pass_pct, '%')}
+          ${playerStatLine('Part./J', participationPerGame(found))}
           ${playerStatLine('Passes', found.passes_made)}
           ${playerStatLine('Des%', found.tackle_pct, '%')}
           ${playerStatLine('Desarmes', found.tackles_made)}
@@ -9576,7 +9670,7 @@ function renderJogadores() {
           ${playerStatLine('A/J', p.assists_per_game)}
           ${playerStatLine('Chutes', p.shots)}
           ${playerStatLine('Chu/J', p.shots_per_game)}
-          ${playerStatLine('Pass%', p.pass_pct, '%')}
+          ${playerStatLine('Part./J', participationPerGame(p))}
           ${playerStatLine('Passes', p.passes_made)}
           ${playerStatLine('Des%', p.tackle_pct, '%')}
           ${playerStatLine('Desarmes', p.tackles_made)}
