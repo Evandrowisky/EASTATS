@@ -1568,7 +1568,6 @@ def require_owner_admin(current_user: dict = Depends(require_admin)):
     return current_user
 
 
-@app.post("/api/matches/{match_id}/ignored")
 def set_match_ignored(match_id: str, payload: MatchIgnoredPayload, current_user: dict = Depends(require_admin)):
     club_id = str((current_user or {}).get("club_id") or "").strip()
     if not club_id:
@@ -2173,6 +2172,8 @@ app.add_middleware(
 )
 
 ea_client = EAFCClient()
+
+app.post("/api/matches/{match_id}/ignored")(set_match_ignored)
 
 
 # ============================================================
