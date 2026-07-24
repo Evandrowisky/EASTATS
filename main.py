@@ -1249,6 +1249,35 @@ def load_admin_clubs_for_cron(limit: int = 10) -> List[dict]:
     return clubs
 
 
+PLAYER_PROFILE_META_KEY = "__clubscout_profile_meta__"
+
+
+def unpack_player_profile_notes(raw_notes):
+    """Separa observacao livre de metadados internos sem exigir nova coluna."""
+    ignored = False
+    clean_notes = raw_notes
+    if raw_notes:
+        try:
+            data = json.loads(raw_notes) if isinstance(raw_notes, str) else raw_notes
+            if isinstance(data, dict) and data.get(PLAYER_PROFILE_META_KEY):
+                ignored = bool(data.get("ignored"))
+                clean_notes = data.get("notes") or None
+        except Exception:
+            pass
+    return clean_notes, ignored
+
+
+def pack_player_profile_notes(notes=None, ignored=False):
+    clean_notes = str(notes or "").strip()
+    if ignored:
+        return json.dumps({
+            PLAYER_PROFILE_META_KEY: True,
+            "ignored": True,
+            "notes": clean_notes,
+        }, ensure_ascii=False)
+    return clean_notes or None
+
+
 def load_player_profiles_supabase(club_id: str) -> Dict[str, Dict[str, Any]]:
     sb = get_supabase()
     if not sb or not club_id:
@@ -1256,33 +1285,38 @@ def load_player_profiles_supabase(club_id: str) -> Dict[str, Dict[str, Any]]:
     try:
         resp = sb.table("player_profiles").select("player_name,manual_position,archetype,playstyles,notes").eq("club_id", str(club_id)).execute()
         rows = getattr(resp, "data", None) or []
-        return {
-            r.get("player_name"): {
+        profiles = {}
+        for r in rows:
+            if not isinstance(r, dict) or not r.get("player_name"):
+                continue
+            clean_notes, ignored = unpack_player_profile_notes(r.get("notes"))
+            profiles[r.get("player_name")] = {
                 "manual_position": r.get("manual_position"),
                 "archetype": r.get("archetype"),
                 "playstyles": r.get("playstyles") or [],
-                "notes": r.get("notes"),
+                "notes": clean_notes,
+                "ignored": ignored,
+                "is_ignored": ignored,
             }
-            for r in rows if isinstance(r, dict) and r.get("player_name")
-        }
+        return profiles
     except Exception as e:
         print(f"[SUPABASE] Aviso ao carregar player_profiles: {type(e).__name__}: {e}")
         return {}
 
 
-def save_player_profile_supabase(club_id: str, player_name: str, manual_position=None, archetype=None, playstyles=None, notes=None):
+def save_player_profile_supabase(club_id: str, player_name: str, manual_position=None, archetype=None, playstyles=None, notes=None, ignored=False):
     sb = get_supabase()
     if not sb or not club_id or not player_name:
         return False
     try:
-        if manual_position or archetype or playstyles or notes:
+        if manual_position or archetype or playstyles or notes or ignored:
             sb.table("player_profiles").upsert({
                 "club_id": str(club_id),
                 "player_name": str(player_name),
                 "manual_position": manual_position,
                 "archetype": archetype,
                 "playstyles": playstyles or [],
-                "notes": notes,
+                "notes": pack_player_profile_notes(notes, ignored),
                 "updated_at": _now_iso(),
             }, on_conflict="club_id,player_name").execute()
         else:
@@ -1998,6 +2032,10 @@ def apply_player_profiles_to_players(players_list, club_id: Optional[str] = None
             continue
         item = dict(p)
         prof = profiles.get(str(item.get("name", "")), {}) or {}
+        if prof.get("ignored") or prof.get("is_ignored"):
+            item["ignored"] = True
+            item["is_ignored"] = True
+            item["profile_ignored"] = True
         manual_position = prof.get("manual_position")
         if manual_position:
             item["position"] = manual_position
@@ -2014,6 +2052,8 @@ def has_complete_player_profile(player: dict) -> bool:
     """Jogador elegivel para Time Ideal: cadastro manual completo + jogos suficientes."""
     if not isinstance(player, dict):
         return False
+    if player.get("ignored") or player.get("is_ignored") or player.get("profile_ignored"):
+        return False
     return (
         bool(str(player.get("manual_position") or "").strip())
         and bool(str(player.get("archetype") or "").strip())
@@ -2023,6 +2063,10 @@ def has_complete_player_profile(player: dict) -> bool:
 
 def build_ideal_team(players_list, formation="3-5-2"):
     """Monta 11 ideal por formacao, funcao e melhor encaixe disponivel."""
+    players_list = [
+        p for p in (players_list or [])
+        if isinstance(p, dict) and not (p.get("ignored") or p.get("is_ignored") or p.get("profile_ignored"))
+    ]
     formation_slots = {
         "3-5-2": ["GK", "LCB", "CB", "RCB", "LM", "LCM", "CM", "RCM", "RM", "LST", "RST"],
         "3-4-3": ["GK", "LCB", "CB", "RCB", "LM", "LCM", "RCM", "RM", "LW", "ST", "RW"],
@@ -4655,6 +4699,7 @@ class PlayerProfileUpdate(BaseModel):
     archetype: Optional[str] = None
     playstyles: Optional[List[str]] = None
     notes: Optional[str] = None
+    ignored: Optional[bool] = None
 
 
 def _current_club_id_from_cache() -> str:
@@ -4676,15 +4721,18 @@ def load_player_profiles(club_id: Optional[str] = None) -> Dict[str, Dict[str, A
             (club_id,),
         ).fetchall()
         conn.close()
-        return {
-            r["player_name"]: {
+        profiles = {}
+        for r in rows:
+            clean_notes, ignored = unpack_player_profile_notes(r["notes"])
+            profiles[r["player_name"]] = {
                 "manual_position": r["manual_position"],
                 "archetype": r["archetype"],
                 "playstyles": json.loads(r["playstyles"] or "[]") if r["playstyles"] else [],
-                "notes": r["notes"],
+                "notes": clean_notes,
+                "ignored": ignored,
+                "is_ignored": ignored,
             }
-            for r in rows
-        }
+        return profiles
     except Exception as e:
         print(f"[profiles] erro ao carregar perfis: {e}")
         return {}
@@ -4720,14 +4768,17 @@ def update_player_profile(player_name: str, item: PlayerProfileUpdate, current_u
     raw_archetype = item.archetype if "archetype" in field_set else existing.get("archetype")
     raw_playstyles = item.playstyles if "playstyles" in field_set else existing.get("playstyles")
     raw_notes = (item.notes if "notes" in field_set else existing.get("notes")) if is_admin_user else existing.get("notes")
+    raw_ignored = (item.ignored if "ignored" in field_set else existing.get("ignored")) if is_admin_user else existing.get("ignored")
 
     manual_position = (raw_manual_position or "").strip() or None
     archetype = (raw_archetype or "").strip() or None
     playstyles = [str(x).strip() for x in (raw_playstyles or []) if str(x).strip()][:3]
     notes = (raw_notes or "").strip() or None
+    ignored = bool(raw_ignored)
+    stored_notes = pack_player_profile_notes(notes, ignored)
     try:
         conn = sqlite3.connect(DB_FILE)
-        if manual_position or archetype or playstyles or notes:
+        if manual_position or archetype or playstyles or notes or ignored:
             conn.execute(
                 """
                 INSERT INTO player_profiles (club_id, player_name, manual_position, archetype, playstyles, notes, updated_at)
@@ -4739,7 +4790,7 @@ def update_player_profile(player_name: str, item: PlayerProfileUpdate, current_u
                     notes=excluded.notes,
                     updated_at=CURRENT_TIMESTAMP
                 """,
-                (club_id, player_name, manual_position, archetype, json.dumps(playstyles, ensure_ascii=False), notes),
+                (club_id, player_name, manual_position, archetype, json.dumps(playstyles, ensure_ascii=False), stored_notes),
             )
         else:
             conn.execute(
@@ -4748,7 +4799,7 @@ def update_player_profile(player_name: str, item: PlayerProfileUpdate, current_u
             )
         conn.commit()
         conn.close()
-        save_player_profile_supabase(club_id, player_name, manual_position, archetype, playstyles, notes)
+        save_player_profile_supabase(club_id, player_name, manual_position, archetype, playstyles, notes, ignored=ignored)
     except Exception as e:
         print(f"[profiles] erro ao salvar perfil de {player_name}: {e}")
         raise HTTPException(500, f"Erro ao salvar perfil: {e}")
@@ -4759,6 +4810,8 @@ def update_player_profile(player_name: str, item: PlayerProfileUpdate, current_u
         "archetype": archetype,
         "playstyles": playstyles,
         "notes": notes,
+        "ignored": ignored,
+        "is_ignored": ignored,
     }
 
 
@@ -8142,8 +8195,11 @@ function inactivePlayerKeys() {
 
 function filterActivePlayers(players) {
   const inactive = inactivePlayerKeys();
-  if (!inactive.size) return players || [];
-  return (players || []).filter(p => !normPlayerKeys(p.name).some(k => inactive.has(k)));
+  return (players || []).filter(p => {
+    if (isPlayerIgnored(p.name)) return false;
+    if (!inactive.size) return true;
+    return !normPlayerKeys(p.name).some(k => inactive.has(k));
+  });
 }
 
 function currentScopeLabel() {
@@ -8163,6 +8219,7 @@ function scopedPlayers() {
 }
 
 function clubGamesForPlayer(name) {
+  if (isPlayerIgnored(name)) return 0;
   const wanted = new Set(normPlayerKeys(name));
   if (!wanted.size) return 0;
   return ((DATA && DATA.matches) ? DATA.matches : []).reduce((total, match) => {
@@ -8519,10 +8576,18 @@ async function loadClubUserStatus() {
   return CLUB_USER_STATUS;
 }
 
-async function savePlayerProfile(name, manualPosition, archetype, notes, playstyles=[]) {
+async function savePlayerProfile(name, manualPosition, archetype, notes, playstyles=[], ignored=false) {
   playstyles = (playstyles || []).filter(Boolean).slice(0, 3);
-  if (manualPosition || archetype || notes || playstyles.length) {
-    PLAYER_PROFILES[name] = {manual_position: manualPosition || null, archetype: archetype || null, playstyles, notes: notes || null, manual_saved_at: new Date().toISOString()};
+  if (manualPosition || archetype || notes || playstyles.length || ignored) {
+    PLAYER_PROFILES[name] = {
+      manual_position: manualPosition || null,
+      archetype: archetype || null,
+      playstyles,
+      notes: notes || null,
+      ignored: !!ignored,
+      is_ignored: !!ignored,
+      manual_saved_at: new Date().toISOString()
+    };
     if (DATA) DATA.player_profiles = {...(DATA.player_profiles || {}), [name]: PLAYER_PROFILES[name]};
   } else {
     delete PLAYER_PROFILES[name];
@@ -8537,6 +8602,7 @@ async function savePlayerProfile(name, manualPosition, archetype, notes, playsty
       archetype: archetype || null,
       playstyles,
       notes: notes || null,
+      ignored: !!ignored,
     })
   });
   if (!r.ok) throw new Error('Erro ao salvar cadastro');
@@ -10007,7 +10073,13 @@ function profileForPlayer(name) {
   return PLAYER_PROFILES[name] || PLAYER_PROFILES[String(name || '').trim()] || {};
 }
 
+function isPlayerIgnored(name) {
+  const profile = profileForPlayer(name);
+  return !!(profile && (profile.ignored || profile.is_ignored || profile.profile_ignored));
+}
+
 function hasCompletePlayerProfile(name) {
+  if (isPlayerIgnored(name)) return false;
   const profile = profileForPlayer(name);
   return !!(
     String(profile.manual_position || '').trim() &&
@@ -10023,12 +10095,12 @@ function effectiveMinGamesForScope() {
 
 function eligibleRankingPlayers(players) {
   const minGames = effectiveMinGamesForScope();
-  return (players || []).filter(p => Number(clubGamesForPlayer(p.name) || 0) >= minGames);
+  return (players || []).filter(p => !isPlayerIgnored(p.name) && Number(clubGamesForPlayer(p.name) || 0) >= minGames);
 }
 
 function eligibleIdealPlayers() {
   const minGames = MIN_IDEAL_GAMES;
-  return scopedPlayers().filter(p => Number(clubGamesForPlayer(p.name) || 0) >= minGames && hasCompletePlayerProfile(p.name));
+  return scopedPlayers().filter(p => !isPlayerIgnored(p.name) && Number(clubGamesForPlayer(p.name) || 0) >= minGames && hasCompletePlayerProfile(p.name));
 }
 
 function inferPlayerPositionIntel(player) {
@@ -10835,6 +10907,7 @@ function renderCadastroJogadores() {
     const selectHtml = manualPositionSelectOptions(profile.manual_position || '');
     const selectedStyles = (profile.playstyles || []).map(normalizePlaystyleName);
     const selectedArchetype = normalizeArchetypeName(profile.archetype || "");
+    const ignored = !!(profile.ignored || profile.is_ignored || profile.profile_ignored);
     return `
       <div class="profile-row">
         <div>
@@ -10846,7 +10919,14 @@ function renderCadastroJogadores() {
         <select id="prof-ps-1-${cssSafeId(p.name)}">${playstyleSelectOptions(selectedStyles[0] || '')}</select>
         <select id="prof-ps-2-${cssSafeId(p.name)}">${playstyleSelectOptions(selectedStyles[1] || '')}</select>
         <select id="prof-ps-3-${cssSafeId(p.name)}">${playstyleSelectOptions(selectedStyles[2] || '')}</select>
-        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;"><button id="prof-save-${cssSafeId(p.name)}" class="btn-mini" onclick="saveProfileFromRow('${p.name.replace(/'/g, "\'")}')">Salvar</button><span id="prof-status-${cssSafeId(p.name)}" style="display:none;color:var(--green);font-size:11px;font-weight:800;letter-spacing:1px;text-transform:uppercase;">Dados salvos</span></div>
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+          <label style="display:flex;align-items:center;gap:6px;color:${ignored ? 'var(--red)' : 'var(--text-2)'};font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:1px;white-space:nowrap;">
+            <input id="prof-ignore-${cssSafeId(p.name)}" type="checkbox" ${ignored ? 'checked' : ''}>
+            Desconsiderar
+          </label>
+          <button id="prof-save-${cssSafeId(p.name)}" class="btn-mini" onclick="saveProfileFromRow('${p.name.replace(/'/g, "\'")}')">Salvar</button>
+          <span id="prof-status-${cssSafeId(p.name)}" style="display:none;color:var(--green);font-size:11px;font-weight:800;letter-spacing:1px;text-transform:uppercase;">Dados salvos</span>
+        </div>
       </div>
     `;
   }).join('');
@@ -10886,13 +10966,14 @@ async function saveProfileFromRow(name) {
   const arch = normalizeArchetypeName(document.getElementById('prof-arch-' + id)?.value || '');
   const notes = profile.notes || '';
   const playstyles = [1,2,3].map(i => normalizePlaystyleName(document.getElementById(`prof-ps-${i}-` + id)?.value || '')).filter(Boolean);
+  const ignored = !!document.getElementById('prof-ignore-' + id)?.checked;
   const btn = document.getElementById('prof-save-' + id);
   const status = document.getElementById('prof-status-' + id);
   const oldText = btn ? btn.textContent : '';
   try {
     if (btn) { btn.disabled = true; btn.textContent = 'Salvando...'; }
     if (status) { status.style.color = 'var(--green)'; status.style.display = 'none'; status.textContent = ''; }
-    await savePlayerProfile(name, pos, arch, notes, playstyles);
+    await savePlayerProfile(name, pos, arch, notes, playstyles, ignored);
     if (btn) { btn.textContent = 'Salvo!'; }
     if (status) { status.textContent = 'Dados salvos'; status.style.display = 'inline'; }
     setTimeout(() => {
