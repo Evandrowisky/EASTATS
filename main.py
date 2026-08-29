@@ -3756,9 +3756,25 @@ def _filter_matches_for_scope(matches: list, match_type: str = "todos", period: 
     if wanted_period == "semana":
         cutoff = now - 7 * 86400
         return [m for m in out if _safe_int(m.get("timestamp") or m.get("match_timestamp")) >= cutoff]
-    if wanted_period == "mes":
-        cutoff = now - 30 * 86400
-        return [m for m in out if _safe_int(m.get("timestamp") or m.get("match_timestamp")) >= cutoff]
+    if wanted_period == "mes" or wanted_period.startswith("mes:"):
+        # "mes" continua significando o mês corrente; "mes:AAAA-MM" permite
+        # que a interface consulte qualquer mês salvo no histórico.
+        now_dt = datetime.now(BR_TZ)
+        target_year, target_month = now_dt.year, now_dt.month
+        if wanted_period.startswith("mes:"):
+            try:
+                year_str, month_str = wanted_period.split(":", 1)[1].split("-", 1)
+                target_year, target_month = int(year_str), int(month_str)
+                if not 1 <= target_month <= 12:
+                    raise ValueError("mês inválido")
+            except (ValueError, TypeError):
+                return []
+        return [
+            m for m in out
+            if (lambda dt: dt.year == target_year and dt.month == target_month)(
+                datetime.fromtimestamp(_safe_int(m.get("timestamp") or m.get("match_timestamp")), BR_TZ)
+            )
+        ]
     return out
 
 
@@ -7088,6 +7104,8 @@ body {
   border-radius: 10px;
   padding: 8px;
   box-shadow: 0 12px 28px rgba(0,0,0,.55), 0 0 22px var(--green-glow);
+  max-height: 320px;
+  overflow-y: auto;
 }
 .period-dropdown:hover .period-menu,
 .period-dropdown:focus-within .period-menu,
@@ -7108,6 +7126,29 @@ body {
 }
 .period-menu-item:hover,
 .period-menu-item.active { border-color: var(--green); color: var(--green); background: var(--green-dim); }
+.monthly-winrate-chart {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 18px;
+  margin: 22px 0;
+}
+.monthly-winrate-subtitle { color: var(--text-2); font-size: 12px; margin: -6px 0 16px; }
+.monthly-winrate-bars {
+  height: 245px;
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+  overflow-x: auto;
+  padding: 22px 4px 0;
+  border-bottom: 1px solid var(--border);
+  background: repeating-linear-gradient(to top, transparent 0, transparent 48px, rgba(255,255,255,.06) 49px);
+}
+.monthly-winrate-col { min-width: 54px; height: 100%; display: flex; flex-direction: column; justify-content: flex-end; align-items: center; gap: 7px; }
+.monthly-winrate-value { color: var(--green); font-size: 12px; font-weight: 800; }
+.monthly-winrate-bar { width: 34px; min-height: 3px; border-radius: 7px 7px 2px 2px; background: linear-gradient(180deg, #52ff9c, var(--green)); box-shadow: 0 0 12px var(--green-glow); }
+.monthly-winrate-label { color: var(--text-2); font-size: 10px; font-weight: 800; letter-spacing: .5px; white-space: nowrap; }
+@media (max-width: 640px) { .monthly-winrate-chart { padding: 14px; } .monthly-winrate-bars { gap: 7px; } }
 @media (max-width: 640px) {
   .period-dropdown { width: 100%; }
   .period-menu-btn { width: 100%; }
@@ -7991,10 +8032,11 @@ function applyMatchFilters(matches, opts = {}) {
     const cutoff = now - 7 * 86400;
     return all.filter(m => matchTs(m) >= cutoff);
   }
-  if (CURRENT_PERIOD === 'mes') {
+  const chosenMonth = String(CURRENT_PERIOD || '').match(/^mes:(\d{4})-(\d{2})$/);
+  if (CURRENT_PERIOD === 'mes' || chosenMonth) {
     const nowDate = new Date();
-    const currentYear = nowDate.getFullYear();
-    const currentMonth = nowDate.getMonth();
+    const currentYear = chosenMonth ? Number(chosenMonth[1]) : nowDate.getFullYear();
+    const currentMonth = chosenMonth ? Number(chosenMonth[2]) - 1 : nowDate.getMonth();
     return all.filter(m => {
       const ts = matchTs(m);
       if (!ts) return false;
@@ -8026,11 +8068,31 @@ function periodLabelText() {
   const raw = String(CURRENT_PERIOD || 'todos');
   const ultMatch = raw.match(/^ult(\d+)$/);
   if (ultMatch) return `&uacute;ltimas ${ultMatch[1]} partidas`;
+  const monthMatch = raw.match(/^mes:(\d{4})-(\d{2})$/);
+  if (monthMatch) return monthLabelFromKey(`${monthMatch[1]}-${monthMatch[2]}`);
   return {
     todos: 'todo o hist&oacute;rico salvo',
     semana: '&uacute;ltimos 7 dias',
     mes: 'm&ecirc;s atual'
   }[raw] || 'per&iacute;odo atual';
+}
+
+function monthLabelFromKey(key) {
+  const match = String(key || '').match(/^(\d{4})-(\d{2})$/);
+  if (!match) return 'm&ecirc;s selecionado';
+  const date = new Date(Number(match[1]), Number(match[2]) - 1, 1);
+  return date.toLocaleDateString('pt-BR', {month:'long', year:'numeric'});
+}
+
+function availableHistoryMonths() {
+  const months = new Set();
+  ((DATA && DATA.matches) || []).forEach(m => {
+    const ts = Number(m && (m.timestamp || m.match_timestamp));
+    if (!Number.isFinite(ts) || ts <= 0) return;
+    const d = new Date(ts * 1000);
+    months.add(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`);
+  });
+  return [...months].sort((a, b) => b.localeCompare(a));
 }
 
 function statusLabelText() {
@@ -8297,12 +8359,13 @@ function filterActivePlayers(players) {
 }
 
 function currentScopeLabel() {
+  const selectedMonth = String(CURRENT_PERIOD || '').match(/^mes:(\d{4})-(\d{2})$/);
   const periodLabel = {
     todos: 'todo o historico salvo',
     ult10: 'ultimas 10 partidas',
     semana: 'ultimos 7 dias',
     mes: 'mes atual',
-  }[CURRENT_PERIOD] || (String(CURRENT_PERIOD || '').startsWith('ult') ? 'ultimas ' + String(CURRENT_PERIOD).replace('ult','') + ' partidas' : 'filtro atual');
+  }[CURRENT_PERIOD] || (selectedMonth ? monthLabelFromKey(`${selectedMonth[1]}-${selectedMonth[2]}`) : (String(CURRENT_PERIOD || '').startsWith('ult') ? 'ultimas ' + String(CURRENT_PERIOD).replace('ult','') + ' partidas' : 'filtro atual'));
   const typeLabel = CURRENT_MATCH_TYPE === 'todos' ? 'todas as partidas' : CURRENT_MATCH_TYPE;
   const statusLabel = CURRENT_MATCH_STATUS === 'todas' ? 'todas' : CURRENT_MATCH_STATUS;
   return `${typeLabel} - ${periodLabel} - ${statusLabel}`;
@@ -8920,6 +8983,14 @@ function render() {
       <div class="period ${CURRENT_PERIOD==='ult10'?'active':''}" onclick="setPeriod('ult10', event)">ÚLT. 10</div>
       <div class="period ${CURRENT_PERIOD==='semana'?'active':''}" onclick="setPeriod('semana', event)">SEMANA</div>
       <div class="period ${CURRENT_PERIOD==='mes'?'active':''}" onclick="setPeriod('mes', event)">MÊS</div>
+      <div class="period-dropdown">
+        <button class="period period-menu-btn ${String(CURRENT_PERIOD).startsWith('mes:')?'active':''}" type="button" onclick="togglePeriodMenu(event)">
+          ${String(CURRENT_PERIOD).startsWith('mes:') ? monthLabelFromKey(String(CURRENT_PERIOD).slice(4)).toUpperCase() : 'ESCOLHER MÊS'} ▾
+        </button>
+        <div class="period-menu">
+          ${availableHistoryMonths().map(key => `<button type="button" class="period-menu-item ${CURRENT_PERIOD===`mes:${key}`?'active':''}" onclick="setPeriod('mes:${key}', event)">${monthLabelFromKey(key)}</button>`).join('') || '<div style="padding:10px;color:var(--text-2);font-size:12px;">Sem meses no histórico</div>'}
+        </div>
+      </div>
     </div>
     
     <div class="period-filter" style="margin-top:-10px;">
@@ -9282,8 +9353,44 @@ function miniGeneralCard(label, value, tone='') {
   return `<div class="stat-card"><div class="stat-value ${tone}">${value}</div><div class="stat-label">${label}</div></div>`;
 }
 
+function monthlyWinRateSeries(matches) {
+  const byMonth = new Map();
+  (matches || []).forEach(m => {
+    const ts = Number(m && (m.timestamp || m.match_timestamp));
+    if (!Number.isFinite(ts) || ts <= 0) return;
+    const d = new Date(ts * 1000);
+    const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+    const row = byMonth.get(key) || {key, games: 0, wins: 0};
+    row.games += 1;
+    if (m.result === 'V') row.wins += 1;
+    byMonth.set(key, row);
+  });
+  return [...byMonth.values()]
+    .sort((a, b) => a.key.localeCompare(b.key))
+    .map(row => ({...row, winRate: Math.round((row.wins / Math.max(row.games, 1)) * 100)}));
+}
+
+function renderMonthlyWinRateChart(matches) {
+  const series = monthlyWinRateSeries(matches);
+  if (!series.length) return '';
+  return `
+    <div class="monthly-winrate-chart">
+      <div class="section-title" style="margin:0 0 6px;">📈 Evolução do Win Rate por Mês</div>
+      <div class="monthly-winrate-subtitle">Histórico do clube respeitando os filtros de tipo e status.</div>
+      <div class="monthly-winrate-bars">
+        ${series.map(row => `
+          <div class="monthly-winrate-col" title="${monthLabelFromKey(row.key)}: ${row.winRate}% em ${row.games} jogo${row.games === 1 ? '' : 's'}">
+            <div class="monthly-winrate-value">${row.winRate}%</div>
+            <div class="monthly-winrate-bar" style="height:${Math.max(row.winRate, 2)}%"></div>
+            <div class="monthly-winrate-label">${monthLabelFromKey(row.key).slice(0, 3).toUpperCase()}</div>
+          </div>`).join('')}
+      </div>
+    </div>`;
+}
+
 function renderVisao() {
   const matches = filteredMatches();
+  const trendMatches = applyMatchFilters((DATA && DATA.matches) ? DATA.matches : [], {includePeriod:false});
   const playersInClub = computePlayersForMatches(matches);
   const s = computeStatsFor(matches);
   const adv = computeAdvancedGeneralStats(matches);
@@ -9338,6 +9445,7 @@ function renderVisao() {
       ${circle(tackPct, '% DIVIDIDAS')}
       ${circle(offense, 'OFENSIVIDADE')}
     </div>
+    ${renderMonthlyWinRateChart(trendMatches)}
     
     <div class="stat-card highlight" style="display:flex;align-items:center;gap:16px;justify-content:flex-start;text-align:left;padding:20px;">
       <div style="font-size:32px;color:var(--yellow);">⭐</div>
