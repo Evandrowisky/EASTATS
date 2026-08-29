@@ -11587,6 +11587,17 @@ function trophyMatchById(id) {
   return (DATA && DATA.matches ? DATA.matches : []).find(m => String(m.match_id || m.matchId || '') === sid);
 }
 
+function trophiesForPlayer(playerName) {
+  const playerKey = normalizePlayerLookup(playerName);
+  if (!playerKey) return [];
+  return (TROPHIES || []).filter(trophy => {
+    const finalMatch = trophyMatchById(trophy.final_match_id);
+    return (finalMatch?.players_ratings || []).some(player =>
+      normalizePlayerLookup(player.name || player.playername || '') === playerKey
+    );
+  });
+}
+
 function trophyMatchOptions(selected) {
   const selectedId = String(selected || '');
   const matches = (DATA && DATA.matches ? DATA.matches : [])
@@ -12108,6 +12119,8 @@ async function showPlayerDetail(name) {
   const scopedSummary = findScopedPlayerSummary(name);
   const scopedHistory = filteredHistoryForPlayer(name);
   try {
+    // Os títulos são vinculados à súmula da final e sempre pertencem ao clube atual.
+    await loadTrophies();
     const r = await authFetch('/api/player/' + encodeURIComponent(name) + '/analytics?match_type=' + encodeURIComponent(CURRENT_MATCH_TYPE) + '&period=' + encodeURIComponent(CURRENT_PERIOD) + '&match_status=' + encodeURIComponent(CURRENT_MATCH_STATUS));
     if (!r.ok) throw new Error('Não encontrado ou sem dados suficientes');
     const data = mergeScopedAnalytics(await r.json(), scopedSummary, scopedHistory);
@@ -12178,6 +12191,7 @@ function renderPlayerDetailHTML(data) {
   const safeName = p.name.replace(/'/g, "\\'");
   const radar = adv.radar || {};
   const profile = profileForPlayer(p.name);
+  const playerTrophies = trophiesForPlayer(p.name);
   const psBadges = (profile.playstyles || []).map(x => `<span class="tag liga" style="margin-right:6px;">${playstyleIcon(x)} ${x}</span>`).join('');
   const detailedGames = Number(data.detail_games ?? data.games_with_history ?? h.length ?? 0) || h.length || 0;
   const clubTotalGames = Number(data.club_total_games ?? p.ea_global_games ?? p.games ?? detailedGames) || detailedGames;
@@ -12203,6 +12217,7 @@ function renderPlayerDetailHTML(data) {
         <div class="analytics-card"><div class="v">${totals.goals || 0}</div><div class="l">Gols</div></div>
         <div class="analytics-card"><div class="v">${totals.assists || 0}</div><div class="l">Assist</div></div>
         <div class="analytics-card"><div class="v">${(totals.goals || 0) + (totals.assists || 0)}</div><div class="l">G+A</div></div>
+        <div class="analytics-card"><div class="v" style="color:var(--yellow);">🏆 ${playerTrophies.length}</div><div class="l">Troféus pelo Clube</div></div>
         <div class="analytics-card"><div class="v">${avg.goals_per_game || 0}</div><div class="l">G/J</div></div>
         <div class="analytics-card"><div class="v">${avg.assists_per_game || 0}</div><div class="l">A/J</div></div>
         <div class="analytics-card"><div class="v">${fmtStat(totals.shots)}</div><div class="l">Chutes</div></div>
