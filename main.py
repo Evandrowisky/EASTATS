@@ -8233,7 +8233,7 @@ function computePlayersForMatches(matches) {
       position_counts: {GK:0, DEF:0, MID:0, FWD:0},
       games: 0, rating_sum: 0, sofi_sum: 0, goals: 0, assists: 0, shots: 0,
       pre_assists: 0, key_passes: 0,
-      passes_pct_sum: 0, passes_made: 0, tackle_pct_sum: 0, tackles_made: 0, tackle_attempts: 0, interceptions: 0, mom: 0, reds: 0, saves: 0, clean_sheet: 0, wins: 0, draws: 0, losses: 0
+      passes_pct_sum: 0, passes_made: 0, tackle_pct_sum: 0, tackles_made: 0, tackle_attempts: 0, interceptions: 0, mom: 0, reds: 0, saves: 0, clean_sheet: 0, wins: 0, draws: 0, losses: 0, rating_7_games: 0
     };
   });
   (matches || []).forEach(m => {
@@ -8244,7 +8244,7 @@ function computePlayersForMatches(matches) {
           position_counts: {GK:0, DEF:0, MID:0, FWD:0},
           games: 0, rating_sum: 0, sofi_sum: 0, goals: 0, assists: 0, shots: 0,
           pre_assists: 0, key_passes: 0,
-          passes_pct_sum: 0, passes_made: 0, tackle_pct_sum: 0, tackles_made: 0, tackle_attempts: 0, interceptions: 0, mom: 0, reds: 0, saves: 0, clean_sheet: 0, wins: 0, draws: 0, losses: 0
+          passes_pct_sum: 0, passes_made: 0, tackle_pct_sum: 0, tackles_made: 0, tackle_attempts: 0, interceptions: 0, mom: 0, reds: 0, saves: 0, clean_sheet: 0, wins: 0, draws: 0, losses: 0, rating_7_games: 0
         };
       }
       const p = byName[pr.name];
@@ -8253,6 +8253,7 @@ function computePlayersForMatches(matches) {
       p.last_match_position = pr.pos || p.last_match_position;
       p.position_counts[fam] = (p.position_counts[fam] || 0) + 1;
       p.rating_sum += Number(pr.rating || 0);
+      if (Number(pr.rating || 0) >= 7) p.rating_7_games += 1;
       p.sofi_sum += Number(pr.sofi_rating || pr.rating || 0);
       p.goals += Number(pr.goals || 0);
       p.assists += Number(pr.assists || 0);
@@ -8303,6 +8304,9 @@ function computePlayersForMatches(matches) {
         pre_assists_per_game: +(Number(p.pre_assists || 0) / Math.max(p.games, 1)).toFixed(2),
         key_passes_per_game: +(Number(p.key_passes || 0) / Math.max(p.games, 1)).toFixed(2),
         win_rate: +((Number(p.wins || 0) / Math.max(p.games, 1)) * 100).toFixed(1),
+        unbeaten_rate: +(((Number(p.wins || 0) + Number(p.draws || 0)) / Math.max(p.games, 1)) * 100).toFixed(1),
+        points_per_game: +(((Number(p.wins || 0) * 3 + Number(p.draws || 0)) / Math.max(p.games, 1))).toFixed(2),
+        regularity_pct: +((Number(p.rating_7_games || 0) / Math.max(p.games, 1)) * 100).toFixed(1),
       };
     })
     .sort((a,b) => Number(b.rating || 0) - Number(a.rating || 0));
@@ -8556,6 +8560,9 @@ function buildScopedAnalyticsFallback(summary, history, warning = '') {
       clean_sheets_per_game: games ? roundStat(Number(summary?.clean_sheet || 0) / games, 2) : 0,
       mom_per_game: games ? roundStat(moms / games, 2) : 0,
       win_rate: games ? roundStat((Number(summary?.wins || 0) / games) * 100, 1) : 0,
+      unbeaten_rate: games ? roundStat(((Number(summary?.wins || 0) + Number(summary?.draws || 0)) / games) * 100, 1) : 0,
+      points_per_game: games ? roundStat((Number(summary?.wins || 0) * 3 + Number(summary?.draws || 0)) / games, 2) : 0,
+      regularity_pct: regularity,
       pass_pct: roundStat(summary?.pass_pct, 2),
       tackle_pct: roundStat(summary?.tackle_pct, 2),
     },
@@ -10135,6 +10142,10 @@ function renderRankings() {
     if (key === 'shot_conversion_pct') return Number(p.shot_conversion_pct || 0);
     if (key === 'saves_per_game') return Number(p.saves_per_game || 0);
     if (key === 'mom_per_game') return Number(p.mom_per_game || 0);
+    if (key === 'win_rate') return Number(p.win_rate || 0);
+    if (key === 'unbeaten_rate') return Number(p.unbeaten_rate || 0);
+    if (key === 'points_per_game') return Number(p.points_per_game || 0);
+    if (key === 'regularity_pct') return Number(p.regularity_pct || 0);
     if (key === 'mom') return Number(p.mom || 0);
     return 0;
   };
@@ -10179,13 +10190,14 @@ function renderRankings() {
     ['rating','Nota EA'], ['goals_per_game','Gols/J'], ['assists_per_game','Assistências/J'],
     ['goal_involvements_per_game','Participações/J'],
     ['tackles_per_game','Desarmes/J'], ['shot_conversion_pct','Conversão'],
-    ['saves_per_game','Defesas/J'], ['pass_pct','Passes certos'], ['mom_per_game','MOM/J']
+    ['saves_per_game','Defesas/J'], ['pass_pct','Passes certos'], ['mom_per_game','MOM/J'],
+    ['win_rate','Vitórias%'], ['unbeaten_rate','Invencibilidade%'], ['points_per_game','Pontos/J'], ['regularity_pct','Regularidade%']
   ];
   const positionOptions = [['TODOS','Todas'],['GK','Goleiros'],['DEF','Defensores'],['MID','Meias'],['FWD','Atacantes']];
   const positionPlayers = players.filter(p => RANK_POSITION === 'TODOS' || normalizePlayerFamily(p.position_family || p.position) === RANK_POSITION);
   const selectedMetric = metricOptions.find(x => x[0] === RANK_METRIC) || metricOptions[0];
   const positionRanking = () => {
-    const suffix = ['shot_conversion_pct','pass_pct'].includes(selectedMetric[0]) ? '%' : '';
+    const suffix = ['shot_conversion_pct','pass_pct','win_rate','unbeaten_rate','regularity_pct'].includes(selectedMetric[0]) ? '%' : '';
     const rows = positionPlayers.slice().sort((a,b) => rankValue(b, selectedMetric[0]) - rankValue(a, selectedMetric[0])).slice(0, 10);
     return `<div class="ranking-card" style="grid-column:1/-1;">
       <div class="ranking-title"><span class="ranking-title-icon">&#9881;</span>Ranking configurável por posição</div>
@@ -10264,6 +10276,9 @@ function renderRankings() {
       ${topList('Top 5 Conversão de Chutes', '&#127919;', 'shot_conversion_pct', '%', true)}
       ${topList('Top 5 Defesas/J', '&#129351;', 'saves_per_game', '', true)}
       ${topList('Top 5 MOM por Jogo', '&#9819;', 'mom_per_game', '', true)}
+      ${topList('Top 5 Vit&oacute;rias com o Jogador', '&#9989;', 'win_rate', '%', true)}
+      ${topList('Top 5 Pontos por Jogo', '&#128200;', 'points_per_game', '', true, p => `${formatRankValue(p.unbeaten_rate, '%')} invicto`)}
+      ${topList('Top 5 Regularidade', '&#128202;', 'regularity_pct', '%', true, p => `nota EA 7+`)}
     </div>
   `;
 }
@@ -10359,6 +10374,9 @@ function renderCompareBars() {
     {key:'clean_sheets_per_game', label:'SG/J', max: Math.max(a.clean_sheets_per_game, b.clean_sheets_per_game, 1)},
     {key:'mom_per_game', label:'MOM/J', max: Math.max(a.mom_per_game, b.mom_per_game, 0.1)},
     {key:'win_rate', label:'Vitórias%', max:100},
+    {key:'unbeaten_rate', label:'Invicto%', max:100},
+    {key:'points_per_game', label:'Pontos/J', max:3},
+    {key:'regularity_pct', label:'Regularid.%', max:100},
   ];
   let html = '<div class="compare-bars"><div style="font-weight:700;margin-bottom:8px;">Comparativo direto</div>';
   fields.forEach(f => {
@@ -11210,6 +11228,9 @@ function renderAjuda() {
       '<strong>SG e SG/J:</strong> jogos sem sofrer gol (clean sheets) no total e por partida.',
       '<strong>MOM e MOM/J:</strong> vezes eleito melhor da partida e quantidade por jogo.',
       '<strong>Vit&oacute;rias%:</strong> partidas vencidas pelo clube com o jogador em campo divididas pelas partidas dele.',
+      '<strong>Invencibilidade:</strong> vit&oacute;rias mais empates com o jogador em campo, divididos pelas partidas dele.',
+      '<strong>Pontos/J:</strong> aplica 3 pontos por vit&oacute;ria e 1 por empate, dividindo o total pelos jogos do jogador. Varia de 0 a 3.',
+      '<strong>Regularidade (Nota 7+):</strong> percentual de partidas em que o jogador recebeu nota EA igual ou superior a 7.',
       '<strong>Frequ&ecirc;ncia:</strong> partidas disputadas pelo jogador no m&ecirc;s divididas pelo total de partidas salvas do clube no mesmo m&ecirc;s.',
       '<strong>N/D:</strong> dado n&atilde;o disponibilizado pela EA ou imposs&iacute;vel de calcular com seguran&ccedil;a; n&atilde;o significa zero.',
     ]),
@@ -12440,6 +12461,9 @@ function renderPlayerDetailHTML(data) {
         <div class="analytics-card"><div class="v">${totals.moms || 0}</div><div class="l">MOMs</div></div>
         <div class="analytics-card"><div class="v">${fmtStat(avg.mom_per_game)}</div><div class="l">MOM/J</div></div>
         <div class="analytics-card"><div class="v">${fmtStat(avg.win_rate, "%")}</div><div class="l">Vitórias</div></div>
+        <div class="analytics-card"><div class="v">${fmtStat(avg.unbeaten_rate, "%")}</div><div class="l">Invicto</div></div>
+        <div class="analytics-card"><div class="v">${fmtStat(avg.points_per_game)}</div><div class="l">Pontos/J</div></div>
+        <div class="analytics-card"><div class="v">${fmtStat(avg.regularity_pct, "%")}</div><div class="l">Nota 7+</div></div>
         <div class="analytics-card"><div class="v">${adv.regularity || 0}%</div><div class="l">Regularidade</div></div>
         <div class="analytics-card"><div class="v">${adv.consistency || 0}</div><div class="l">Consist.</div></div>
         <div class="analytics-card"><div class="v">${adv.offensive_impact || 0}</div><div class="l">Impacto Of.</div></div>
