@@ -10134,6 +10134,7 @@ function renderRankings() {
     if (key === 'goal_involvements_per_game') return Number(p.goal_involvements_per_game || 0);
     if (key === 'shot_conversion_pct') return Number(p.shot_conversion_pct || 0);
     if (key === 'saves_per_game') return Number(p.saves_per_game || 0);
+    if (key === 'mom_per_game') return Number(p.mom_per_game || 0);
     if (key === 'mom') return Number(p.mom || 0);
     return 0;
   };
@@ -10175,10 +10176,10 @@ function renderRankings() {
   };
 
   const metricOptions = [
-    ['rating','Nota EA'], ['goals','Gols'], ['goals_per_game','Gols/J'], ['assists','Assistências'], ['assists_per_game','Assistências/J'],
-    ['goal_involvements_per_game','Participações/J'], ['tackles_made','Desarmes'],
+    ['rating','Nota EA'], ['goals_per_game','Gols/J'], ['assists_per_game','Assistências/J'],
+    ['goal_involvements_per_game','Participações/J'],
     ['tackles_per_game','Desarmes/J'], ['shot_conversion_pct','Conversão'],
-    ['saves_per_game','Defesas/J'], ['pass_pct','Passes certos'], ['mom','MOM']
+    ['saves_per_game','Defesas/J'], ['pass_pct','Passes certos'], ['mom_per_game','MOM/J']
   ];
   const positionOptions = [['TODOS','Todas'],['GK','Goleiros'],['DEF','Defensores'],['MID','Meias'],['FWD','Atacantes']];
   const positionPlayers = players.filter(p => RANK_POSITION === 'TODOS' || normalizePlayerFamily(p.position_family || p.position) === RANK_POSITION);
@@ -10255,17 +10256,14 @@ function renderRankings() {
       ${titleRanking()}
       ${positionRanking()}
       ${topList('Top 5 Nota M&eacute;dia EA', '&#9733;', 'rating')}
-      ${topList('Top 5 Gols', '&#9917;', 'goals', '', true)}
       ${topList('Top 5 Gols por Jogo', '&#9917;', 'goals_per_game', '', true)}
-      ${topList('Top 5 Assist&ecirc;ncias', '&#9673;', 'assists', '', true)}
       ${topList('Top 5 Assist&ecirc;ncias por Jogo', '&#9673;', 'assists_per_game', '', true)}
       ${topList('Top 5 % Passes Certos', '&#10148;', 'pass_pct', '%', true)}
-      ${topList('Top 5 Desarmes', '&#9635;', 'tackles_made', '', true, p => `${formatRankValue(p.tackle_pct, '%')} de aproveitamento`)}
       ${topList('Top 5 Desarmes por Jogo', '&#9635;', 'tackles_per_game', '', true, p => `${formatRankValue(p.tackles_made)} no total`)}
       ${topList('Top 5 Participações em Gol/J', '&#10133;', 'goal_involvements_per_game', '', true)}
       ${topList('Top 5 Conversão de Chutes', '&#127919;', 'shot_conversion_pct', '%', true)}
       ${topList('Top 5 Defesas/J', '&#129351;', 'saves_per_game', '', true)}
-      ${topList('Top 5 MOM', '&#9819;', 'mom', '', true)}
+      ${topList('Top 5 MOM por Jogo', '&#9819;', 'mom_per_game', '', true)}
     </div>
   `;
 }
