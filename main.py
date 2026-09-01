@@ -4616,6 +4616,135 @@ Responda em markdown com:
 
     return {"player": player, "analytics": analytics, "analysis": analysis}
 
+
+def _comparison_snapshot(analytics: dict) -> dict:
+    """Reduz o pacote analitico ao que realmente ajuda a comparar dois jogadores."""
+    p = analytics.get("player") or {}
+    avg = analytics.get("averages") or {}
+    totals = analytics.get("totals") or {}
+    adv = analytics.get("advanced") or {}
+    history = analytics.get("history") or []
+    games = _safe_int(analytics.get("detail_games") or analytics.get("games_with_history") or p.get("games"))
+    goals = _safe_int(totals.get("goals"))
+    assists = _safe_int(totals.get("assists"))
+    shots = _safe_int(totals.get("shots"))
+    wins = sum(1 for h in history if h.get("result") == "V")
+    draws = sum(1 for h in history if h.get("result") == "E")
+    gk_games = sum(1 for h in history if _position_profile(h.get("position")) == "GK")
+    return {
+        "nome": p.get("name"),
+        "posicao": p.get("position"),
+        "jogos": games,
+        "nota_ea": _safe_float(avg.get("rating")),
+        "nota_sofi": _safe_float(avg.get("sofi_rating")),
+        "gols_por_jogo": round(goals / max(games, 1), 2),
+        "assistencias_por_jogo": round(assists / max(games, 1), 2),
+        "participacoes_por_jogo": round((goals + assists) / max(games, 1), 2),
+        "conversao_chutes_pct": round((goals / shots) * 100, 1) if shots else None,
+        "passes_pct": avg.get("passes_pct"),
+        "desarmes_por_jogo": avg.get("tackles_per_game"),
+        "defesas_por_jogo_gk": round(_safe_int(totals.get("saves")) / gk_games, 2) if gk_games else None,
+        "mom_por_jogo": round(_safe_int(totals.get("moms")) / max(games, 1), 2),
+        "vitorias_pct": round((wins / max(games, 1)) * 100, 1),
+        "invencibilidade_pct": round(((wins + draws) / max(games, 1)) * 100, 1),
+        "pontos_por_jogo": round((wins * 3 + draws) / max(games, 1), 2),
+        "regularidade_nota_7_pct": adv.get("regularity"),
+        "consistencia": adv.get("consistency"),
+        "tendencia": (analytics.get("trend") or {}).get("status"),
+    }
+
+
+def _comparison_offline(a: dict, b: dict) -> str:
+    def leader(metric, lower=False):
+        va, vb = a.get(metric), b.get(metric)
+        if va is None or vb is None or va == vb:
+            return "equilibrio"
+        better = a if ((va < vb) if lower else (va > vb)) else b
+        return str(better.get("nome") or "-")
+
+    return f"""## Resumo executivo
+Comparativo de **{a.get('nome')}** ({a.get('posicao')}) e **{b.get('nome')}** ({b.get('posicao')}) no mesmo recorte de partidas. A leitura considera funcoes diferentes e evita comparar metricas sem dado.
+
+## Vantagens de {a.get('nome')}
+- Nota EA: **{a.get('nota_ea')}**; participacoes por jogo: **{a.get('participacoes_por_jogo')}**.
+- Passes certos: **{a.get('passes_pct')}%**; desarmes por jogo: **{a.get('desarmes_por_jogo')}**.
+- Vitorias com ele: **{a.get('vitorias_pct')}%**; pontos por jogo: **{a.get('pontos_por_jogo')}**.
+
+## Vantagens de {b.get('nome')}
+- Nota EA: **{b.get('nota_ea')}**; participacoes por jogo: **{b.get('participacoes_por_jogo')}**.
+- Passes certos: **{b.get('passes_pct')}%**; desarmes por jogo: **{b.get('desarmes_por_jogo')}**.
+- Vitorias com ele: **{b.get('vitorias_pct')}%**; pontos por jogo: **{b.get('pontos_por_jogo')}**.
+
+## Leitura por indicador
+- Maior impacto ofensivo: **{leader('participacoes_por_jogo')}**.
+- Melhor aproveitamento coletivo: **{leader('pontos_por_jogo')}**.
+- Maior regularidade: **{leader('regularidade_nota_7_pct')}**.
+- Melhor eficiencia de passe: **{leader('passes_pct')}**.
+- Maior volume defensivo por jogo: **{leader('desarmes_por_jogo')}**.
+
+## Conclusao
+Use a comparacao como apoio de decisao, considerando posicao, adversario e funcao tatica. O jogador com melhor numero geral nem sempre e o melhor encaixe para a vaga especifica.
+"""
+
+
+@app.post("/api/ai/compare-players")
+async def ai_compare_players(
+    player_a: str,
+    player_b: str,
+    match_type: str = Query("todos"),
+    period: str = Query("todos"),
+    match_status: str = Query("todas"),
+):
+    """Compara dois jogadores no mesmo recorte e gera parecer scout com GPT."""
+    if not str(player_a or "").strip() or not str(player_b or "").strip():
+        raise HTTPException(400, "Selecione dois jogadores")
+    cache = load_cache()
+    if not cache or not cache.get("players"):
+        raise HTTPException(404, "Sincronize um clube primeiro")
+    analytics_a = build_player_analytics(player_a, cache, match_type, period, match_status)
+    analytics_b = build_player_analytics(player_b, cache, match_type, period, match_status)
+    snapshot_a = _comparison_snapshot(analytics_a)
+    snapshot_b = _comparison_snapshot(analytics_b)
+    analysis = _comparison_offline(snapshot_a, snapshot_b)
+    source = "offline"
+    if OPENAI_API_KEY:
+        try:
+            from openai import OpenAI
+            client = OpenAI(api_key=OPENAI_API_KEY)
+            prompt = f"""Atue como scout profissional de EA FC Pro Clubs. Compare os dois jogadores usando SOMENTE os dados abaixo, que pertencem ao mesmo filtro.
+
+Jogador A: {json.dumps(snapshot_a, ensure_ascii=False, indent=2, default=str)}
+Jogador B: {json.dumps(snapshot_b, ensure_ascii=False, indent=2, default=str)}
+
+Regras:
+- Nao invente estatisticas e trate null como N/D.
+- Considere diferencas de posicao e funcao; nao compare defesas de goleiro com jogador de linha.
+- Priorize metricas por jogo, percentuais, regularidade e impacto nos resultados.
+- Explique amostra pequena quando o numero de jogos for muito diferente.
+- Nao escolha um vencedor absoluto se os perfis servirem a funcoes diferentes.
+
+Responda em portugues, markdown, com:
+## Resumo executivo
+## Comparacao indicador por indicador
+## Pontos fortes de cada jogador
+## Pontos de atencao
+## Melhor encaixe por cenario
+## Conclusao scout
+"""
+            resp = client.chat.completions.create(
+                model=OPENAI_MODEL,
+                messages=[
+                    {"role": "system", "content": "Voce e um scout de futebol objetivo, criterioso e orientado por dados."},
+                    {"role": "user", "content": prompt},
+                ],
+                temperature=0.35,
+            )
+            analysis = resp.choices[0].message.content or analysis
+            source = "openai"
+        except Exception as e:
+            print(f"[AI] Falha ao comparar {player_a} e {player_b}: {e}")
+    return {"player_a": snapshot_a, "player_b": snapshot_b, "analysis": analysis, "source": source}
+
 def generate_player_analysis_offline(p):
     """Análise offline baseada em estat&iacute;sticas"""
     rating = p['rating']
@@ -8292,7 +8421,7 @@ function computePlayersForMatches(matches) {
         passes_per_game: +(p.passes_made / Math.max(p.games, 1)).toFixed(2),
         tackles_per_game: +(p.tackles_made / Math.max(p.games, 1)).toFixed(2),
         interceptions_per_game: +(p.interceptions / Math.max(p.games, 1)).toFixed(2),
-        saves_per_game: +(p.saves / Math.max(p.games, 1)).toFixed(2),
+        saves_per_game: +(p.saves / Math.max(Number(p.position_counts?.GK || 0), 1)).toFixed(2),
         goal_involvements: Number(p.goals || 0) + Number(p.assists || 0),
         goal_involvements_per_game: +((Number(p.goals || 0) + Number(p.assists || 0)) / Math.max(p.games, 1)).toFixed(2),
         shots_per_goal: Number(p.goals || 0) > 0 ? +(Number(p.shots || 0) / Number(p.goals || 1)).toFixed(2) : null,
@@ -8554,7 +8683,7 @@ function buildScopedAnalyticsFallback(summary, history, warning = '') {
       shots_per_game: games ? roundStat(shots / games, 2) : 0,
       passes_per_game: games ? roundStat(passes / games, 2) : 0,
       tackles_per_game: games ? roundStat(tackles / games, 2) : 0,
-      saves_per_game: games ? roundStat(saves / games, 2) : 0,
+      saves_per_game: Number(summary?.position_counts?.GK || 0) ? roundStat(saves / Number(summary.position_counts.GK), 2) : 0,
       interceptions_per_game: games ? roundStat(interceptions / games, 2) : 0,
       shots_per_goal: goals > 0 ? roundStat(shots / goals, 2) : null,
       clean_sheets_per_game: games ? roundStat(Number(summary?.clean_sheet || 0) / games, 2) : 0,
@@ -10322,12 +10451,41 @@ function renderComparar() {
       </div>
     </div>
     <div id="cmp-bars"></div>
+    <div style="display:flex;justify-content:center;margin-top:16px;">
+      <button class="btn-primary" onclick="analyzePlayerComparison()">&#129302; Analisar compara&ccedil;&atilde;o com IA</button>
+    </div>
   `;
 }
 
 function setCompare(side, name) {
   if (side === 'A') COMPARE_A = name; else COMPARE_B = name;
   renderCompareBars();
+}
+
+async function analyzePlayerComparison() {
+  if (!COMPARE_A || !COMPARE_B) return alert('Selecione dois jogadores');
+  if (COMPARE_A === COMPARE_B) return alert('Selecione jogadores diferentes');
+  const mc = document.getElementById('modalContent');
+  mc.innerHTML = `<div class="loading"><div class="spinner"></div> Comparando ${escapeAttr(COMPARE_A)} e ${escapeAttr(COMPARE_B)} com IA...</div>`;
+  document.getElementById('modal').classList.add('active');
+  try {
+    const params = new URLSearchParams({
+      player_a: COMPARE_A,
+      player_b: COMPARE_B,
+      match_type: CURRENT_MATCH_TYPE,
+      period: CURRENT_PERIOD,
+      match_status: CURRENT_MATCH_STATUS,
+    });
+    const r = await authFetch('/api/ai/compare-players?' + params.toString(), {method:'POST'});
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(data.detail || 'Erro ao comparar jogadores');
+    mc.innerHTML = `
+      <h2>Compara&ccedil;&atilde;o IA</h2>
+      <div style="color:var(--text-2);font-size:12px;margin-bottom:14px;">${escapeAttr(COMPARE_A)} vs ${escapeAttr(COMPARE_B)} &middot; ${escapeAttr(currentScopeLabel())} &middot; ${data.source === 'openai' ? 'GPT' : 'an&aacute;lise local'}</div>
+      <div class="analytics-note">${renderMarkdown(data.analysis || '')}</div>`;
+  } catch (e) {
+    mc.innerHTML = `<p style="color:var(--red);">Erro: ${escapeAttr(e.message || e)}</p>`;
+  }
 }
 
 function renderCompareBars() {
@@ -10368,10 +10526,8 @@ function renderCompareBars() {
     {key:'mom', label:'MOMs', max: Math.max(a.mom, b.mom, 1)},
     {key:'goals_per_game', label:'Gol/J', max: Math.max(a.goals_per_game, b.goals_per_game, 0.5)},
     {key:'goal_involvements_per_game', label:'G+A/J', max: Math.max(a.goal_involvements_per_game, b.goal_involvements_per_game, 0.5)},
-    {key:'saves', label:'Defesas', max: Math.max(a.saves, b.saves, 1)},
-    {key:'saves_per_game', label:'Def/J', max: Math.max(a.saves_per_game, b.saves_per_game, 1)},
-    {key:'clean_sheet', label:'SG', max: Math.max(a.clean_sheet, b.clean_sheet, 1)},
-    {key:'clean_sheets_per_game', label:'SG/J', max: Math.max(a.clean_sheets_per_game, b.clean_sheets_per_game, 1)},
+    {key:'saves', label:'Defesas (GK)', max: Math.max(a.saves, b.saves, 1), gkOnly:true},
+    {key:'saves_per_game', label:'Def/J (GK)', max: Math.max(a.saves_per_game, b.saves_per_game, 1), gkOnly:true},
     {key:'mom_per_game', label:'MOM/J', max: Math.max(a.mom_per_game, b.mom_per_game, 0.1)},
     {key:'win_rate', label:'Vitórias%', max:100},
     {key:'unbeaten_rate', label:'Invicto%', max:100},
@@ -10381,21 +10537,25 @@ function renderCompareBars() {
   let html = '<div class="compare-bars"><div style="font-weight:700;margin-bottom:8px;">Comparativo direto</div>';
   fields.forEach(f => {
     const rawA = a[f.key], rawB = b[f.key];
+    const aGkApps = Number(a.position_counts?.GK || 0);
+    const bGkApps = Number(b.position_counts?.GK || 0);
+    const applicableA = !f.gkOnly || aGkApps > 0;
+    const applicableB = !f.gkOnly || bGkApps > 0;
     const va = rawA === null || rawA === undefined ? 0 : Number(rawA || 0);
     const vb = rawB === null || rawB === undefined ? 0 : Number(rawB || 0);
-    const pa = Math.min(100, (va / f.max) * 100);
-    const pb = Math.min(100, (vb / f.max) * 100);
+    const pa = applicableA ? Math.min(100, (va / f.max) * 100) : 0;
+    const pb = applicableB ? Math.min(100, (vb / f.max) * 100) : 0;
     const comparableA = f.lowerBetter && va <= 0 ? Infinity : va;
     const comparableB = f.lowerBetter && vb <= 0 ? Infinity : vb;
-    const wa = (f.lowerBetter ? comparableA < comparableB : va > vb) ? 'color:var(--green)' : '';
-    const wb = (f.lowerBetter ? comparableB < comparableA : vb > va) ? 'color:var(--green)' : '';
+    const wa = applicableA && applicableB && (f.lowerBetter ? comparableA < comparableB : va > vb) ? 'color:var(--green)' : '';
+    const wb = applicableA && applicableB && (f.lowerBetter ? comparableB < comparableA : vb > va) ? 'color:var(--green)' : '';
     html += `
       <div class="compare-bar-row">
-        <div class="compare-bar-val left" style="${wa}">${fmtStat(rawA)}</div>
+        <div class="compare-bar-val left" style="${wa}">${applicableA ? fmtStat(rawA) : 'N/D'}</div>
         <div class="compare-bar left"><div class="fill" style="width:${pa}%"></div></div>
         <div class="compare-bar-label">${f.label}</div>
         <div class="compare-bar right"><div class="fill" style="width:${pb}%"></div></div>
-        <div class="compare-bar-val right" style="${wb}">${fmtStat(rawB)}</div>
+        <div class="compare-bar-val right" style="${wb}">${applicableB ? fmtStat(rawB) : 'N/D'}</div>
       </div>
     `;
   });
@@ -11208,7 +11368,8 @@ function renderAjuda() {
       'Jogador com login bloqueado, pendente ou inativo sai dos rankings at&eacute; ser ativado novamente.',
       'Nota m&eacute;dia, passes e divididas exigem m&iacute;nimo de jogos no clube para evitar jogador com uma partida dominar ranking.',
       'Gols, assist&ecirc;ncias, passes, desarmes e MOM respeitam o filtro selecionado.',
-      'Os rankings exibem totais e tamb&eacute;m valores por jogo. O total mostra produ&ccedil;&atilde;o acumulada; por jogo equilibra jogadores com quantidades diferentes de partidas.',
+      'Os rankings de desempenho priorizam valores por jogo e percentuais para equilibrar jogadores com quantidades diferentes de partidas.',
+      'Na tela Comparar, o bot&atilde;o Analisar compara&ccedil;&atilde;o com IA envia os dois jogadores e o filtro atual para gerar um parecer scout textual. A IA considera posi&ccedil;&atilde;o, amostra, efici&ecirc;ncia, regularidade e impacto nos resultados.',
     ]),
     helpCard('Gloss&aacute;rio das m&eacute;tricas', [
       '<strong>Jogos (J):</strong> partidas do filtro em que o jogador aparece na s&uacute;mula.',
@@ -11224,8 +11385,8 @@ function renderAjuda() {
       '<strong>Pass%:</strong> passes completados divididos pelas tentativas de passe. N&atilde;o &eacute; volume; &eacute; aproveitamento.',
       '<strong>Desarmes e Des/J:</strong> desarmes conclu&iacute;dos no total e desarmes conclu&iacute;dos por partida.',
       '<strong>Des%:</strong> desarmes conclu&iacute;dos divididos pelas tentativas de desarme. Deve ser lido junto com o volume de desarmes.',
-      '<strong>Defesas e Def/J:</strong> defesas registradas para goleiros no total e por partida.',
-      '<strong>SG e SG/J:</strong> jogos sem sofrer gol (clean sheets) no total e por partida.',
+      '<strong>Defesas e Def/J:</strong> defesas registradas nas atua&ccedil;&otilde;es como goleiro; Def/J usa somente os jogos no gol. Para quem nunca atuou como GK, aparece N/D.',
+      '<strong>Clean sheet:</strong> n&atilde;o &eacute; exibido porque o payload atual da EA devolve o campo zerado e n&atilde;o permite diferenciar zero real de dado ausente.',
       '<strong>MOM e MOM/J:</strong> vezes eleito melhor da partida e quantidade por jogo.',
       '<strong>Vit&oacute;rias%:</strong> partidas vencidas pelo clube com o jogador em campo divididas pelas partidas dele.',
       '<strong>Invencibilidade:</strong> vit&oacute;rias mais empates com o jogador em campo, divididos pelas partidas dele.',
@@ -12419,6 +12580,7 @@ function renderPlayerDetailHTML(data) {
   const clubTotalGames = Number(data.club_total_games ?? p.ea_global_games ?? p.games ?? detailedGames) || detailedGames;
   const participationPerGame = detailedGames ? (((Number(totals.goals || 0) + Number(totals.assists || 0)) / detailedGames).toFixed(2)) : '0';
   const shotsPerGoal = Number(totals.goals || 0) > 0 ? (Number(totals.shots || 0) / Number(totals.goals || 1)).toFixed(2) : 'N/D';
+  const gkApps = Number(p.position_counts?.GK || h.filter(x => normalizePlayerFamily(x.position) === 'GK').length || 0);
   const totalSuffix = data.uses_member_totals && isFullPlayerScope() ? ` &middot; ${clubTotalGames} jogos no clube (totais EA)` : '';
   const gamesLine = `${detailedGames} partidas no filtro (${activeScopeLabel()})${totalSuffix} &middot; ranking ${rank.rating_rank_label || '-'} &middot; tend&ecirc;ncia ${trend.status || '-'}`;
   return `
@@ -12454,10 +12616,8 @@ function renderPlayerDetailHTML(data) {
         <div class="analytics-card"><div class="v">${fmtStat(totals.tackles)}</div><div class="l">Desarmes</div></div>
         <div class="analytics-card"><div class="v">${fmtStat(avg.tackle_pct, "%")}</div><div class="l">Des%</div></div>
         <div class="analytics-card"><div class="v">${fmtStat(avg.tackles_per_game)}</div><div class="l">Des/J</div></div>
-        <div class="analytics-card"><div class="v">${totals.saves || 0}</div><div class="l">Defesas</div></div>
-        <div class="analytics-card"><div class="v">${avg.saves_per_game || 0}</div><div class="l">Def/J</div></div>
-        <div class="analytics-card"><div class="v">${totals.clean_sheets || 0}</div><div class="l">SG</div></div>
-        <div class="analytics-card"><div class="v">${fmtStat(avg.clean_sheets_per_game)}</div><div class="l">SG/J</div></div>
+        <div class="analytics-card"><div class="v">${gkApps > 0 ? (totals.saves || 0) : 'N/D'}</div><div class="l">Defesas (GK)</div></div>
+        <div class="analytics-card"><div class="v">${gkApps > 0 ? (avg.saves_per_game || 0) : 'N/D'}</div><div class="l">Def/J (GK)</div></div>
         <div class="analytics-card"><div class="v">${totals.moms || 0}</div><div class="l">MOMs</div></div>
         <div class="analytics-card"><div class="v">${fmtStat(avg.mom_per_game)}</div><div class="l">MOM/J</div></div>
         <div class="analytics-card"><div class="v">${fmtStat(avg.win_rate, "%")}</div><div class="l">Vitórias</div></div>
