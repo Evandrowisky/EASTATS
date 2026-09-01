@@ -4650,6 +4650,7 @@ def _comparison_snapshot(analytics: dict) -> dict:
         "pontos_por_jogo": round((wins * 3 + draws) / max(games, 1), 2),
         "regularidade_nota_7_pct": adv.get("regularity"),
         "consistencia": adv.get("consistency"),
+        "score_analitico": adv.get("analytic_score"),
         "tendencia": (analytics.get("trend") or {}).get("status"),
     }
 
@@ -4661,6 +4662,24 @@ def _comparison_offline(a: dict, b: dict) -> str:
             return "equilibrio"
         better = a if ((va < vb) if lower else (va > vb)) else b
         return str(better.get("nome") or "-")
+
+    score_a = _safe_float(a.get("score_analitico"))
+    score_b = _safe_float(b.get("score_analitico"))
+    if score_a == score_b:
+        score_a = _safe_float(a.get("nota_ea"))
+        score_b = _safe_float(b.get("nota_ea"))
+    winner, runner_up = (a, b) if score_a >= score_b else (b, a)
+    deciding = []
+    for key, label in (
+        ("nota_ea", "nota EA"), ("participacoes_por_jogo", "participacoes por jogo"),
+        ("pontos_por_jogo", "pontos por jogo"), ("regularidade_nota_7_pct", "regularidade"),
+        ("passes_pct", "eficiencia de passe"), ("desarmes_por_jogo", "desarmes por jogo"),
+    ):
+        if _safe_float(winner.get(key)) > _safe_float(runner_up.get(key)):
+            deciding.append(f"{label} ({winner.get(key)} contra {runner_up.get(key)})")
+    reasons = ", ".join(deciding[:3]) or "vantagem no score analitico geral"
+    gap = abs(_safe_float(winner.get("score_analitico")) - _safe_float(runner_up.get("score_analitico")))
+    confidence = "alta" if gap >= 8 else "media" if gap >= 3 else "baixa"
 
     return f"""## Resumo executivo
 Comparativo de **{a.get('nome')}** ({a.get('posicao')}) e **{b.get('nome')}** ({b.get('posicao')}) no mesmo recorte de partidas. A leitura considera funcoes diferentes e evita comparar metricas sem dado.
@@ -4682,8 +4701,11 @@ Comparativo de **{a.get('nome')}** ({a.get('posicao')}) e **{b.get('nome')}** ({
 - Melhor eficiencia de passe: **{leader('passes_pct')}**.
 - Maior volume defensivo por jogo: **{leader('desarmes_por_jogo')}**.
 
+## Veredito: {winner.get('nome')}
+**{winner.get('nome')} vence a comparacao**, com confianca **{confidence}**. Os principais fatores foram {reasons}. Score analitico: **{winner.get('score_analitico')}** contra **{runner_up.get('score_analitico')}**.
+
 ## Conclusao
-Use a comparacao como apoio de decisao, considerando posicao, adversario e funcao tatica. O jogador com melhor numero geral nem sempre e o melhor encaixe para a vaga especifica.
+No recorte analisado, **{winner.get('nome')}** apresenta o conjunto mais forte. **{runner_up.get('nome')}** ainda pode ser a escolha mais adequada quando a necessidade tatica exigir especificamente suas caracteristicas ou posicao.
 """
 
 
@@ -4721,7 +4743,9 @@ Regras:
 - Considere diferencas de posicao e funcao; nao compare defesas de goleiro com jogador de linha.
 - Priorize metricas por jogo, percentuais, regularidade e impacto nos resultados.
 - Explique amostra pequena quando o numero de jogos for muito diferente.
-- Nao escolha um vencedor absoluto se os perfis servirem a funcoes diferentes.
+- Escolha obrigatoriamente UM vencedor geral entre os dois, mesmo se atuarem em funcoes diferentes.
+- Justifique o vencedor com pelo menos tres numeros do recorte e informe confianca alta, media ou baixa.
+- Se as posicoes forem diferentes, explique a ressalva tatica, mas nao deixe de dar o veredito.
 
 Responda em portugues, markdown, com:
 ## Resumo executivo
@@ -4729,6 +4753,7 @@ Responda em portugues, markdown, com:
 ## Pontos fortes de cada jogador
 ## Pontos de atencao
 ## Melhor encaixe por cenario
+## Veredito: [nome do vencedor]
 ## Conclusao scout
 """
             resp = client.chat.completions.create(
@@ -11369,7 +11394,7 @@ function renderAjuda() {
       'Nota m&eacute;dia, passes e divididas exigem m&iacute;nimo de jogos no clube para evitar jogador com uma partida dominar ranking.',
       'Gols, assist&ecirc;ncias, passes, desarmes e MOM respeitam o filtro selecionado.',
       'Os rankings de desempenho priorizam valores por jogo e percentuais para equilibrar jogadores com quantidades diferentes de partidas.',
-      'Na tela Comparar, o bot&atilde;o Analisar compara&ccedil;&atilde;o com IA envia os dois jogadores e o filtro atual para gerar um parecer scout textual. A IA considera posi&ccedil;&atilde;o, amostra, efici&ecirc;ncia, regularidade e impacto nos resultados.',
+      'Na tela Comparar, o bot&atilde;o Analisar compara&ccedil;&atilde;o com IA envia os dois jogadores e o filtro atual para gerar um parecer scout textual. A IA considera posi&ccedil;&atilde;o, amostra, efici&ecirc;ncia, regularidade e impacto nos resultados, escolhe um vencedor e justifica o veredito com os n&uacute;meros.',
     ]),
     helpCard('Gloss&aacute;rio das m&eacute;tricas', [
       '<strong>Jogos (J):</strong> partidas do filtro em que o jogador aparece na s&uacute;mula.',
