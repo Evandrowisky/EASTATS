@@ -8288,6 +8288,7 @@ function computePlayersForMatches(matches) {
         goals_per_game: +(p.goals / Math.max(p.games, 1)).toFixed(2),
         assists_per_game: +(p.assists / Math.max(p.games, 1)).toFixed(2),
         shots_per_game: +(p.shots / Math.max(p.games, 1)).toFixed(2),
+        passes_per_game: +(p.passes_made / Math.max(p.games, 1)).toFixed(2),
         tackles_per_game: +(p.tackles_made / Math.max(p.games, 1)).toFixed(2),
         interceptions_per_game: +(p.interceptions / Math.max(p.games, 1)).toFixed(2),
         saves_per_game: +(p.saves / Math.max(p.games, 1)).toFixed(2),
@@ -8295,6 +8296,8 @@ function computePlayersForMatches(matches) {
         goal_involvements_per_game: +((Number(p.goals || 0) + Number(p.assists || 0)) / Math.max(p.games, 1)).toFixed(2),
         shots_per_goal: Number(p.goals || 0) > 0 ? +(Number(p.shots || 0) / Number(p.goals || 1)).toFixed(2) : null,
         shot_conversion_pct: Number(p.shots || 0) > 0 ? +((Number(p.goals || 0) / Number(p.shots || 1)) * 100).toFixed(1) : 0,
+        clean_sheets_per_game: +(p.clean_sheet / Math.max(p.games, 1)).toFixed(2),
+        mom_per_game: +(p.mom / Math.max(p.games, 1)).toFixed(2),
         pre_assists: Number(p.pre_assists || 0),
         key_passes: Number(p.key_passes || 0),
         pre_assists_per_game: +(Number(p.pre_assists || 0) / Math.max(p.games, 1)).toFixed(2),
@@ -8326,6 +8329,7 @@ function playersFromMemberTotals() {
       shots_per_game: hasShotStats ? Number(base.shots || 0) / games : null,
       passes_made: hasPassStats ? Number(base.passes_made || 0) : null,
       pass_pct: hasPassStats ? base.pass_pct : null,
+      passes_per_game: hasPassStats ? Number(base.passes_made || 0) / games : null,
       tackles_made: hasTackleStats ? Number(base.tackles_made || 0) : null,
       tackle_pct: hasTackleStats ? base.tackle_pct : null,
       tackles_per_game: hasTackleStats ? Number(base.tackles_made || 0) / games : null,
@@ -8347,9 +8351,12 @@ function playersFromMemberTotals() {
     merged.pre_assists_per_game = +(merged.pre_assists / games).toFixed(2);
     merged.key_passes_per_game = +(merged.key_passes / games).toFixed(2);
     merged.shots_per_game = hasShotStats ? +Number(merged.shots_per_game || 0).toFixed(2) : null;
+    merged.passes_per_game = hasPassStats ? +Number(merged.passes_per_game || 0).toFixed(2) : null;
     merged.shots_per_goal = hasShotStats && Number(merged.goals || 0) > 0 ? +(Number(merged.shots || 0) / Number(merged.goals || 1)).toFixed(2) : null;
     merged.shot_conversion_pct = hasShotStats && Number(merged.shots || 0) > 0 ? +((Number(merged.goals || 0) / Number(merged.shots || 1)) * 100).toFixed(1) : 0;
     merged.tackles_per_game = hasTackleStats ? +Number(merged.tackles_per_game || 0).toFixed(2) : null;
+    merged.clean_sheets_per_game = +(Number(merged.clean_sheet || 0) / games).toFixed(2);
+    merged.mom_per_game = +(Number(merged.mom || 0) / games).toFixed(2);
     const intel = inferPlayerPositionIntel(merged);
     return {...merged, position: intel.label, position_family: intel.family, position_source: intel.source, history_apps: intel.apps};
   });
@@ -8506,6 +8513,7 @@ function buildScopedAnalyticsFallback(summary, history, warning = '') {
   const goals = Number(summary?.goals || 0);
   const assists = Number(summary?.assists || 0);
   const shots = Number(summary?.shots || 0);
+  const passes = Number(summary?.passes_made || 0);
   const tackles = Number(summary?.tackles_made || 0);
   const saves = Number(summary?.saves || 0);
   const interceptions = Number(summary?.interceptions || 0);
@@ -8540,10 +8548,14 @@ function buildScopedAnalyticsFallback(summary, history, warning = '') {
       goals_per_game: games ? roundStat(goals / games, 2) : 0,
       assists_per_game: games ? roundStat(assists / games, 2) : 0,
       shots_per_game: games ? roundStat(shots / games, 2) : 0,
+      passes_per_game: games ? roundStat(passes / games, 2) : 0,
       tackles_per_game: games ? roundStat(tackles / games, 2) : 0,
       saves_per_game: games ? roundStat(saves / games, 2) : 0,
       interceptions_per_game: games ? roundStat(interceptions / games, 2) : 0,
       shots_per_goal: goals > 0 ? roundStat(shots / goals, 2) : null,
+      clean_sheets_per_game: games ? roundStat(Number(summary?.clean_sheet || 0) / games, 2) : 0,
+      mom_per_game: games ? roundStat(moms / games, 2) : 0,
+      win_rate: games ? roundStat((Number(summary?.wins || 0) / games) * 100, 1) : 0,
       pass_pct: roundStat(summary?.pass_pct, 2),
       tackle_pct: roundStat(summary?.tackle_pct, 2),
     },
@@ -8551,6 +8563,7 @@ function buildScopedAnalyticsFallback(summary, history, warning = '') {
       goals,
       assists,
       shots,
+      passes,
       tackles,
       saves,
       interceptions,
@@ -10162,8 +10175,7 @@ function renderRankings() {
   const metricOptions = [
     ['rating','Nota EA'], ['goals','Gols'], ['assists','Assistências'],
     ['goal_involvements_per_game','Participações/J'], ['tackles_made','Desarmes'],
-    ['tackles_per_game','Desarmes/J'], ['interceptions','Interceptações'],
-    ['interceptions_per_game','Interceptações/J'], ['shot_conversion_pct','Conversão'],
+    ['tackles_per_game','Desarmes/J'], ['shot_conversion_pct','Conversão'],
     ['saves_per_game','Defesas/J'], ['pass_pct','Passes certos'], ['mom','MOM']
   ];
   const positionOptions = [['TODOS','Todas'],['GK','Goleiros'],['DEF','Defensores'],['MID','Meias'],['FWD','Atacantes']];
@@ -10246,7 +10258,7 @@ function renderRankings() {
       ${topList('Top 5 % Passes Certos', '&#10148;', 'pass_pct', '%', true)}
       ${topList('Top 5 Desarmes', '&#9635;', 'tackles_made', '', true, p => `${formatRankValue(p.tackle_pct, '%')} de aproveitamento`)}
       ${topList('Top 5 Participações em Gol/J', '&#10133;', 'goal_involvements_per_game', '', true)}
-      ${topList('Top 5 Interceptações', '&#9876;', 'interceptions', '', true)}
+      ${topList('Top 5 Conversão de Chutes', '&#127919;', 'shot_conversion_pct', '%', true)}
       ${topList('Top 5 Defesas/J', '&#129351;', 'saves_per_game', '', true)}
       ${topList('Top 5 MOM', '&#9819;', 'mom', '', true)}
     </div>
@@ -10328,16 +10340,22 @@ function renderCompareBars() {
     {key:'goals', label:'Gols', max: Math.max(a.goals, b.goals, 1)},
     {key:'assists', label:'Assist', max: Math.max(a.assists, b.assists, 1)},
     {key:'pass_pct', label:'Pass%', max:100},
+    {key:'passes_made', label:'Passes', max: Math.max(a.passes_made, b.passes_made, 1)},
+    {key:'passes_per_game', label:'Passes/J', max: Math.max(a.passes_per_game, b.passes_per_game, 1)},
     {key:'tackles_made', label:'Desarmes', max: Math.max(a.tackles_made, b.tackles_made, 1)},
     {key:'tackles_per_game', label:'Des/J', max: Math.max(a.tackles_per_game, b.tackles_per_game, 1)},
-    {key:'interceptions', label:'Intercep.', max: Math.max(a.interceptions, b.interceptions, 1)},
     {key:'shots', label:'Chutes', max: Math.max(a.shots, b.shots, 1)},
+    {key:'shot_conversion_pct', label:'Conversão', max:100},
     {key:'shots_per_goal', label:'Finaliz/Gol', max: Math.max(a.shots_per_goal || 0, b.shots_per_goal || 0, 1), lowerBetter:true},
     {key:'mom', label:'MOMs', max: Math.max(a.mom, b.mom, 1)},
     {key:'goals_per_game', label:'Gol/J', max: Math.max(a.goals_per_game, b.goals_per_game, 0.5)},
     {key:'goal_involvements_per_game', label:'G+A/J', max: Math.max(a.goal_involvements_per_game, b.goal_involvements_per_game, 0.5)},
     {key:'saves', label:'Defesas', max: Math.max(a.saves, b.saves, 1)},
     {key:'saves_per_game', label:'Def/J', max: Math.max(a.saves_per_game, b.saves_per_game, 1)},
+    {key:'clean_sheet', label:'SG', max: Math.max(a.clean_sheet, b.clean_sheet, 1)},
+    {key:'clean_sheets_per_game', label:'SG/J', max: Math.max(a.clean_sheets_per_game, b.clean_sheets_per_game, 1)},
+    {key:'mom_per_game', label:'MOM/J', max: Math.max(a.mom_per_game, b.mom_per_game, 0.1)},
+    {key:'win_rate', label:'Vitórias%', max:100},
   ];
   let html = '<div class="compare-bars"><div style="font-weight:700;margin-bottom:8px;">Comparativo direto</div>';
   fields.forEach(f => {
@@ -12382,16 +12400,21 @@ function renderPlayerDetailHTML(data) {
         <div class="analytics-card"><div class="v">${fmtStat(totals.shots)}</div><div class="l">Chutes</div></div>
         <div class="analytics-card"><div class="v">${fmtStat(avg.shots_per_game)}</div><div class="l">Chu/J</div></div>
         <div class="analytics-card"><div class="v">${shotsPerGoal}</div><div class="l">Finaliz./Gol</div></div>
+        <div class="analytics-card"><div class="v">${fmtStat(Number(totals.shots || 0) > 0 ? (Number(totals.goals || 0) / Number(totals.shots || 1)) * 100 : 0, "%")}</div><div class="l">Conversão</div></div>
         <div class="analytics-card"><div class="v">${participationPerGame}</div><div class="l">Part./J</div></div>
+        <div class="analytics-card"><div class="v">${fmtStat(totals.passes)}</div><div class="l">Passes</div></div>
+        <div class="analytics-card"><div class="v">${fmtStat(avg.passes_per_game)}</div><div class="l">Passes/J</div></div>
+        <div class="analytics-card"><div class="v">${fmtStat(avg.pass_pct, "%")}</div><div class="l">Pass%</div></div>
         <div class="analytics-card"><div class="v">${fmtStat(totals.tackles)}</div><div class="l">Desarmes</div></div>
         <div class="analytics-card"><div class="v">${fmtStat(avg.tackle_pct, "%")}</div><div class="l">Des%</div></div>
         <div class="analytics-card"><div class="v">${fmtStat(avg.tackles_per_game)}</div><div class="l">Des/J</div></div>
-        <div class="analytics-card"><div class="v">${fmtStat(totals.interceptions)}</div><div class="l">Intercept.</div></div>
-        <div class="analytics-card"><div class="v">${fmtStat(avg.interceptions_per_game)}</div><div class="l">Interc./J</div></div>
         <div class="analytics-card"><div class="v">${totals.saves || 0}</div><div class="l">Defesas</div></div>
         <div class="analytics-card"><div class="v">${avg.saves_per_game || 0}</div><div class="l">Def/J</div></div>
         <div class="analytics-card"><div class="v">${totals.clean_sheets || 0}</div><div class="l">SG</div></div>
+        <div class="analytics-card"><div class="v">${fmtStat(avg.clean_sheets_per_game)}</div><div class="l">SG/J</div></div>
         <div class="analytics-card"><div class="v">${totals.moms || 0}</div><div class="l">MOMs</div></div>
+        <div class="analytics-card"><div class="v">${fmtStat(avg.mom_per_game)}</div><div class="l">MOM/J</div></div>
+        <div class="analytics-card"><div class="v">${fmtStat(avg.win_rate, "%")}</div><div class="l">Vitórias</div></div>
         <div class="analytics-card"><div class="v">${adv.regularity || 0}%</div><div class="l">Regularidade</div></div>
         <div class="analytics-card"><div class="v">${adv.consistency || 0}</div><div class="l">Consist.</div></div>
         <div class="analytics-card"><div class="v">${adv.offensive_impact || 0}</div><div class="l">Impacto Of.</div></div>
