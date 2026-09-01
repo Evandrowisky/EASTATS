@@ -10122,7 +10122,9 @@ function renderRankings() {
   const rankValue = (p, key) => {
     if (key === 'rating') return Number(p.rating || 0);
     if (key === 'goals') return Number(p.goals || 0);
+    if (key === 'goals_per_game') return Number(p.goals_per_game || 0);
     if (key === 'assists') return Number(p.assists || 0);
+    if (key === 'assists_per_game') return Number(p.assists_per_game || 0);
     if (key === 'pass_pct') return Number(p.pass_pct || 0);
     if (key === 'tackle_pct') return Number(p.tackle_pct || 0);
     if (key === 'tackles_made') return Number(p.tackles_made || 0);
@@ -10173,7 +10175,7 @@ function renderRankings() {
   };
 
   const metricOptions = [
-    ['rating','Nota EA'], ['goals','Gols'], ['assists','Assistências'],
+    ['rating','Nota EA'], ['goals','Gols'], ['goals_per_game','Gols/J'], ['assists','Assistências'], ['assists_per_game','Assistências/J'],
     ['goal_involvements_per_game','Participações/J'], ['tackles_made','Desarmes'],
     ['tackles_per_game','Desarmes/J'], ['shot_conversion_pct','Conversão'],
     ['saves_per_game','Defesas/J'], ['pass_pct','Passes certos'], ['mom','MOM']
@@ -10254,9 +10256,12 @@ function renderRankings() {
       ${positionRanking()}
       ${topList('Top 5 Nota M&eacute;dia EA', '&#9733;', 'rating')}
       ${topList('Top 5 Gols', '&#9917;', 'goals', '', true)}
+      ${topList('Top 5 Gols por Jogo', '&#9917;', 'goals_per_game', '', true)}
       ${topList('Top 5 Assist&ecirc;ncias', '&#9673;', 'assists', '', true)}
+      ${topList('Top 5 Assist&ecirc;ncias por Jogo', '&#9673;', 'assists_per_game', '', true)}
       ${topList('Top 5 % Passes Certos', '&#10148;', 'pass_pct', '%', true)}
       ${topList('Top 5 Desarmes', '&#9635;', 'tackles_made', '', true, p => `${formatRankValue(p.tackle_pct, '%')} de aproveitamento`)}
+      ${topList('Top 5 Desarmes por Jogo', '&#9635;', 'tackles_per_game', '', true, p => `${formatRankValue(p.tackles_made)} no total`)}
       ${topList('Top 5 Participações em Gol/J', '&#10133;', 'goal_involvements_per_game', '', true)}
       ${topList('Top 5 Conversão de Chutes', '&#127919;', 'shot_conversion_pct', '%', true)}
       ${topList('Top 5 Defesas/J', '&#129351;', 'saves_per_game', '', true)}
@@ -11186,7 +11191,29 @@ function renderAjuda() {
       'Rankings usam somente jogadores ativos no clube.',
       'Jogador com login bloqueado, pendente ou inativo sai dos rankings at&eacute; ser ativado novamente.',
       'Nota m&eacute;dia, passes e divididas exigem m&iacute;nimo de jogos no clube para evitar jogador com uma partida dominar ranking.',
-      'Gols, assist&ecirc;ncias, passes, divididas e MOM respeitam o filtro selecionado.',
+      'Gols, assist&ecirc;ncias, passes, desarmes e MOM respeitam o filtro selecionado.',
+      'Os rankings exibem totais e tamb&eacute;m valores por jogo. O total mostra produ&ccedil;&atilde;o acumulada; por jogo equilibra jogadores com quantidades diferentes de partidas.',
+    ]),
+    helpCard('Gloss&aacute;rio das m&eacute;tricas', [
+      '<strong>Jogos (J):</strong> partidas do filtro em que o jogador aparece na s&uacute;mula.',
+      '<strong>Nota EA:</strong> avalia&ccedil;&atilde;o de 0 a 10 fornecida pelo EA FC ao fim da partida. Nota m&eacute;dia &eacute; a soma das notas dividida pelos jogos.',
+      '<strong>Nota Sofi:</strong> nota anal&iacute;tica do sistema, que ajusta a nota EA considerando impacto ofensivo, defensivo, resultado, MOM, clean sheet e posi&ccedil;&atilde;o.',
+      '<strong>Gols e G/J:</strong> total de gols e gols divididos pelo n&uacute;mero de jogos.',
+      '<strong>Assist&ecirc;ncias e A/J:</strong> total de assist&ecirc;ncias e assist&ecirc;ncias divididas pelo n&uacute;mero de jogos.',
+      '<strong>G+A e Part./J:</strong> gols mais assist&ecirc;ncias; participa&ccedil;&otilde;es por jogo &eacute; (gols + assist&ecirc;ncias) dividido pelos jogos.',
+      '<strong>Chutes e Chu/J:</strong> finaliza&ccedil;&otilde;es registradas pela EA no total e por partida.',
+      '<strong>Finaliz./Gol:</strong> quantidade m&eacute;dia de chutes necess&aacute;rios para marcar. Neste indicador, menor &eacute; melhor. Sem gol, aparece N/D.',
+      '<strong>Convers&atilde;o:</strong> gols divididos pelos chutes, multiplicado por 100. Mede a efici&ecirc;ncia das finaliza&ccedil;&otilde;es.',
+      '<strong>Passes e Passes/J:</strong> passes completados no total e passes completados por partida.',
+      '<strong>Pass%:</strong> passes completados divididos pelas tentativas de passe. N&atilde;o &eacute; volume; &eacute; aproveitamento.',
+      '<strong>Desarmes e Des/J:</strong> desarmes conclu&iacute;dos no total e desarmes conclu&iacute;dos por partida.',
+      '<strong>Des%:</strong> desarmes conclu&iacute;dos divididos pelas tentativas de desarme. Deve ser lido junto com o volume de desarmes.',
+      '<strong>Defesas e Def/J:</strong> defesas registradas para goleiros no total e por partida.',
+      '<strong>SG e SG/J:</strong> jogos sem sofrer gol (clean sheets) no total e por partida.',
+      '<strong>MOM e MOM/J:</strong> vezes eleito melhor da partida e quantidade por jogo.',
+      '<strong>Vit&oacute;rias%:</strong> partidas vencidas pelo clube com o jogador em campo divididas pelas partidas dele.',
+      '<strong>Frequ&ecirc;ncia:</strong> partidas disputadas pelo jogador no m&ecirc;s divididas pelo total de partidas salvas do clube no mesmo m&ecirc;s.',
+      '<strong>N/D:</strong> dado n&atilde;o disponibilizado pela EA ou imposs&iacute;vel de calcular com seguran&ccedil;a; n&atilde;o significa zero.',
     ]),
     helpCard('Confrontos', [
       'Confrontos tamb&eacute;m fica dispon&iacute;vel para jogadores.',
