@@ -1294,24 +1294,30 @@ PLAYER_PROFILE_META_KEY = "__clubscout_profile_meta__"
 def unpack_player_profile_notes(raw_notes):
     """Separa observacao livre de metadados internos sem exigir nova coluna."""
     ignored = False
+    availability_today = None
+    availability_date = None
     clean_notes = raw_notes
     if raw_notes:
         try:
             data = json.loads(raw_notes) if isinstance(raw_notes, str) else raw_notes
             if isinstance(data, dict) and data.get(PLAYER_PROFILE_META_KEY):
                 ignored = bool(data.get("ignored"))
+                availability_today = data.get("availability_today")
+                availability_date = data.get("availability_date") or None
                 clean_notes = data.get("notes") or None
         except Exception:
             pass
-    return clean_notes, ignored
+    return clean_notes, ignored, availability_today, availability_date
 
 
-def pack_player_profile_notes(notes=None, ignored=False):
+def pack_player_profile_notes(notes=None, ignored=False, availability_today=None, availability_date=None):
     clean_notes = str(notes or "").strip()
-    if ignored:
+    if ignored or availability_today is not None or availability_date:
         return json.dumps({
             PLAYER_PROFILE_META_KEY: True,
-            "ignored": True,
+            "ignored": bool(ignored),
+            "availability_today": availability_today,
+            "availability_date": availability_date,
             "notes": clean_notes,
         }, ensure_ascii=False)
     return clean_notes or None
@@ -1328,7 +1334,7 @@ def load_player_profiles_supabase(club_id: str) -> Dict[str, Dict[str, Any]]:
         for r in rows:
             if not isinstance(r, dict) or not r.get("player_name"):
                 continue
-            clean_notes, ignored = unpack_player_profile_notes(r.get("notes"))
+            clean_notes, ignored, availability_today, availability_date = unpack_player_profile_notes(r.get("notes"))
             profiles[r.get("player_name")] = {
                 "manual_position": r.get("manual_position"),
                 "archetype": r.get("archetype"),
@@ -1336,6 +1342,8 @@ def load_player_profiles_supabase(club_id: str) -> Dict[str, Dict[str, Any]]:
                 "notes": clean_notes,
                 "ignored": ignored,
                 "is_ignored": ignored,
+                "availability_today": availability_today,
+                "availability_date": availability_date,
             }
         return profiles
     except Exception as e:
@@ -1343,19 +1351,19 @@ def load_player_profiles_supabase(club_id: str) -> Dict[str, Dict[str, Any]]:
         return {}
 
 
-def save_player_profile_supabase(club_id: str, player_name: str, manual_position=None, archetype=None, playstyles=None, notes=None, ignored=False):
+def save_player_profile_supabase(club_id: str, player_name: str, manual_position=None, archetype=None, playstyles=None, notes=None, ignored=False, availability_today=None, availability_date=None):
     sb = get_supabase()
     if not sb or not club_id or not player_name:
         return False
     try:
-        if manual_position or archetype or playstyles or notes or ignored:
+        if manual_position or archetype or playstyles or notes or ignored or availability_today is not None or availability_date:
             sb.table("player_profiles").upsert({
                 "club_id": str(club_id),
                 "player_name": str(player_name),
                 "manual_position": manual_position,
                 "archetype": archetype,
                 "playstyles": playstyles or [],
-                "notes": pack_player_profile_notes(notes, ignored),
+                "notes": pack_player_profile_notes(notes, ignored, availability_today, availability_date),
                 "updated_at": _now_iso(),
             }, on_conflict="club_id,player_name").execute()
         else:
@@ -1875,6 +1883,7 @@ def parse_matches(matches_raw, our_club_id):
                 p_pass_att = int(float(pdata.get("passattempts", pdata.get("passAttempts", 0)) or 0))
                 p_tackles = int(float(pdata.get("tacklesmade", pdata.get("tacklesMade", 0)) or 0))
                 p_tackle_att = int(float(pdata.get("tackleattempts", pdata.get("tackleAttempts", 0)) or 0))
+                p_interceptions = int(float(_first_stat(pdata, ("interceptions", "interceptionsMade", "interception")) or 0))
                 p_saves = int(float(pdata.get("saves", 0) or 0))
                 p_cleansheets = int(float(pdata.get("cleansheetsany", pdata.get("cleanSheets", 0)) or 0))
                 p_red = int(float(pdata.get("redcards", 0) or 0))
@@ -1935,7 +1944,9 @@ def parse_matches(matches_raw, our_club_id):
                     "passes_made": p_passes_made,
                     "pass_pct": pass_pct,
                     "tackles_made": p_tackles,
+                    "tackle_attempts": p_tackle_att,
                     "tackle_pct": tackle_pct,
+                    "interceptions": p_interceptions,
                     "saves": p_saves,
                     "clean_sheet": p_cleansheets,
                     "red": p_red,
@@ -4769,6 +4780,8 @@ class PlayerProfileUpdate(BaseModel):
     playstyles: Optional[List[str]] = None
     notes: Optional[str] = None
     ignored: Optional[bool] = None
+    availability_today: Optional[bool] = None
+    availability_date: Optional[str] = None
 
 
 def _current_club_id_from_cache() -> str:
@@ -4792,7 +4805,7 @@ def load_player_profiles(club_id: Optional[str] = None) -> Dict[str, Dict[str, A
         conn.close()
         profiles = {}
         for r in rows:
-            clean_notes, ignored = unpack_player_profile_notes(r["notes"])
+            clean_notes, ignored, availability_today, availability_date = unpack_player_profile_notes(r["notes"])
             profiles[r["player_name"]] = {
                 "manual_position": r["manual_position"],
                 "archetype": r["archetype"],
@@ -4800,6 +4813,8 @@ def load_player_profiles(club_id: Optional[str] = None) -> Dict[str, Dict[str, A
                 "notes": clean_notes,
                 "ignored": ignored,
                 "is_ignored": ignored,
+                "availability_today": availability_today,
+                "availability_date": availability_date,
             }
         return profiles
     except Exception as e:
@@ -4838,16 +4853,20 @@ def update_player_profile(player_name: str, item: PlayerProfileUpdate, current_u
     raw_playstyles = item.playstyles if "playstyles" in field_set else existing.get("playstyles")
     raw_notes = (item.notes if "notes" in field_set else existing.get("notes")) if is_admin_user else existing.get("notes")
     raw_ignored = (item.ignored if "ignored" in field_set else existing.get("ignored")) if is_admin_user else existing.get("ignored")
+    raw_availability_today = item.availability_today if "availability_today" in field_set else existing.get("availability_today")
+    raw_availability_date = item.availability_date if "availability_date" in field_set else existing.get("availability_date")
 
     manual_position = (raw_manual_position or "").strip() or None
     archetype = (raw_archetype or "").strip() or None
     playstyles = [str(x).strip() for x in (raw_playstyles or []) if str(x).strip()][:3]
     notes = (raw_notes or "").strip() or None
     ignored = bool(raw_ignored)
-    stored_notes = pack_player_profile_notes(notes, ignored)
+    availability_today = bool(raw_availability_today) if raw_availability_today is not None else None
+    availability_date = str(raw_availability_date or "").strip()[:10] or None
+    stored_notes = pack_player_profile_notes(notes, ignored, availability_today, availability_date)
     try:
         conn = sqlite3.connect(DB_FILE)
-        if manual_position or archetype or playstyles or notes or ignored:
+        if manual_position or archetype or playstyles or notes or ignored or availability_today is not None or availability_date:
             conn.execute(
                 """
                 INSERT INTO player_profiles (club_id, player_name, manual_position, archetype, playstyles, notes, updated_at)
@@ -4868,7 +4887,10 @@ def update_player_profile(player_name: str, item: PlayerProfileUpdate, current_u
             )
         conn.commit()
         conn.close()
-        save_player_profile_supabase(club_id, player_name, manual_position, archetype, playstyles, notes, ignored=ignored)
+        save_player_profile_supabase(
+            club_id, player_name, manual_position, archetype, playstyles, notes,
+            ignored=ignored, availability_today=availability_today, availability_date=availability_date,
+        )
     except Exception as e:
         print(f"[profiles] erro ao salvar perfil de {player_name}: {e}")
         raise HTTPException(500, f"Erro ao salvar perfil: {e}")
@@ -4881,6 +4903,8 @@ def update_player_profile(player_name: str, item: PlayerProfileUpdate, current_u
         "notes": notes,
         "ignored": ignored,
         "is_ignored": ignored,
+        "availability_today": availability_today,
+        "availability_date": availability_date,
     }
 
 
@@ -7701,6 +7725,8 @@ let CONFRONTOS_SEARCH = '';
 let PLAYER_PROFILES = {};
 let COMPARE_A = null;
 let COMPARE_B = null;
+let RANK_POSITION = localStorage.getItem('scout_rank_position') || 'TODOS';
+let RANK_METRIC = localStorage.getItem('scout_rank_metric_' + RANK_POSITION) || 'rating';
 let AGENDA = [];
 let TROPHIES = [];
 let OPPONENT_SCOUTS = [];
@@ -8207,7 +8233,7 @@ function computePlayersForMatches(matches) {
       position_counts: {GK:0, DEF:0, MID:0, FWD:0},
       games: 0, rating_sum: 0, sofi_sum: 0, goals: 0, assists: 0, shots: 0,
       pre_assists: 0, key_passes: 0,
-      passes_pct_sum: 0, passes_made: 0, tackle_pct_sum: 0, tackles_made: 0, mom: 0, reds: 0, saves: 0, clean_sheet: 0, wins: 0, draws: 0, losses: 0
+      passes_pct_sum: 0, passes_made: 0, tackle_pct_sum: 0, tackles_made: 0, tackle_attempts: 0, interceptions: 0, mom: 0, reds: 0, saves: 0, clean_sheet: 0, wins: 0, draws: 0, losses: 0
     };
   });
   (matches || []).forEach(m => {
@@ -8218,7 +8244,7 @@ function computePlayersForMatches(matches) {
           position_counts: {GK:0, DEF:0, MID:0, FWD:0},
           games: 0, rating_sum: 0, sofi_sum: 0, goals: 0, assists: 0, shots: 0,
           pre_assists: 0, key_passes: 0,
-          passes_pct_sum: 0, passes_made: 0, tackle_pct_sum: 0, tackles_made: 0, mom: 0, reds: 0, saves: 0, clean_sheet: 0, wins: 0, draws: 0, losses: 0
+          passes_pct_sum: 0, passes_made: 0, tackle_pct_sum: 0, tackles_made: 0, tackle_attempts: 0, interceptions: 0, mom: 0, reds: 0, saves: 0, clean_sheet: 0, wins: 0, draws: 0, losses: 0
         };
       }
       const p = byName[pr.name];
@@ -8237,6 +8263,8 @@ function computePlayersForMatches(matches) {
       p.passes_made += Number(pr.passes_made || 0);
       p.tackle_pct_sum += Number(pr.tackle_pct || 0);
       p.tackles_made += Number(pr.tackles_made || 0);
+      p.tackle_attempts += Number(pr.tackle_attempts || 0);
+      p.interceptions += Number(pr.interceptions || 0);
       p.mom += Number(pr.mom || 0);
       if (m.result === 'V') p.wins += 1; else if (m.result === 'E') p.draws += 1; else if (m.result === 'D') p.losses += 1;
       p.reds += Number(pr.red || 0);
@@ -8261,9 +8289,12 @@ function computePlayersForMatches(matches) {
         assists_per_game: +(p.assists / Math.max(p.games, 1)).toFixed(2),
         shots_per_game: +(p.shots / Math.max(p.games, 1)).toFixed(2),
         tackles_per_game: +(p.tackles_made / Math.max(p.games, 1)).toFixed(2),
+        interceptions_per_game: +(p.interceptions / Math.max(p.games, 1)).toFixed(2),
         saves_per_game: +(p.saves / Math.max(p.games, 1)).toFixed(2),
         goal_involvements: Number(p.goals || 0) + Number(p.assists || 0),
         goal_involvements_per_game: +((Number(p.goals || 0) + Number(p.assists || 0)) / Math.max(p.games, 1)).toFixed(2),
+        shots_per_goal: Number(p.goals || 0) > 0 ? +(Number(p.shots || 0) / Number(p.goals || 1)).toFixed(2) : null,
+        shot_conversion_pct: Number(p.shots || 0) > 0 ? +((Number(p.goals || 0) / Number(p.shots || 1)) * 100).toFixed(1) : 0,
         pre_assists: Number(p.pre_assists || 0),
         key_passes: Number(p.key_passes || 0),
         pre_assists_per_game: +(Number(p.pre_assists || 0) / Math.max(p.games, 1)).toFixed(2),
@@ -8298,6 +8329,9 @@ function playersFromMemberTotals() {
       tackles_made: hasTackleStats ? Number(base.tackles_made || 0) : null,
       tackle_pct: hasTackleStats ? base.tackle_pct : null,
       tackles_per_game: hasTackleStats ? Number(base.tackles_made || 0) / games : null,
+      tackle_attempts: d.tackle_attempts || 0,
+      interceptions: d.interceptions || 0,
+      interceptions_per_game: d.interceptions_per_game || 0,
       saves_per_game: d.saves_per_game || 0,
       wins: d.wins || 0,
       draws: d.draws || 0,
@@ -8313,6 +8347,8 @@ function playersFromMemberTotals() {
     merged.pre_assists_per_game = +(merged.pre_assists / games).toFixed(2);
     merged.key_passes_per_game = +(merged.key_passes / games).toFixed(2);
     merged.shots_per_game = hasShotStats ? +Number(merged.shots_per_game || 0).toFixed(2) : null;
+    merged.shots_per_goal = hasShotStats && Number(merged.goals || 0) > 0 ? +(Number(merged.shots || 0) / Number(merged.goals || 1)).toFixed(2) : null;
+    merged.shot_conversion_pct = hasShotStats && Number(merged.shots || 0) > 0 ? +((Number(merged.goals || 0) / Number(merged.shots || 1)) * 100).toFixed(1) : 0;
     merged.tackles_per_game = hasTackleStats ? +Number(merged.tackles_per_game || 0).toFixed(2) : null;
     const intel = inferPlayerPositionIntel(merged);
     return {...merged, position: intel.label, position_family: intel.family, position_source: intel.source, history_apps: intel.apps};
@@ -8442,6 +8478,7 @@ function filteredHistoryForPlayer(name) {
       pass_pct: roundStat(pr.pass_pct, 2),
       tackles_made: Number(pr.tackles_made || pr.tacklesMade || 0),
       tackle_pct: roundStat(pr.tackle_pct, 2),
+      interceptions: Number(pr.interceptions || 0),
       saves: Number(pr.saves || 0),
       clean_sheet: Number(pr.clean_sheet || pr.cleanSheets || 0),
       red: Number(pr.red || pr.redcards || 0),
@@ -8471,6 +8508,7 @@ function buildScopedAnalyticsFallback(summary, history, warning = '') {
   const shots = Number(summary?.shots || 0);
   const tackles = Number(summary?.tackles_made || 0);
   const saves = Number(summary?.saves || 0);
+  const interceptions = Number(summary?.interceptions || 0);
   const moms = Number(summary?.mom || 0);
   const offensive = roundStat(goals * 4 + assists * 3 + shots * 0.6, 1);
   const defensive = roundStat(tackles * 1.2 + Number(summary?.tackle_pct || 0) * 0.4 + saves * 1.5, 1);
@@ -8504,6 +8542,8 @@ function buildScopedAnalyticsFallback(summary, history, warning = '') {
       shots_per_game: games ? roundStat(shots / games, 2) : 0,
       tackles_per_game: games ? roundStat(tackles / games, 2) : 0,
       saves_per_game: games ? roundStat(saves / games, 2) : 0,
+      interceptions_per_game: games ? roundStat(interceptions / games, 2) : 0,
+      shots_per_goal: goals > 0 ? roundStat(shots / goals, 2) : null,
       pass_pct: roundStat(summary?.pass_pct, 2),
       tackle_pct: roundStat(summary?.tackle_pct, 2),
     },
@@ -8513,6 +8553,7 @@ function buildScopedAnalyticsFallback(summary, history, warning = '') {
       shots,
       tackles,
       saves,
+      interceptions,
       clean_sheets: Number(summary?.clean_sheet || 0),
       moms,
       red_cards: Number(summary?.reds || summary?.red || 0),
@@ -8733,9 +8774,12 @@ async function loadClubUserStatus() {
   return CLUB_USER_STATUS;
 }
 
-async function savePlayerProfile(name, manualPosition, archetype, notes, playstyles=[], ignored=false) {
+async function savePlayerProfile(name, manualPosition, archetype, notes, playstyles=[], ignored=false, availabilityToday=undefined, availabilityDate=undefined) {
   playstyles = (playstyles || []).filter(Boolean).slice(0, 3);
-  if (manualPosition || archetype || notes || playstyles.length || ignored) {
+  const existingProfile = PLAYER_PROFILES[name] || {};
+  if (availabilityToday === undefined) availabilityToday = existingProfile.availability_today;
+  if (availabilityDate === undefined) availabilityDate = existingProfile.availability_date;
+  if (manualPosition || archetype || notes || playstyles.length || ignored || availabilityToday !== undefined || availabilityDate) {
     PLAYER_PROFILES[name] = {
       manual_position: manualPosition || null,
       archetype: archetype || null,
@@ -8743,6 +8787,8 @@ async function savePlayerProfile(name, manualPosition, archetype, notes, playsty
       notes: notes || null,
       ignored: !!ignored,
       is_ignored: !!ignored,
+      availability_today: availabilityToday,
+      availability_date: availabilityDate || null,
       manual_saved_at: new Date().toISOString()
     };
     if (DATA) DATA.player_profiles = {...(DATA.player_profiles || {}), [name]: PLAYER_PROFILES[name]};
@@ -8760,6 +8806,8 @@ async function savePlayerProfile(name, manualPosition, archetype, notes, playsty
       playstyles,
       notes: notes || null,
       ignored: !!ignored,
+      availability_today: availabilityToday,
+      availability_date: availabilityDate || null,
     })
   });
   if (!r.ok) throw new Error('Erro ao salvar cadastro');
@@ -8954,6 +9002,7 @@ function render() {
       <div class="tab ${CURRENT_TAB==='meu-scout'?'active':''}" onclick="setTab('meu-scout')">MEU SCOUT</div>
       <div class="tab ${CURRENT_TAB==='jogadores'?'active':''}" onclick="setTab('jogadores')">JOGADORES</div>
       <div class="tab ${CURRENT_TAB==='rankings'?'active':''}" onclick="setTab('rankings')">RANKINGS</div>
+      <div class="tab ${CURRENT_TAB==='frequencia'?'active':''}" onclick="setTab('frequencia')">FREQU&Ecirc;NCIA</div>
       <div class="tab ${CURRENT_TAB==='comparar'?'active':''}" onclick="setTab('comparar')">COMPARAR</div>
       <div class="tab ${CURRENT_TAB==='confrontos'?'active':''}" onclick="setTab('confrontos')">CONFRONTOS</div>
       <div class="tab ${CURRENT_TAB==='time-ideal'?'active':''}" onclick="setTab('time-ideal')">TIME IDEAL</div>
@@ -9053,6 +9102,7 @@ function renderTab() {
       if (t && CURRENT_TAB === 'rankings') t.innerHTML = renderRankings();
     });
   }
+  else if (CURRENT_TAB === 'frequencia') tc.innerHTML = renderFrequencia();
   else if (CURRENT_TAB === 'comparar') { tc.innerHTML = renderComparar(); renderCompareBars(); }
   else if (CURRENT_TAB === 'confrontos') tc.innerHTML = renderConfrontos();
   else if (CURRENT_TAB === 'time-ideal') tc.innerHTML = renderTimeIdeal();
@@ -9991,6 +10041,59 @@ function showMarketClubHistory(clubId) {
 }
 
 
+function localTodayKey() {
+  const d = new Date();
+  const pad = n => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
+}
+
+function currentUserMatchesPlayer(name) {
+  return [AUTH_USER?.usuario, AUTH_USER?.nome].some(v => samePlayerName(v, name));
+}
+
+async function setPlayerAvailability(name, value) {
+  const profile = profileForPlayer(name) || {};
+  try {
+    await savePlayerProfile(
+      name, profile.manual_position || '', profile.archetype || '', profile.notes || '',
+      profile.playstyles || [], !!(profile.ignored || profile.is_ignored), !!value, localTodayKey()
+    );
+    renderTab();
+  } catch (e) {
+    alert(e.message || 'Erro ao salvar disponibilidade');
+  }
+}
+
+function renderFrequencia() {
+  const today = localTodayKey();
+  const now = new Date();
+  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).getTime() / 1000;
+  const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 1).getTime() / 1000;
+  const monthMatches = (DATA.matches || []).filter(m => {
+    const ts = Number(m.timestamp || m.match_timestamp || 0);
+    return ts >= monthStart && ts < monthEnd && !isIgnoredMatch(m);
+  });
+  const clubGames = monthMatches.length;
+  const frequency = filterActivePlayers(computePlayersForMatches(monthMatches))
+    .map(p => ({...p, frequency_pct: clubGames ? (Number(p.games || 0) / clubGames) * 100 : 0}))
+    .sort((a,b) => Number(b.games || 0) - Number(a.games || 0) || String(a.name).localeCompare(String(b.name)));
+  const allPlayers = filterActivePlayers(playersFromMemberTotals());
+  const availabilityRows = allPlayers.map(p => {
+    const profile = profileForPlayer(p.name) || {};
+    const current = profile.availability_date === today ? profile.availability_today : null;
+    const canEdit = isAdmin() || currentUserMatchesPlayer(p.name);
+    const status = current === true ? '<span class="badge-win">Vai jogar</span>' : current === false ? '<span class="badge-loss">Não vai</span>' : '<span class="tag">Não respondeu</span>';
+    const actions = canEdit ? `<button class="btn-mini" onclick="setPlayerAvailability('${p.name.replace(/'/g, "\\'")}', true)">Vou jogar</button><button class="btn-mini" onclick="setPlayerAvailability('${p.name.replace(/'/g, "\\'")}', false)">Não vou</button>` : '';
+    return `<div class="ranking-row"><div class="ranking-pos">${current === true ? '&#10003;' : current === false ? '&times;' : '?'}</div><div class="ranking-main"><div class="ranking-name">${escapeAttr(p.name)}</div><div class="ranking-meta">${escapeAttr(p.position || '-')} &middot; ${status}</div></div><div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end;">${actions}</div></div>`;
+  }).join('');
+  const frequencyRows = frequency.map((p,idx) => `<div class="ranking-row" onclick="showPlayerDetail('${p.name.replace(/'/g, "\\'")}')"><div class="ranking-pos ${idx < 3 ? ['top1','top2','top3'][idx] : ''}">${idx+1}</div><div class="ranking-main"><div class="ranking-name">${escapeAttr(p.name)}</div><div class="ranking-meta">${escapeAttr(p.position || '-')} &middot; clube jogou ${clubGames}</div></div><div class="ranking-value">${p.games} <span style="font-size:12px;color:var(--text-2);">(${p.frequency_pct.toFixed(1)}%)</span></div></div>`).join('');
+  return `<div class="section-title">Frequência e disponibilidade</div>
+    <div class="rankings-grid">
+      <div class="ranking-card"><div class="ranking-title">Disponibilidade de hoje &middot; ${today.split('-').reverse().join('/')}</div><div class="ranking-list">${availabilityRows || '<div class="empty-state">Sem jogadores ativos</div>'}</div></div>
+      <div class="ranking-card"><div class="ranking-title">Mais partidas no mês</div><div style="color:var(--text-2);font-size:12px;margin-bottom:10px;">Percentual sobre as ${clubGames} partidas salvas do clube neste mês.</div><div class="ranking-list">${frequencyRows || '<div class="empty-state">Nenhuma partida neste mês</div>'}</div></div>
+    </div>`;
+}
+
 function renderRankings() {
   const matches = playerStatMatches();
   const players = eligibleRankingPlayers(filterActivePlayers(computePlayersForMatches(matches)));
@@ -10009,6 +10112,13 @@ function renderRankings() {
     if (key === 'assists') return Number(p.assists || 0);
     if (key === 'pass_pct') return Number(p.pass_pct || 0);
     if (key === 'tackle_pct') return Number(p.tackle_pct || 0);
+    if (key === 'tackles_made') return Number(p.tackles_made || 0);
+    if (key === 'tackles_per_game') return Number(p.tackles_per_game || 0);
+    if (key === 'interceptions') return Number(p.interceptions || 0);
+    if (key === 'interceptions_per_game') return Number(p.interceptions_per_game || 0);
+    if (key === 'goal_involvements_per_game') return Number(p.goal_involvements_per_game || 0);
+    if (key === 'shot_conversion_pct') return Number(p.shot_conversion_pct || 0);
+    if (key === 'saves_per_game') return Number(p.saves_per_game || 0);
     if (key === 'mom') return Number(p.mom || 0);
     return 0;
   };
@@ -10025,7 +10135,7 @@ function renderRankings() {
   const podiumIcon = (idx) => String(idx + 1);
   const podiumClass = (idx) => idx === 0 ? 'top1' : idx === 1 ? 'top2' : idx === 2 ? 'top3' : '';
 
-  const topList = (title, icon, key, suffix='', requirePositive=false) => {
+  const topList = (title, icon, key, suffix='', requirePositive=false, metaValue=null) => {
     const rows = players
       .map(p => ({...p, _rank_value: rankValue(p, key), _club_games: clubGamesForPlayer(p.name)}))
       .filter(p => requirePositive ? p._rank_value > 0 : p._rank_value >= 0)
@@ -10040,13 +10150,36 @@ function renderRankings() {
               <div class="ranking-pos ${podiumClass(idx)}">${podiumIcon(idx)}</div>
               <div class="ranking-main">
                 <div class="ranking-name">${p.name}</div>
-                <div class="ranking-meta">${p.position || '-'} &middot; ${p.games || 0} jogos no filtro</div>
+                <div class="ranking-meta">${p.position || '-'} &middot; ${p.games || 0} jogos no filtro${metaValue ? ' &middot; ' + metaValue(p) : ''}</div>
               </div>
               <div class="ranking-value">${formatRankValue(p._rank_value, suffix)}</div>
             </div>
           `).join('') || '<div class="empty-state" style="padding:24px 10px;">Sem dados neste filtro</div>'}
         </div>
       </div>`;
+  };
+
+  const metricOptions = [
+    ['rating','Nota EA'], ['goals','Gols'], ['assists','Assistências'],
+    ['goal_involvements_per_game','Participações/J'], ['tackles_made','Desarmes'],
+    ['tackles_per_game','Desarmes/J'], ['interceptions','Interceptações'],
+    ['interceptions_per_game','Interceptações/J'], ['shot_conversion_pct','Conversão'],
+    ['saves_per_game','Defesas/J'], ['pass_pct','Passes certos'], ['mom','MOM']
+  ];
+  const positionOptions = [['TODOS','Todas'],['GK','Goleiros'],['DEF','Defensores'],['MID','Meias'],['FWD','Atacantes']];
+  const positionPlayers = players.filter(p => RANK_POSITION === 'TODOS' || normalizePlayerFamily(p.position_family || p.position) === RANK_POSITION);
+  const selectedMetric = metricOptions.find(x => x[0] === RANK_METRIC) || metricOptions[0];
+  const positionRanking = () => {
+    const suffix = ['shot_conversion_pct','pass_pct'].includes(selectedMetric[0]) ? '%' : '';
+    const rows = positionPlayers.slice().sort((a,b) => rankValue(b, selectedMetric[0]) - rankValue(a, selectedMetric[0])).slice(0, 10);
+    return `<div class="ranking-card" style="grid-column:1/-1;">
+      <div class="ranking-title"><span class="ranking-title-icon">&#9881;</span>Ranking configurável por posição</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;">
+        <select onchange="setRankPosition(this.value)">${positionOptions.map(x => `<option value="${x[0]}" ${RANK_POSITION===x[0]?'selected':''}>${x[1]}</option>`).join('')}</select>
+        <select onchange="setRankMetric(this.value)">${metricOptions.map(x => `<option value="${x[0]}" ${selectedMetric[0]===x[0]?'selected':''}>${x[1]}</option>`).join('')}</select>
+      </div>
+      <div class="ranking-list">${rows.map((p,idx) => `<div class="ranking-row" onclick="showPlayerDetail('${p.name.replace(/'/g, "\\'")}')"><div class="ranking-pos ${podiumClass(idx)}">${podiumIcon(idx)}</div><div class="ranking-main"><div class="ranking-name">${p.name}</div><div class="ranking-meta">${p.position || '-'} &middot; ${p.games || 0} jogos</div></div><div class="ranking-value">${formatRankValue(rankValue(p, selectedMetric[0]), suffix)}</div></div>`).join('') || '<div class="empty-state">Sem jogadores nesta posição</div>'}</div>
+    </div>`;
   };
 
   const titleRanking = () => {
@@ -10106,14 +10239,31 @@ function renderRankings() {
     </div>
     <div class="rankings-grid">
       ${titleRanking()}
+      ${positionRanking()}
       ${topList('Top 5 Nota M&eacute;dia EA', '&#9733;', 'rating')}
       ${topList('Top 5 Gols', '&#9917;', 'goals', '', true)}
       ${topList('Top 5 Assist&ecirc;ncias', '&#9673;', 'assists', '', true)}
       ${topList('Top 5 % Passes Certos', '&#10148;', 'pass_pct', '%', true)}
-      ${topList('Top 5 % Divididas', '&#9635;', 'tackle_pct', '%', true)}
+      ${topList('Top 5 Desarmes', '&#9635;', 'tackles_made', '', true, p => `${formatRankValue(p.tackle_pct, '%')} de aproveitamento`)}
+      ${topList('Top 5 Participações em Gol/J', '&#10133;', 'goal_involvements_per_game', '', true)}
+      ${topList('Top 5 Interceptações', '&#9876;', 'interceptions', '', true)}
+      ${topList('Top 5 Defesas/J', '&#129351;', 'saves_per_game', '', true)}
       ${topList('Top 5 MOM', '&#9819;', 'mom', '', true)}
     </div>
   `;
+}
+
+function setRankPosition(value) {
+  RANK_POSITION = value || 'TODOS';
+  localStorage.setItem('scout_rank_position', RANK_POSITION);
+  RANK_METRIC = localStorage.getItem('scout_rank_metric_' + RANK_POSITION) || 'rating';
+  renderTab();
+}
+
+function setRankMetric(value) {
+  RANK_METRIC = value || 'rating';
+  localStorage.setItem('scout_rank_metric_' + RANK_POSITION, RANK_METRIC);
+  renderTab();
 }
 
 function renderComparar() {
@@ -10178,10 +10328,16 @@ function renderCompareBars() {
     {key:'goals', label:'Gols', max: Math.max(a.goals, b.goals, 1)},
     {key:'assists', label:'Assist', max: Math.max(a.assists, b.assists, 1)},
     {key:'pass_pct', label:'Pass%', max:100},
-    {key:'tackle_pct', label:'Div%', max:100},
+    {key:'tackles_made', label:'Desarmes', max: Math.max(a.tackles_made, b.tackles_made, 1)},
+    {key:'tackles_per_game', label:'Des/J', max: Math.max(a.tackles_per_game, b.tackles_per_game, 1)},
+    {key:'interceptions', label:'Intercep.', max: Math.max(a.interceptions, b.interceptions, 1)},
     {key:'shots', label:'Chutes', max: Math.max(a.shots, b.shots, 1)},
+    {key:'shots_per_goal', label:'Finaliz/Gol', max: Math.max(a.shots_per_goal || 0, b.shots_per_goal || 0, 1), lowerBetter:true},
     {key:'mom', label:'MOMs', max: Math.max(a.mom, b.mom, 1)},
     {key:'goals_per_game', label:'Gol/J', max: Math.max(a.goals_per_game, b.goals_per_game, 0.5)},
+    {key:'goal_involvements_per_game', label:'G+A/J', max: Math.max(a.goal_involvements_per_game, b.goal_involvements_per_game, 0.5)},
+    {key:'saves', label:'Defesas', max: Math.max(a.saves, b.saves, 1)},
+    {key:'saves_per_game', label:'Def/J', max: Math.max(a.saves_per_game, b.saves_per_game, 1)},
   ];
   let html = '<div class="compare-bars"><div style="font-weight:700;margin-bottom:8px;">Comparativo direto</div>';
   fields.forEach(f => {
@@ -10190,8 +10346,10 @@ function renderCompareBars() {
     const vb = rawB === null || rawB === undefined ? 0 : Number(rawB || 0);
     const pa = Math.min(100, (va / f.max) * 100);
     const pb = Math.min(100, (vb / f.max) * 100);
-    const wa = va > vb ? 'color:var(--green)' : '';
-    const wb = vb > va ? 'color:var(--green)' : '';
+    const comparableA = f.lowerBetter && va <= 0 ? Infinity : va;
+    const comparableB = f.lowerBetter && vb <= 0 ? Infinity : vb;
+    const wa = (f.lowerBetter ? comparableA < comparableB : va > vb) ? 'color:var(--green)' : '';
+    const wb = (f.lowerBetter ? comparableB < comparableA : vb > va) ? 'color:var(--green)' : '';
     html += `
       <div class="compare-bar-row">
         <div class="compare-bar-val left" style="${wa}">${fmtStat(rawA)}</div>
@@ -12196,6 +12354,7 @@ function renderPlayerDetailHTML(data) {
   const detailedGames = Number(data.detail_games ?? data.games_with_history ?? h.length ?? 0) || h.length || 0;
   const clubTotalGames = Number(data.club_total_games ?? p.ea_global_games ?? p.games ?? detailedGames) || detailedGames;
   const participationPerGame = detailedGames ? (((Number(totals.goals || 0) + Number(totals.assists || 0)) / detailedGames).toFixed(2)) : '0';
+  const shotsPerGoal = Number(totals.goals || 0) > 0 ? (Number(totals.shots || 0) / Number(totals.goals || 1)).toFixed(2) : 'N/D';
   const totalSuffix = data.uses_member_totals && isFullPlayerScope() ? ` &middot; ${clubTotalGames} jogos no clube (totais EA)` : '';
   const gamesLine = `${detailedGames} partidas no filtro (${activeScopeLabel()})${totalSuffix} &middot; ranking ${rank.rating_rank_label || '-'} &middot; tend&ecirc;ncia ${trend.status || '-'}`;
   return `
@@ -12222,10 +12381,13 @@ function renderPlayerDetailHTML(data) {
         <div class="analytics-card"><div class="v">${avg.assists_per_game || 0}</div><div class="l">A/J</div></div>
         <div class="analytics-card"><div class="v">${fmtStat(totals.shots)}</div><div class="l">Chutes</div></div>
         <div class="analytics-card"><div class="v">${fmtStat(avg.shots_per_game)}</div><div class="l">Chu/J</div></div>
+        <div class="analytics-card"><div class="v">${shotsPerGoal}</div><div class="l">Finaliz./Gol</div></div>
         <div class="analytics-card"><div class="v">${participationPerGame}</div><div class="l">Part./J</div></div>
         <div class="analytics-card"><div class="v">${fmtStat(totals.tackles)}</div><div class="l">Desarmes</div></div>
         <div class="analytics-card"><div class="v">${fmtStat(avg.tackle_pct, "%")}</div><div class="l">Des%</div></div>
         <div class="analytics-card"><div class="v">${fmtStat(avg.tackles_per_game)}</div><div class="l">Des/J</div></div>
+        <div class="analytics-card"><div class="v">${fmtStat(totals.interceptions)}</div><div class="l">Intercept.</div></div>
+        <div class="analytics-card"><div class="v">${fmtStat(avg.interceptions_per_game)}</div><div class="l">Interc./J</div></div>
         <div class="analytics-card"><div class="v">${totals.saves || 0}</div><div class="l">Defesas</div></div>
         <div class="analytics-card"><div class="v">${avg.saves_per_game || 0}</div><div class="l">Def/J</div></div>
         <div class="analytics-card"><div class="v">${totals.clean_sheets || 0}</div><div class="l">SG</div></div>
