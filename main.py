@@ -10341,7 +10341,7 @@ function renderRankings() {
   };
 
   const metricOptions = [
-    ['rating','Nota EA'], ['goals_per_game','Gols/J'], ['assists_per_game','Assistências/J'],
+    ['rating','Nota EA'], ['goals','Gols totais'], ['goals_per_game','Gols/J'], ['assists','Assistências totais'], ['assists_per_game','Assistências/J'],
     ['goal_involvements_per_game','Participações/J'],
     ['tackles_per_game','Desarmes/J'], ['shot_conversion_pct','Conversão'],
     ['saves_per_game','Defesas/J'], ['pass_pct','Passes certos'], ['mom_per_game','MOM/J'],
@@ -10422,7 +10422,9 @@ function renderRankings() {
       ${titleRanking()}
       ${positionRanking()}
       ${topList('Top 5 Nota M&eacute;dia EA', '&#9733;', 'rating')}
+      ${topList('Top 5 Gols', '&#9917;', 'goals', '', true)}
       ${topList('Top 5 Gols por Jogo', '&#9917;', 'goals_per_game', '', true)}
+      ${topList('Top 5 Assist&ecirc;ncias', '&#9673;', 'assists', '', true)}
       ${topList('Top 5 Assist&ecirc;ncias por Jogo', '&#9673;', 'assists_per_game', '', true)}
       ${topList('Top 5 % Passes Certos', '&#10148;', 'pass_pct', '%', true)}
       ${topList('Top 5 Desarmes por Jogo', '&#9635;', 'tackles_per_game', '', true, p => `${formatRankValue(p.tackles_made)} no total`)}
@@ -11393,7 +11395,7 @@ function renderAjuda() {
       'Jogador com login bloqueado, pendente ou inativo sai dos rankings at&eacute; ser ativado novamente.',
       'Nota m&eacute;dia, passes e divididas exigem m&iacute;nimo de jogos no clube para evitar jogador com uma partida dominar ranking.',
       'Gols, assist&ecirc;ncias, passes, desarmes e MOM respeitam o filtro selecionado.',
-      'Os rankings de desempenho priorizam valores por jogo e percentuais para equilibrar jogadores com quantidades diferentes de partidas.',
+      'Gols e assist&ecirc;ncias aparecem em duas leituras: total para mostrar produ&ccedil;&atilde;o acumulada e por jogo para equilibrar jogadores com quantidades diferentes de partidas. Os demais rankings priorizam valores normalizados e percentuais.',
       'Na tela Comparar, o bot&atilde;o Analisar compara&ccedil;&atilde;o com IA envia os dois jogadores e o filtro atual para gerar um parecer scout textual. A IA considera posi&ccedil;&atilde;o, amostra, efici&ecirc;ncia, regularidade e impacto nos resultados, escolhe um vencedor e justifica o veredito com os n&uacute;meros.',
     ]),
     helpCard('Gloss&aacute;rio das m&eacute;tricas', [
