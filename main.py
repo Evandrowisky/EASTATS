@@ -3284,6 +3284,23 @@ async def sync_stream(
                 await asyncio.sleep(0.01)
 
             new_matches = parse_matches(all_matches_raw, club_id)
+
+            # Clube duplicado/novo na EA com o mesmo nome (ex.: ID novo da temporada nova):
+            # baixa as partidas/jogadores desse ID tambem e junta no historico do clube principal.
+            for extra_id in [x for x in _sibling_club_ids(club_id) if x != club_id]:
+                try:
+                    yield f"data: {log(f'Buscando tambem o ID {extra_id} (mesmo nome do clube)...', 7, 8)}\n\n"
+                    extra_raw, _dbg = fetch_all_match_types(ea_client, extra_id, plat, max_count=100)
+                    extra_matches = parse_matches(extra_raw, extra_id)
+                    new_matches = new_matches + extra_matches
+                    yield f"data: {log(f'✓ {len(extra_matches)} partidas do ID {extra_id}', 7, 8)}\n\n"
+                    if not players:
+                        extra_players = parse_players(ea_client.members(extra_id, plat))
+                        if extra_players:
+                            players = extra_players
+                            yield f"data: {log(f'✓ {len(players)} jogadores do ID {extra_id}', 7, 8)}\n\n"
+                except Exception as e:
+                    print(f"[SYNC] Aviso ao buscar clube irmao {extra_id}: {type(e).__name__}: {e}")
             resumo_sync = summarize_matches_by_type(new_matches)
             resumo_msg = (
                 f"Resumo: liga={resumo_sync.get('liga', 0)}, "
