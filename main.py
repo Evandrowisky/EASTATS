@@ -3215,7 +3215,25 @@ async def sync_stream(
             
             yield f"data: {log(f'🔎 Buscando clube: {club_name} (varias plataformas)...', 2, 8)}\n\n"
             await asyncio.sleep(0.05)
-            search = ea_client.search_club(club_name, plat)
+            user_club_id = str((current_user or {}).get("club_id") or "").strip()
+            search = {"success": False}
+            if user_club_id:
+                # Usa o ID do clube do proprio usuario (evita cair em outro clube com nome parecido na busca da EA)
+                saved_name, saved_plat = (current_user or {}).get("clube") or club_name, ""
+                sb_sync = get_supabase()
+                if sb_sync:
+                    try:
+                        rr = sb_sync.table("clubs").select("name,platform").eq("club_id", user_club_id).limit(1).execute()
+                        rr = getattr(rr, "data", None) or []
+                        if rr:
+                            saved_name = rr[0].get("name") or saved_name
+                            saved_plat = rr[0].get("platform") or ""
+                    except Exception as e:
+                        print(f"[SYNC] Aviso ao ler clube {user_club_id}: {type(e).__name__}: {e}")
+                search = {"success": True, "clubId": user_club_id, "name": saved_name,
+                          "platform": saved_plat or (plat if plat and plat != "auto" else "common-gen5")}
+            if not search.get("success"):
+                search = ea_client.search_club(club_name, plat)
             
             if not search.get("success"):
                 fallback = fallback_search_from_local(club_name, plat)
