@@ -1603,12 +1603,32 @@ def _sibling_club_ids(club_id: str) -> List[str]:
     return ids
 
 
-def club_has_admin(club_id: str) -> bool:
-    """Considera admin de qualquer ID do mesmo clube (clubes duplicados com o mesmo nome)."""
+def club_id_with_admin(club_id: str) -> str:
+    """Retorna o ID (o proprio ou de um clube duplicado com o mesmo nome) que tem admin ativo."""
     for cid in _sibling_club_ids(club_id):
         if _club_has_admin_single(cid):
-            return True
-    return False
+            return cid
+    return ""
+
+
+def club_has_admin(club_id: str) -> bool:
+    return bool(club_id_with_admin(club_id))
+
+
+def _move_user_to_club(row: dict, new_club_id: str) -> dict:
+    """Move o cadastro do jogador para o ID principal do clube (onde estao o admin e as partidas)."""
+    sb = get_supabase()
+    if not sb or not row.get("id") or not new_club_id:
+        return row
+    try:
+        if _get_app_user_by_usuario(row.get("usuario") or "", new_club_id):
+            return row
+        sb.table("app_users").update({"club_id": str(new_club_id), "updated_at": _now_iso()}).eq("id", row["id"]).execute()
+        print(f"[AUTH] Usuario {row.get('usuario')} movido do clube {row.get('club_id')} para {new_club_id}")
+        return {**row, "club_id": str(new_club_id)}
+    except Exception as e:
+        print(f"[AUTH] Aviso ao mover usuario para clube principal: {type(e).__name__}: {e}")
+        return row
 
 
 def _club_has_admin_single(club_id: str) -> bool:
@@ -2430,9 +2450,13 @@ def auth_login(payload: AuthLoginPayload):
     if status_value == "pendente":
         raise HTTPException(403, "Conta pendente de liberacao")
 
+    if str(row.get("cargo") or "") != "admin":
+        admin_club_id = club_id_with_admin(row.get("club_id"))
+        if not admin_club_id:
+            raise HTTPException(403, "Este clube ainda nao possui um administrador cadastrado.")
+        if admin_club_id != str(row.get("club_id") or ""):
+            row = _move_user_to_club(row, admin_club_id)
     user = _public_user(row)
-    if user.get("cargo") != "admin" and not club_has_admin(user.get("club_id")):
-        raise HTTPException(403, "Este clube ainda nao possui um administrador cadastrado.")
     token = create_access_token({
         "sub": user["id"],
         "usuario": user["usuario"],
