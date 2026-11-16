@@ -1571,7 +1571,47 @@ def _get_app_user_by_id(user_id: str):
         raise HTTPException(500, "Erro ao consultar usuario")
 
 
+def _sibling_club_ids(club_id: str) -> List[str]:
+    """IDs de todos os clubes com o mesmo nome (ex.: clube recriado/duplicado na EA)."""
+    club_id = str(club_id or "").strip()
+    ids = [club_id] if club_id else []
+    sb = get_supabase()
+    if not sb or not club_id:
+        return ids
+    try:
+        nomes = set()
+        for tabela, col in (("clubs", "name"), ("allowed_clubs", "clube")):
+            resp = sb.table(tabela).select(col).eq("club_id", club_id).limit(1).execute()
+            for r in getattr(resp, "data", None) or []:
+                if r.get(col):
+                    nomes.add(_norm_club_name(r.get(col)))
+        users = sb.table("app_users").select("clube").eq("club_id", club_id).limit(1).execute()
+        for r in getattr(users, "data", None) or []:
+            if r.get("clube"):
+                nomes.add(_norm_club_name(r.get("clube")))
+        nomes.discard("")
+        if not nomes:
+            return ids
+        for tabela, col in (("clubs", "name"), ("allowed_clubs", "clube")):
+            resp = sb.table(tabela).select(f"club_id,{col}").execute()
+            for r in getattr(resp, "data", None) or []:
+                cid = str(r.get("club_id") or "").strip()
+                if cid and cid not in ids and _norm_club_name(r.get(col) or "") in nomes:
+                    ids.append(cid)
+    except Exception as e:
+        print(f"[AUTH] Aviso ao buscar IDs irmaos do clube {club_id}: {type(e).__name__}: {e}")
+    return ids
+
+
 def club_has_admin(club_id: str) -> bool:
+    """Considera admin de qualquer ID do mesmo clube (clubes duplicados com o mesmo nome)."""
+    for cid in _sibling_club_ids(club_id):
+        if _club_has_admin_single(cid):
+            return True
+    return False
+
+
+def _club_has_admin_single(club_id: str) -> bool:
     sb = get_supabase()
     if not sb or not club_id:
         return False
@@ -11182,13 +11222,13 @@ function renderOwnerClubsAdmin() {
       <div><div class="profile-meta">${allowed ? 'Liberado em' : 'Cadastrado em'}</div>${escapeAttr(formatDateTime(c.created_at || c.updated_at || ''))}</div>
       <div><span class="tag ${allowed ? 'v' : 'd'}">${allowed ? 'Liberado' : 'Bloqueado'}</span></div>
       ${allowed
-        ? `<button class="btn-mini danger" onclick="deleteOwnerClub('${clubId}','${clubName}')">Remover libera??o</button>`
+        ? `<button class="btn-mini danger" onclick="deleteOwnerClub('${clubId}','${clubName}')">Remover liberação</button>`
         : `<button class="btn-mini" onclick="allowExistingOwnerClub('${clubId}','${clubName}')">Liberar</button>`}
     </div>`;
   }).join('');
   return `
     <div class="section-title">Painel master &middot; clubes liberados</div>
-    <div style="color:var(--text-2);font-size:12px;margin-bottom:12px;line-height:1.5;">Cadastre aqui os clubes que podem receber novos usu?rios. Clubes que j? foram sincronizados aparecem na lista abaixo; basta clicar em Liberar.</div>
+    <div style="color:var(--text-2);font-size:12px;margin-bottom:12px;line-height:1.5;">Cadastre aqui os clubes que podem receber novos usuários. Clubes que já foram sincronizados aparecem na lista abaixo; basta clicar em Liberar.</div>
     <form class="agenda-form" onsubmit="addOwnerClub(event)" style="grid-template-columns: 1fr auto;">
       <input id="owner-club-name" type="text" placeholder="Nome do clube exatamente como aparece no Pro Clubs" required>
       <button type="submit" class="btn-primary" style="padding:8px 18px;">Cadastrar / liberar clube</button>
